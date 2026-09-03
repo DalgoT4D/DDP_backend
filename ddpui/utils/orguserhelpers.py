@@ -37,7 +37,7 @@ def from_orguser(orguser: OrgUser) -> OrgUserResponse:
         plan_start_date=plan_start,
         plan_end_date=plan_end,
         work_domain=orguser.work_domain,
-        has_seen_rbac_notice=orguser.has_seen_rbac_notice,
+        has_seen_resource_sharing_notice=orguser.has_seen_resource_sharing_notice,
     )
     if orguser.org:
         response.org.tnc_accepted = OrgTnC.objects.filter(org=orguser.org).exists()

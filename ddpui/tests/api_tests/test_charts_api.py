@@ -236,7 +236,7 @@ class TestGetChart:
         """get_chart returns the creator's email in created_by"""
         request = mock_request(orguser)
 
-        response = get_chart(request, sample_chart.id)
+        response = get_chart(request, chart_id=sample_chart.id)
 
         assert response.created_by == "chartapiuser@test.com"
 
@@ -740,7 +740,7 @@ def test_update_chart_creates_audit_log(mock_audit_log, seed_db, orguser, sample
     request = mock_request(orguser)
     payload = ChartUpdate(title="Updated Chart Title")
 
-    response = update_chart(request, sample_chart.id, payload)
+    response = update_chart(request, chart_id=sample_chart.id, payload=payload)
 
     assert response.title == "Updated Chart Title"
     mock_audit_log.assert_called_once()
@@ -764,7 +764,7 @@ def test_update_chart_untouched_title_still_logged(mock_audit_log, seed_db, orgu
     request = mock_request(orguser)
     payload = ChartUpdate(description="Updated description only")
 
-    update_chart(request, sample_chart.id, payload)
+    update_chart(request, chart_id=sample_chart.id, payload=payload)
 
     resource_fields = mock_audit_log.call_args[1]["resource_fields"]
     assert resource_fields["title"] == sample_chart.title
@@ -788,7 +788,7 @@ def test_delete_chart_creates_audit_log(mock_audit_log, seed_db, orguser, org):
     chart_id = chart.id
 
     request = mock_request(orguser)
-    delete_chart(request, chart_id)
+    delete_chart(request, chart_id=chart_id)
 
     mock_audit_log.assert_called_once()
     call_kwargs = mock_audit_log.call_args[1]

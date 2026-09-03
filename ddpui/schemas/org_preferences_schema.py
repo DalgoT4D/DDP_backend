@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
 from ninja import Schema
 
@@ -39,6 +39,14 @@ class UpdateDiscordNotificationsSchema(Schema):
 
     enable_discord_notifications: bool
     discord_webhook: Optional[str] = None
+
+
+class UpdateAccessDefaultsSchema(Schema):
+    """Schema for updating org-wide access defaults (Access → Roles tab)."""
+
+    default_analyst_level: Literal["view", "edit", "no_access"]
+    default_member_level: Literal["view", "edit", "no_access"]
+    allow_public_sharing: bool
 
 
 class CreateOrgSupersetDetailsSchema(Schema):

@@ -18,7 +18,9 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.comment import Comment, CommentTargetType
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, MEMBER_ROLE
+from ddpui.models.org_preferences import OrgPreferences
+from ddpui.models.resource_share import AccessLevel
 from ddpui.core.reports.comment_service import CommentService
 from ddpui.core.reports.exceptions import (
     CommentNotFoundError,
@@ -90,6 +92,24 @@ def other_orguser(other_user, org, seed_db):
     )
     yield orguser
     orguser.delete()
+
+
+@pytest.fixture
+def view_only_user(org, seed_db):
+    """A Member on a no-access floor — only View access via an explicit share.
+    Used to exercise the "View-holder cannot moderate" branch (spec §"Story 15" P04)."""
+    OrgPreferences.objects.filter(org=org).delete()
+    OrgPreferences.objects.create(
+        org=org,
+        default_analyst_level=AccessLevel.EDIT,
+        default_member_level=AccessLevel.VIEW,
+    )
+    user = User.objects.create(username="mut_view", email="mut_view@test.com")
+    ou = OrgUser.objects.create(
+        user=user, org=org, new_role=Role.objects.filter(slug=MEMBER_ROLE).first()
+    )
+    yield ou
+    user.delete()
 
 
 @pytest.fixture
@@ -282,7 +302,10 @@ class TestDeleteComment:
         assert my_comment.content == ""
         assert my_comment.mentioned_emails == []
 
-    def test_non_author_raises(self, snapshot, author_orguser, other_orguser, org):
+    def test_view_holder_non_author_raises_P04(self, snapshot, author_orguser, view_only_user, org):
+        """Spec §"Story 15" P04: View-holder cannot delete another user's comment.
+        (Was formerly test_non_author_raises using an Admin — that no longer
+        raises because Edit-holders can now moderate per P03.)"""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -294,9 +317,26 @@ class TestDeleteComment:
             CommentService.delete_comment(
                 comment_id=comment.id,
                 org=org,
-                orguser=other_orguser,
+                orguser=view_only_user,
             )
         comment.delete()
+
+    def test_edit_holder_can_moderate_P03(self, snapshot, author_orguser, other_orguser, org):
+        """Spec §"Story 15" P03: Edit-holder (moderator) deletes another user's
+        comment. other_orguser is an Admin (implicit Edit) → succeeds."""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Off-topic",
+            author=author_orguser,
+            org=org,
+        )
+        deleted = CommentService.delete_comment(
+            comment_id=comment.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        assert deleted["content"] == "Off-topic"
 
     def test_not_found_raises(self, org, author_orguser):
         with pytest.raises(CommentNotFoundError):
