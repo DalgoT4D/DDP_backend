@@ -69,7 +69,11 @@ class PdfExportService:
         if dashboard_filters:
             url += f"&dashboard_filters={quote(json.dumps(dashboard_filters))}"
 
-        logger.info(f"Generating PDF for snapshot {snapshot_id} from {url}")
+        # Log the URL without dashboard_filters — it may carry sensitive
+        # filter values and shouldn't sit in application logs. The real
+        # url (with filters) still goes to page.goto() below, unchanged.
+        loggable_url = url.split("&dashboard_filters=")[0]
+        logger.info(f"Generating PDF for snapshot {snapshot_id} from {loggable_url}")
 
         with sync_playwright() as p:
             browser = p.chromium.launch(
