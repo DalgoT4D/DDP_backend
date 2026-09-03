@@ -331,7 +331,13 @@ def transfer_resource_ownership(
     """Transfer ownership of a resource to another org member."""
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
     try:
-        transfer_ownership(orguser, rtype, resource, payload.to_orguser_id)
+        transfer_ownership(
+            orguser,
+            rtype,
+            resource,
+            payload.to_orguser_id,
+            strip_previous_owner_access=payload.strip_previous_owner_access,
+        )
     except OwnershipError as err:
         raise HttpError(400, str(err)) from err
     return {"success": True}
