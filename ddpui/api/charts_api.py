@@ -41,6 +41,7 @@ from ddpui.schemas.chart_schemas import (
     ChartDataResponse,
     DataPreviewResponse,
     ExecuteChartQuery,
+    MapDataOverlayPayload,
     TransformDataForChart,
     GeoJSONDetailResponse,
     GeoJSONListResponse,
@@ -373,23 +374,8 @@ def list_available_layers(request, layer_type: str = "country"):
         return []
 
 
-class MapDataOverlayPayload(Schema):
-    schema_name: str
-    table_name: str
-    geographic_column: str
-    value_column: str
-    metrics: List[ChartMetric]
-    filters: Dict[str, Any] = Field(default_factory=dict)  # Drill-down filters (key-value pairs)
-    dashboard_filters: Optional[dict[str, Any]] = Field(
-        default_factory=dict
-    )  # Dashboard-level filters (dictionary of filter objects)
-    extra_config: Optional[Dict[str, Any]] = Field(
-        default_factory=dict
-    )  # Additional configuration including chart-level filters, pagination, sorting, etc.
-
-
 @charts_router.post("/map-data-overlay/", response=dict)
-@has_permission(["can_view_dashboards"])
+@has_permission(["can_view_charts"])
 def get_map_data_overlay(request, payload: MapDataOverlayPayload):
     """Get map data overlay (separate from GeoJSON) for data visualization"""
     orguser = request.orguser
@@ -409,8 +395,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         table_name = payload.table_name
         geographic_column = payload.geographic_column
         value_column = payload.value_column
-        # Use first metric for map overlay
-        filters = payload.filters
+        dashboard_filters = payload.dashboard_filters
 
         # Validate required fields
         if not all([schema_name, table_name, geographic_column, value_column]):
@@ -422,15 +407,6 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         # Validate metrics exist and are non-empty
         if not payload.metrics:
             raise HttpError(400, "Missing metrics - at least one metric is required")
-
-        # Build payload for standard chart query (same as other charts)
-        # Make a deep copy to avoid mutating the original payload
-        # extra_config already contains chart-level filters in extra_config.filters
-        extra_config = copy.deepcopy(payload.extra_config or {})
-
-        # Use metrics from payload directly
-        metrics = payload.metrics
-        dashboard_filters = payload.dashboard_filters
 
         # Resolve dashboard filters if provided (same logic as regular charts)
         resolved_dashboard_filters = None
@@ -444,60 +420,13 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
                 warehouse_client,
             )
 
-        chart_payload = ChartDataPayload(
-            chart_type="bar",  # We use bar chart query logic for aggregated data
-            schema_name=schema_name,
-            table_name=table_name,
-            dimension_col=geographic_column,
-            metrics=metrics,
-            dashboard_filters=resolved_dashboard_filters,
-            extra_config=extra_config,
+        result = charts_service.execute_map_data_overlay(
+            payload, org_warehouse, warehouse_client, resolved_dashboard_filters
         )
 
-        # Get warehouse client and build query using standard chart service
-        query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
+        logger.info(f"Map data overlay query returned {result['count']} rows")
 
-        # Add filters if provided with case-insensitive matching
-        if filters:
-            from sqlalchemy import column, func
-
-            for filter_column, filter_value in filters.items():
-                # Use case-insensitive matching for string filters
-                # Convert both database column and filter value to uppercase for comparison
-                query_builder.where_clause(
-                    func.upper(column(filter_column)) == str(filter_value).upper()
-                )
-
-        # Execute query using standard chart service
-        execute_payload = ExecuteChartQuery(
-            chart_type="map",
-            dimension_col=geographic_column,
-            metrics=metrics,
-        )
-
-        dict_results = charts_service.execute_chart_query(
-            warehouse_client, query_builder, execute_payload
-        )
-
-        logger.info(f"Map data overlay query returned {len(dict_results)} rows")
-
-        # Transform results for map visualization with proper case normalization
-        # The standard chart query returns data with dimension and aggregate columns
-        map_data = []
-        for row in dict_results:
-            # Get the dimension value (geographic region name)
-            region_name = row.get(geographic_column)
-            # Get the aggregated value using the metric alias
-            metric_alias = metrics[0].alias or f"{metrics[0].aggregation}_{metrics[0].column}"
-            value = row.get(metric_alias)
-
-            if region_name and value is not None:
-                # Normalize region name to proper case for frontend compatibility
-                # Convert "MAHARASHTRA" -> "Maharashtra", "gujarat" -> "Gujarat"
-                normalized_name = str(region_name).strip().title()
-                map_data.append({"name": normalized_name, "value": float(value)})
-
-        return {"success": True, "data": map_data, "count": len(map_data)}
+        return {"success": True, **result}
 
     except Exception as e:
         logger.error(f"Error generating map data overlay: {str(e)}")

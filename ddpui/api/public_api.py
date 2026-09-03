@@ -20,7 +20,6 @@ from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.visualization import Chart
 from ddpui.models.org import OrgWarehouse
-from ddpui.api.charts_api import MapDataOverlayPayload
 from ddpui.core.charts import charts_service
 
 from ddpui.api.dashboard_native_api import (
@@ -32,7 +31,12 @@ from ddpui.api.filter_api import (
     FilterPreviewResponse,
     FilterOptionResponse as AuthFilterOptionResponse,
 )
-from ddpui.schemas.chart_schemas import ChartConfig, ChartDataResponse, ChartDataPayload
+from ddpui.schemas.chart_schemas import (
+    ChartConfig,
+    ChartDataResponse,
+    ChartDataPayload,
+    MapDataOverlayPayload,
+)
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
@@ -273,15 +277,16 @@ def get_public_chart_data(request, token: str, chart_id: int):
         extra_config = chart.extra_config.copy() if chart.extra_config else {}
 
         # Parse and resolve dashboard filters if provided
-        # Uses schema/table match (no warehouse_client) to check filter applicability
         resolved_dashboard_filters = None
         if filters:
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
             filter_defs = DashboardFilter.objects.filter(id__in=filters.keys(), dashboard=dashboard)
             resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
                 filters,
                 [f.to_json() for f in filter_defs],
                 chart.schema_name,
                 chart.table_name,
+                warehouse_client,
             )
 
         config = ChartConfig(
@@ -670,6 +675,8 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
             raise Exception("Chart not found in dashboard's organization")
+        if chart.chart_type != "map":
+            raise Exception(f"Chart {chart_id} is not a map chart")
 
         org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
         if not org_warehouse:
@@ -679,47 +686,34 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
 
         payload = json.loads(request.body) if request.body else {}
 
-        # Add metrics from chart configuration if not provided
-        # IMPORTANT: Always use 'value' as alias to match private API behavior
-        if "metrics" not in payload and chart.extra_config.get("metrics"):
-            # Transform metrics to use 'value' alias (same as private API)
-            original_metrics = chart.extra_config["metrics"]
-            payload["metrics"] = [
-                {
-                    "column": original_metrics[0]["column"],
-                    "aggregation": original_metrics[0]["aggregation"],
-                    "alias": "value",  # Force alias to 'value' like private API
-                }
-            ]
-        elif "metrics" not in payload:
-            # Fallback: create a metric from value_column and aggregate_function
-            payload["metrics"] = [
-                {
-                    "column": payload.get("value_column"),
-                    "aggregation": payload.get("aggregate_function", "sum"),
-                    "alias": "value",  # Force alias to 'value' like private API
-                }
-            ]
+        ec = chart.extra_config or {}
+        geographic_column = ec.get("geographic_column")
+        if not geographic_column:
+            raise Exception(f"Chart {chart_id} is missing a geographic column")
+        value_column = ec.get("value_column")
+        metrics = ec.get("metrics") or [
+            {
+                "column": value_column,
+                "aggregation": ec.get("aggregate_function", "sum"),
+                "alias": "value",
+            }
+        ]
+
+        # schema_name/table_name/geographic_column/value_column/metrics always
+        # come from the chart's own saved config, never from the request, so
+        # a caller can't read an arbitrary column via this endpoint.
+        payload["schema_name"] = chart.schema_name
+        payload["table_name"] = chart.table_name
+        payload["geographic_column"] = geographic_column
+        # value_column is required on this schema but None for count-only charts.
+        payload["value_column"] = value_column or geographic_column
+        payload["metrics"] = metrics
 
         # Convert payload to MapDataOverlayPayload
         map_payload = MapDataOverlayPayload(**payload)
 
-        # Validate required fields
-        if not all(
-            [
-                map_payload.schema_name,
-                map_payload.table_name,
-                map_payload.geographic_column,
-                map_payload.value_column,
-            ]
-        ):
-            raise Exception("Missing required fields for map data")
-
         if not map_payload.metrics:
             raise Exception("Missing metrics - at least one metric is required")
-
-        # Use same logic as authenticated API
-        extra_config = copy.deepcopy(map_payload.extra_config or {})
 
         # Handle dashboard filters (same logic as private API)
         resolved_dashboard_filters = None
@@ -736,60 +730,13 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
                 warehouse_client,
             )
 
-        # Build chart payload for map data query (same logic as private API)
-        from ddpui.schemas.chart_schemas import ChartDataPayload, ExecuteChartQuery
-
-        chart_payload = ChartDataPayload(
-            chart_type="map",
-            schema_name=map_payload.schema_name,
-            table_name=map_payload.table_name,
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-            dashboard_filters=resolved_dashboard_filters,
-            extra_config=extra_config,
+        result = charts_service.execute_map_data_overlay(
+            map_payload, org_warehouse, warehouse_client, resolved_dashboard_filters
         )
 
-        # Get warehouse client and build query using standard chart service
-        query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
+        logger.info(f"Public map data overlay query returned {result['count']} rows")
 
-        # Add filters if provided (drill-down filters) with case-insensitive matching
-        if map_payload.filters:
-            from sqlalchemy import column, func
-
-            for filter_column, filter_value in map_payload.filters.items():
-                # Use case-insensitive matching for string filters (same as private API)
-                query_builder.where_clause(
-                    func.upper(column(filter_column)) == str(filter_value).upper()
-                )
-
-        # Execute query using standard chart service
-        execute_payload = ExecuteChartQuery(
-            chart_type="map",
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-        )
-
-        dict_results = charts_service.execute_chart_query(
-            warehouse_client, query_builder, execute_payload
-        )
-
-        logger.info(f"Public map data overlay query returned {len(dict_results)} rows")
-
-        # Transform results for map visualization (same logic as private API)
-        map_data = []
-        for row in dict_results:
-            # Get the dimension value (geographic region name)
-            region_name = row.get(map_payload.geographic_column)
-            # Get the aggregated value using 'value' alias (same as private API)
-            value = row.get("value")
-
-            if region_name and value is not None:
-                # Normalize region name to proper case for frontend compatibility (same as private API)
-                # Convert "MAHARASHTRA" -> "Maharashtra", "gujarat" -> "Gujarat"
-                normalized_name = str(region_name).strip().title()
-                map_data.append({"name": normalized_name, "value": float(value)})
-
-        return {"data": map_data, "is_valid": True, "count": len(map_data)}
+        return {**result, "is_valid": True}
 
     except Exception as e:
         logger.error(f"Public map data error for chart {chart_id}: {str(e)}")
@@ -1310,7 +1257,12 @@ def get_public_report_chart_data(request, token: str, chart_id: int):
     response={200: dict, 404: PublicErrorResponse},
 )
 def get_public_report_table_data(
-    request, token: str, chart_id: int, page: int = 0, limit: int = 100
+    request,
+    token: str,
+    chart_id: int,
+    page: int = 0,
+    limit: int = 100,
+    dashboard_filters: Optional[str] = None,
 ):
     """Get table chart data for a public report"""
     try:
@@ -1325,7 +1277,29 @@ def get_public_report_table_data(
             title=chart_config.get("title"),
             extra_config=chart_config.get("extra_config"),
         )
-        chart_payload = charts_service.build_chart_data_payload(config)
+
+        # Resolve dashboard filters from the report's frozen config (same pattern as get_public_report_chart_data)
+        resolved_filters = None
+        if dashboard_filters:
+            try:
+                filter_values = json.loads(dashboard_filters)
+                if not isinstance(filter_values, dict):
+                    filter_values = None
+            except json.JSONDecodeError:
+                filter_values = None
+
+            if filter_values:
+                frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+                resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                    filter_values,
+                    frozen_filters,
+                    chart_config["schema_name"],
+                    chart_config["table_name"],
+                    warehouse_client,
+                )
+
+        chart_payload = charts_service.build_chart_data_payload(config, resolved_filters)
 
         preview_data = charts_service.get_chart_data_table_preview(
             org_warehouse, chart_payload, page, limit
@@ -1354,7 +1328,9 @@ def get_public_report_table_data(
     "/reports/{token}/charts/{chart_id}/total-rows/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_table_total_rows(request, token: str, chart_id: int):
+def get_public_report_table_total_rows(
+    request, token: str, chart_id: int, dashboard_filters: Optional[str] = None
+):
     """Get total row count for table chart in a public report"""
     try:
         snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
@@ -1368,7 +1344,29 @@ def get_public_report_table_total_rows(request, token: str, chart_id: int):
             title=chart_config.get("title"),
             extra_config=chart_config.get("extra_config"),
         )
-        chart_payload = charts_service.build_chart_data_payload(config)
+
+        # Resolve dashboard filters from the report's frozen config (same pattern as get_public_report_chart_data)
+        resolved_filters = None
+        if dashboard_filters:
+            try:
+                filter_values = json.loads(dashboard_filters)
+                if not isinstance(filter_values, dict):
+                    filter_values = None
+            except json.JSONDecodeError:
+                filter_values = None
+
+            if filter_values:
+                frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+                resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                    filter_values,
+                    frozen_filters,
+                    chart_config["schema_name"],
+                    chart_config["table_name"],
+                    warehouse_client,
+                )
+
+        chart_payload = charts_service.build_chart_data_payload(config, resolved_filters)
 
         total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
 
@@ -1385,87 +1383,75 @@ def get_public_report_table_total_rows(request, token: str, chart_id: int):
 
 
 @public_router.post(
-    "/reports/{token}/map-data/",
+    "/reports/{token}/charts/{chart_id}/map-data/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_map_data(request, token: str):
-    """Get map data overlay for a public report"""
-    try:
-        snapshot = _get_public_report_snapshot(token, request=request)
+def get_public_report_map_data(request, token: str, chart_id: int):
+    """Get map data overlay for a public report.
 
-        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
-        if not org_warehouse:
-            raise Exception("No warehouse configured for organization")
+    chart_id identifies the frozen chart config this request must match —
+    schema_name/table_name are taken from that frozen config, not from the
+    request body, so a caller can't point the query at an arbitrary table
+    outside this report just by editing the POST body.
+    """
+    try:
+        snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
+            token, chart_id, request
+        )
+        if chart_config.get("chart_type") != "map":
+            raise Exception(f"Chart {chart_id} is not a map chart")
 
         warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
 
         payload = json.loads(request.body) if request.body else {}
 
-        # Add metrics from payload if not provided (same logic as dashboard map endpoint)
-        if "metrics" not in payload and payload.get("value_column"):
-            payload["metrics"] = [
-                {
-                    "column": payload.get("value_column"),
-                    "aggregation": payload.get("aggregate_function", "sum"),
-                    "alias": "value",
-                }
-            ]
+        ec = chart_config.get("extra_config") or {}
+        geographic_column = ec.get("geographic_column")
+        if not geographic_column:
+            raise Exception(f"Chart {chart_id} is missing a geographic column")
+        value_column = ec.get("value_column")
+        metrics = ec.get("metrics") or [
+            {
+                "column": value_column,
+                "aggregation": ec.get("aggregate_function", "sum"),
+                "alias": "value",
+            }
+        ]
+
+        # schema_name/table_name/geographic_column/value_column/metrics always
+        # come from the chart's own frozen config, never from the request, so
+        # a caller can't read an arbitrary column via this endpoint.
+        payload["schema_name"] = chart_config["schema_name"]
+        payload["table_name"] = chart_config["table_name"]
+        payload["geographic_column"] = geographic_column
+        # value_column is required on this schema but None for count-only charts.
+        payload["value_column"] = value_column or geographic_column
+        payload["metrics"] = metrics
 
         map_payload = MapDataOverlayPayload(**payload)
-
-        if not all(
-            [
-                map_payload.schema_name,
-                map_payload.table_name,
-                map_payload.geographic_column,
-                map_payload.value_column,
-            ]
-        ):
-            raise Exception("Missing required fields for map data")
 
         if not map_payload.metrics:
             raise Exception("Missing metrics - at least one metric is required")
 
-        extra_config = copy.deepcopy(map_payload.extra_config or {})
+        # Resolve dashboard filters from the report's frozen config (same pattern
+        # as get_public_report_table_data), so filtering survives the source
+        # dashboard/filter being deleted after the snapshot was created.
+        resolved_dashboard_filters = None
+        if map_payload.dashboard_filters:
+            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                map_payload.dashboard_filters,
+                frozen_filters,
+                map_payload.schema_name,
+                map_payload.table_name,
+                warehouse_client,
+            )
 
-        from ddpui.schemas.chart_schemas import ExecuteChartQuery
-
-        chart_payload = ChartDataPayload(
-            chart_type="map",
-            schema_name=map_payload.schema_name,
-            table_name=map_payload.table_name,
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-            extra_config=extra_config,
+        result = charts_service.execute_map_data_overlay(
+            map_payload, org_warehouse, warehouse_client, resolved_dashboard_filters
         )
 
-        query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
-
-        if map_payload.filters:
-            for filter_column, filter_value in map_payload.filters.items():
-                query_builder.where_clause(
-                    func.upper(column(filter_column)) == str(filter_value).upper()
-                )
-
-        execute_payload = ExecuteChartQuery(
-            chart_type="map",
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-        )
-
-        dict_results = charts_service.execute_chart_query(
-            warehouse_client, query_builder, execute_payload
-        )
-
-        map_data = []
-        for row in dict_results:
-            region_name = row.get(map_payload.geographic_column)
-            value = row.get("value")
-            if region_name and value is not None:
-                normalized_name = str(region_name).strip().title()
-                map_data.append({"name": normalized_name, "value": float(value)})
-
-        return {"data": map_data, "is_valid": True, "count": len(map_data)}
+        return {**result, "is_valid": True}
 
     except ReportSnapshot.DoesNotExist:
         logger.warning(f"Public report map data access failed - token not found: {token}")

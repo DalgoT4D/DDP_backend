@@ -23,7 +23,10 @@ from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import AccessLevel, AccessRequest, ResourceShare, ResourceType
-from ddpui.schemas.chart_schemas import ChartDataResponse
+from ddpui.schemas.chart_schemas import (
+    ChartDataResponse,
+    DataPreviewResponse,
+)
 from ddpui.celeryworkers.report_tasks import send_report_email_task
 from ddpui.schemas.report_schema import (
     CommentCreate,
@@ -31,6 +34,7 @@ from ddpui.schemas.report_schema import (
     CommentStatesResponse,
     CommentUpdate,
     DatetimeColumnResponse,
+    ExportPdfRequest,
     MarkReadRequest,
     MentionableUserResponse,
     ReportShareViaEmailRequest,
@@ -220,6 +224,127 @@ def get_report_kpi_data(
         raise HttpError(500, "Failed to get chart data") from e
 
 
+@report_router.post("/{snapshot_id}/charts/{chart_id}/map-data/", response=dict)
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id")
+)
+def get_report_map_data(
+    request, snapshot_id: int, chart_id: int, dashboard_filters: Optional[str] = None
+):
+    """Get map data overlay for a map chart in a report snapshot."""
+    orguser: OrgUser = request.orguser
+    try:
+        parsed_filters = None
+        if dashboard_filters:
+            try:
+                parsed_filters = json.loads(dashboard_filters)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+
+        result = ReportService.get_report_map_data(
+            snapshot_id, chart_id, orguser.org, parsed_filters
+        )
+        return {**result, "is_valid": True}
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    except SnapshotValidationError as err:
+        raise HttpError(400, str(err)) from err
+    except SnapshotExternalServiceError as err:
+        raise HttpError(502, str(err)) from err
+    except Exception as e:
+        logger.error(f"Error getting report map data: {e}", exc_info=True)
+        raise HttpError(500, "Failed to get map data") from e
+
+
+@report_router.post("/{snapshot_id}/charts/{chart_id}/table-data/", response=DataPreviewResponse)
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id")
+)
+def get_report_table_data(
+    request,
+    snapshot_id: int,
+    chart_id: int,
+    page: int = 0,
+    limit: int = 100,
+    dashboard_filters: Optional[str] = None,
+):
+    """Get paginated table data preview for a table chart in a report snapshot."""
+    orguser: OrgUser = request.orguser
+    try:
+        parsed_filters = None
+        if dashboard_filters:
+            try:
+                parsed_filters = json.loads(dashboard_filters)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+            if not isinstance(parsed_filters, dict):
+                parsed_filters = None
+
+        result = ReportService.get_report_table_data(
+            snapshot_id, chart_id, orguser.org, page, limit, parsed_filters
+        )
+        return DataPreviewResponse(
+            columns=result.get("columns", []),
+            column_types=result.get("column_types", {}),
+            data=result.get("data", []),
+            page=result.get("page", page),
+            page_size=result.get("limit", limit),
+            # Total rows are fetched via /table-data/total-rows/, same as the private endpoint
+            total_rows=result.get("total_rows", 0),
+        )
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    except SnapshotValidationError as err:
+        raise HttpError(400, str(err)) from err
+    except SnapshotExternalServiceError as err:
+        raise HttpError(502, str(err)) from err
+    except Exception as e:
+        logger.error(f"Error getting report table data: {e}", exc_info=True)
+        raise HttpError(500, "Failed to get table data") from e
+
+
+@report_router.post(
+    "/{snapshot_id}/charts/{chart_id}/table-data/total-rows/",
+    response=int,
+)
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id")
+)
+def get_report_table_total_rows(
+    request,
+    snapshot_id: int,
+    chart_id: int,
+    dashboard_filters: Optional[str] = None,
+):
+    """Get total row count for a table chart in a report snapshot."""
+    orguser: OrgUser = request.orguser
+    try:
+        parsed_filters = None
+        if dashboard_filters:
+            try:
+                parsed_filters = json.loads(dashboard_filters)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+            if not isinstance(parsed_filters, dict):
+                parsed_filters = None
+
+        return ReportService.get_report_table_total_rows(
+            snapshot_id, chart_id, orguser.org, parsed_filters
+        )
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    except SnapshotValidationError as err:
+        raise HttpError(400, str(err)) from err
+    except SnapshotExternalServiceError as err:
+        raise HttpError(502, str(err)) from err
+    except Exception as e:
+        logger.error(f"Error getting report table total rows: {e}", exc_info=True)
+        raise HttpError(500, "Failed to get table total rows") from e
+
+
 @report_router.put("/{snapshot_id}/", response=ApiResponse[SnapshotUpdateResponse])
 @has_permission(["can_edit_dashboards"])
 @has_access(
@@ -301,12 +426,16 @@ def delete_snapshot(request, snapshot_id: int):
 @has_access(
     ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id")
 )
-def export_report_pdf(request, snapshot_id: int):
+def export_report_pdf(request, snapshot_id: int, payload: ExportPdfRequest = None):
     """Generate PDF of report via Playwright and return as download.
 
     Uses an X-Render-Secret header (injected by Playwright route
     interception) so the public report endpoints serve data without
     the snapshot needing is_public=True.  No public state is toggled.
+
+    payload.dashboard_filters carries whatever the viewer currently has
+    applied, so the PDF reflects that instead of always the configured
+    defaults.
     """
     orguser: OrgUser = request.orguser
 
@@ -317,7 +446,10 @@ def export_report_pdf(request, snapshot_id: int):
 
     try:
         share_token = ReportService.ensure_share_token(snapshot)
-        pdf_bytes = PdfExportService.generate_pdf(snapshot_id, share_token)
+        dashboard_filters = payload.dashboard_filters if payload else None
+        pdf_bytes = PdfExportService.generate_pdf(
+            snapshot_id, share_token, dashboard_filters=dashboard_filters
+        )
 
         safe_title = "".join(c for c in snapshot.title if c.isalnum() or c in " -_").strip()
         filename = f"{safe_title or 'report'}.pdf"
