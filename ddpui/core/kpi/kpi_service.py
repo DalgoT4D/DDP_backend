@@ -463,11 +463,19 @@ class KPIService:
             period_val = row.get("period")
             value_val = row.get("value")
             period_label = format_time_grain_label(period_val, sql_grain)
+
+            numeric_value = None
+            if value_val is not None:
+                try:
+                    numeric_value = float(value_val)
+                except (TypeError, ValueError):
+                    numeric_value = None
+
             periods.append(
                 {
                     "period": period_label,
                     "period_date": str(period_val) if period_val is not None else None,
-                    "value": float(value_val) if value_val is not None else None,
+                    "value": numeric_value,
                 }
             )
 

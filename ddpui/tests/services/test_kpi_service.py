@@ -532,6 +532,111 @@ class TestKPIData:
         assert result["data"]["current_value"] == 500.0
         assert result["data"]["rag_status"] == "red"
 
+    @patch("ddpui.core.kpi.kpi_service.KPIService._compute_trend")
+    def test_data_non_numeric_values(self, mock_trend, orguser, org, sample_kpi, seed_db):
+        """Non-numeric trend values (e.g. text column_expression) → None, no crash."""
+        mock_trend.return_value = [
+            {"period": "Jan 2026", "period_date": "2026-01-01", "value": None},
+            {"period": "Feb 2026", "period_date": "2026-02-01", "value": None},
+        ]
+        OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+
+        result = KPIService.get_kpi_data(sample_kpi.id, org)
+        assert result["data"]["current_value"] is None
+        assert result["data"]["rag_status"] is None
+
+        OrgWarehouse.objects.filter(org=org).delete()
+
+
+class TestComputeTrendNonNumeric:
+    """_compute_trend must not crash when the warehouse returns non-numeric values."""
+
+    @pytest.fixture
+    def kpi_with_time_col(self, orguser, org, sample_metric):
+        kpi = KPI.objects.create(
+            name="Time-dim KPI",
+            metric=sample_metric,
+            target_value=1000.0,
+            direction="increase",
+            time_grain="monthly",
+            time_dimension_column="created_at",
+            org=org,
+            created_by=orguser,
+        )
+        yield kpi
+        try:
+            kpi.refresh_from_db()
+            kpi.delete()
+        except KPI.DoesNotExist:
+            pass
+
+    @patch("ddpui.core.kpi.kpi_service.WarehouseFactory")
+    def test_string_values_become_none(self, mock_wf, orguser, org, sample_metric, kpi_with_time_col, seed_db):
+        """Text values from a CASE column_expression are coerced to None."""
+        from datetime import datetime as dt
+
+        mock_warehouse = MagicMock()
+        mock_warehouse.execute.return_value = [
+            {"period": dt(2026, 1, 1), "value": "On Track"},
+            {"period": dt(2026, 2, 1), "value": "Off Track"},
+        ]
+        mock_wf.get_warehouse_client.return_value = mock_warehouse
+
+        org_warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+        kpi_response = KPIService.kpi_to_response(kpi_with_time_col)
+
+        periods = KPIService._compute_trend(kpi_response, org_warehouse)
+
+        assert len(periods) == 2
+        assert periods[0]["value"] is None
+        assert periods[1]["value"] is None
+
+        OrgWarehouse.objects.filter(org=org).delete()
+
+    @patch("ddpui.core.kpi.kpi_service.WarehouseFactory")
+    def test_numeric_values_still_work(self, mock_wf, orguser, org, sample_metric, kpi_with_time_col, seed_db):
+        """Numeric values are still converted to float correctly."""
+        from datetime import datetime as dt
+
+        mock_warehouse = MagicMock()
+        mock_warehouse.execute.return_value = [
+            {"period": dt(2026, 1, 1), "value": 100},
+            {"period": dt(2026, 2, 1), "value": 200.5},
+        ]
+        mock_wf.get_warehouse_client.return_value = mock_warehouse
+
+        org_warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+        kpi_response = KPIService.kpi_to_response(kpi_with_time_col)
+
+        periods = KPIService._compute_trend(kpi_response, org_warehouse)
+
+        assert len(periods) == 2
+        assert periods[0]["value"] == 100.0
+        assert periods[1]["value"] == 200.5
+
+        OrgWarehouse.objects.filter(org=org).delete()
+
+    @patch("ddpui.core.kpi.kpi_service.WarehouseFactory")
+    def test_none_values_stay_none(self, mock_wf, orguser, org, sample_metric, kpi_with_time_col, seed_db):
+        """NULL warehouse values remain None."""
+        from datetime import datetime as dt
+
+        mock_warehouse = MagicMock()
+        mock_warehouse.execute.return_value = [
+            {"period": dt(2026, 1, 1), "value": None},
+        ]
+        mock_wf.get_warehouse_client.return_value = mock_warehouse
+
+        org_warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+        kpi_response = KPIService.kpi_to_response(kpi_with_time_col)
+
+        periods = KPIService._compute_trend(kpi_response, org_warehouse)
+
+        assert len(periods) == 1
+        assert periods[0]["value"] is None
+
+        OrgWarehouse.objects.filter(org=org).delete()
+
 
 # ── Annotation Tests ──────────────────────────────────────────────────
 
