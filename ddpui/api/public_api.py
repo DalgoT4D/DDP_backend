@@ -40,6 +40,7 @@ from ddpui.schemas.chart_schemas import (
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
+from ddpui.core.reports.report_service import ReportService
 from ddpui.core.kpi.kpi_service import KPIService
 from ddpui.core.kpi.exceptions import KPINotFoundError
 from django.db.models import Q
@@ -1139,7 +1140,6 @@ def get_public_report(request, token: str):
 
         # Reuse the service method which handles both dashboard-filter and
         # warehouse-discovered-column cases (chart-level filter injection)
-        from ddpui.core.reports.report_service import ReportService
 
         view_data = ReportService.get_snapshot_view_data(snapshot.id, snapshot.org)
 
@@ -1188,12 +1188,32 @@ def _get_frozen_chart_for_public_report(token, chart_id, request):
     chart_config = copy.deepcopy(chart_config)
 
     # Inject period date filters
-    from ddpui.core.reports.report_service import ReportService
 
     temp_configs = {str(chart_id): chart_config}
     ReportService._inject_period_into_chart_configs(temp_configs, snapshot)
 
     return snapshot, chart_config, org_warehouse
+
+
+def _resolve_report_dashboard_filters(filters_param, snapshot, chart_config, org_warehouse):
+    """Parse a `dashboard_filters` JSON query value and resolve it against a
+    report's frozen filter definitions."""
+    if not filters_param:
+        return None
+
+    try:
+        filter_values = json.loads(filters_param)
+    except json.JSONDecodeError:
+        logger.warning(f"Invalid dashboard_filters JSON for public report: {filters_param}")
+        return None
+
+    if not isinstance(filter_values, dict):
+        logger.warning(f"dashboard_filters is not a dict for public report: {filters_param}")
+        return None
+
+    return ReportService._resolve_report_dashboard_filters(
+        snapshot, chart_config, org_warehouse, filter_values
+    )
 
 
 @public_router.get(
@@ -1208,24 +1228,9 @@ def get_public_report_chart_data(request, token: str, chart_id: int):
         )
 
         # Resolve dashboard filters from frozen config (same pattern as public dashboard)
-        resolved_filters = None
-        filters_param = request.GET.get("dashboard_filters")
-        if filters_param:
-            try:
-                filter_values = json.loads(filters_param)
-            except json.JSONDecodeError:
-                filter_values = None
-
-            if filter_values:
-                frozen_filters = snapshot.frozen_dashboard.get("filters", [])
-                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-                resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
-                    filter_values,
-                    frozen_filters,
-                    chart_config["schema_name"],
-                    chart_config["table_name"],
-                    warehouse_client,
-                )
+        resolved_filters = _resolve_report_dashboard_filters(
+            request.GET.get("dashboard_filters"), snapshot, chart_config, org_warehouse
+        )
 
         config = ChartConfig(
             chart_type=chart_config["chart_type"],
@@ -1279,25 +1284,9 @@ def get_public_report_table_data(
         )
 
         # Resolve dashboard filters from the report's frozen config (same pattern as get_public_report_chart_data)
-        resolved_filters = None
-        if dashboard_filters:
-            try:
-                filter_values = json.loads(dashboard_filters)
-                if not isinstance(filter_values, dict):
-                    filter_values = None
-            except json.JSONDecodeError:
-                filter_values = None
-
-            if filter_values:
-                frozen_filters = snapshot.frozen_dashboard.get("filters", [])
-                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-                resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
-                    filter_values,
-                    frozen_filters,
-                    chart_config["schema_name"],
-                    chart_config["table_name"],
-                    warehouse_client,
-                )
+        resolved_filters = _resolve_report_dashboard_filters(
+            dashboard_filters, snapshot, chart_config, org_warehouse
+        )
 
         chart_payload = charts_service.build_chart_data_payload(config, resolved_filters)
 
@@ -1346,25 +1335,9 @@ def get_public_report_table_total_rows(
         )
 
         # Resolve dashboard filters from the report's frozen config (same pattern as get_public_report_chart_data)
-        resolved_filters = None
-        if dashboard_filters:
-            try:
-                filter_values = json.loads(dashboard_filters)
-                if not isinstance(filter_values, dict):
-                    filter_values = None
-            except json.JSONDecodeError:
-                filter_values = None
-
-            if filter_values:
-                frozen_filters = snapshot.frozen_dashboard.get("filters", [])
-                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-                resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
-                    filter_values,
-                    frozen_filters,
-                    chart_config["schema_name"],
-                    chart_config["table_name"],
-                    warehouse_client,
-                )
+        resolved_filters = _resolve_report_dashboard_filters(
+            dashboard_filters, snapshot, chart_config, org_warehouse
+        )
 
         chart_payload = charts_service.build_chart_data_payload(config, resolved_filters)
 
@@ -1494,8 +1467,6 @@ def get_public_report_kpi_data(
             )
 
     try:
-        from ddpui.core.reports.report_service import ReportService
-
         result = ReportService.get_report_kpi_data(
             snapshot.id,
             kpi_id,

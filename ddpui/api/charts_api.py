@@ -394,19 +394,22 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         schema_name = payload.schema_name
         table_name = payload.table_name
         geographic_column = payload.geographic_column
-        value_column = payload.value_column
         dashboard_filters = payload.dashboard_filters
 
         # Validate required fields
-        if not all([schema_name, table_name, geographic_column, value_column]):
+        if not all([schema_name, table_name, geographic_column]):
             raise HttpError(
                 400,
-                "Missing required fields: schema_name, table_name, geographic_column, value_column",
+                "Missing required fields: schema_name, table_name, geographic_column",
             )
 
         # Validate metrics exist and are non-empty
         if not payload.metrics:
             raise HttpError(400, "Missing metrics - at least one metric is required")
+
+        # value_column is a legacy simple-metric field, not populated for calculated metrics
+        if not payload.value_column and not payload.metrics[0].column_expression:
+            raise HttpError(400, "Missing required field: value_column")
 
         # Resolve dashboard filters if provided (same logic as regular charts)
         resolved_dashboard_filters = None

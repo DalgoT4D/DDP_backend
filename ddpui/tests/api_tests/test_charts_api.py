@@ -37,10 +37,17 @@ from ddpui.api.charts_api import (
     bulk_delete_charts,
     get_chart_dashboards,
     get_chart_data,
+    get_map_data_overlay,
     download_chart_data_csv,
     BulkDeleteRequest,
 )
-from ddpui.schemas.chart_schemas import ChartCreate, ChartUpdate, ChartDataPayload
+from ddpui.schemas.chart_schemas import (
+    ChartCreate,
+    ChartUpdate,
+    ChartDataPayload,
+    ChartMetric,
+    MapDataOverlayPayload,
+)
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 from ddpui.tests.common.fixtures.chart_ui_payloads import CHART_UI_PAYLOADS
 
@@ -680,6 +687,99 @@ class TestGetChartData:
             get_chart_data(request, payload)
 
         assert excinfo.value.status_code == 404
+
+
+# ================================================================================
+# Test get_map_data_overlay endpoint
+# ================================================================================
+
+
+class TestGetMapDataOverlay:
+    """Tests for get_map_data_overlay endpoint"""
+
+    @patch("ddpui.api.charts_api.charts_service.execute_map_data_overlay")
+    @patch("ddpui.api.charts_api.charts_service.get_warehouse_client")
+    def test_calculated_metric_success(
+        self, mock_get_client, mock_execute, orguser, org_warehouse, seed_db
+    ):
+        """A calculated (column_expression) metric doesn't need value_column."""
+        mock_execute.return_value = {
+            "data": [{"name": "Maharashtra", "value": 42.0}],
+            "count": 1,
+        }
+
+        request = mock_request(orguser)
+        payload = MapDataOverlayPayload(
+            schema_name="public",
+            table_name="orders",
+            geographic_column="state",
+            metrics=[ChartMetric(column_expression="SUM(amount) / SUM(count)", alias="value")],
+        )
+
+        response = get_map_data_overlay(request, payload)
+
+        assert response["success"] is True
+        assert response["data"] == [{"name": "Maharashtra", "value": 42.0}]
+        mock_execute.assert_called_once()
+
+    @patch("ddpui.api.charts_api.charts_service.execute_map_data_overlay")
+    @patch("ddpui.api.charts_api.charts_service.get_warehouse_client")
+    def test_simple_metric_success(
+        self, mock_get_client, mock_execute, orguser, org_warehouse, seed_db
+    ):
+        """A simple (column + aggregation) metric with value_column set."""
+        mock_execute.return_value = {"data": [{"name": "Kerala", "value": 7.0}], "count": 1}
+
+        request = mock_request(orguser)
+        payload = MapDataOverlayPayload(
+            schema_name="public",
+            table_name="orders",
+            geographic_column="state",
+            value_column="amount",
+            metrics=[ChartMetric(column="amount", aggregation="sum", alias="value")],
+        )
+
+        response = get_map_data_overlay(request, payload)
+
+        assert response["success"] is True
+        assert response["data"] == [{"name": "Kerala", "value": 7.0}]
+
+    @patch("ddpui.api.charts_api.charts_service.get_warehouse_client")
+    def test_missing_value_column_for_simple_metric(
+        self, mock_get_client, orguser, org_warehouse, seed_db
+    ):
+        """A simple metric (no column_expression) with no value_column is rejected."""
+        request = mock_request(orguser)
+        payload = MapDataOverlayPayload(
+            schema_name="public",
+            table_name="orders",
+            geographic_column="state",
+            metrics=[ChartMetric(aggregation="count", alias="value")],
+        )
+
+        with pytest.raises(HttpError) as excinfo:
+            get_map_data_overlay(request, payload)
+
+        # The view wraps every error (validation or not) in a 500.
+        assert excinfo.value.status_code == 500
+        assert "value_column" in str(excinfo.value)
+
+    @patch("ddpui.api.charts_api.charts_service.get_warehouse_client")
+    def test_missing_metrics(self, mock_get_client, orguser, org_warehouse, seed_db):
+        """No metrics at all is rejected."""
+        request = mock_request(orguser)
+        payload = MapDataOverlayPayload(
+            schema_name="public",
+            table_name="orders",
+            geographic_column="state",
+            metrics=[],
+        )
+
+        with pytest.raises(HttpError) as excinfo:
+            get_map_data_overlay(request, payload)
+
+        assert excinfo.value.status_code == 500
+        assert "metrics" in str(excinfo.value)
 
 
 # ================================================================================
