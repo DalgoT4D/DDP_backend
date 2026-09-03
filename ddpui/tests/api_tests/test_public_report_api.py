@@ -22,7 +22,7 @@ django.setup()
 
 from django.contrib.auth.models import User
 from django.test import RequestFactory
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
@@ -575,6 +575,91 @@ class TestGetPublicReportMapData:
 
             assert status == 404
             assert response.is_valid is False
+
+    def test_geographic_column_and_metrics_from_frozen_config_not_request(
+        self, orguser, org, seed_db
+    ):
+        """schema_name/table_name/geographic_column/value_column in the request
+        body are ignored — the frozen chart config always wins, including for
+        a count-only chart whose saved value_column is None."""
+        from ddpui.api.access_api import update_general_access
+        from ddpui.schemas.access.resource_share_schema import GeneralAccessPayload
+        from ddpui.tests.api_tests.test_user_org_api import mock_request
+
+        map_chart = Chart.objects.create(
+            title="Count Only Map",
+            chart_type="map",
+            schema_name="public",
+            table_name="orders",
+            extra_config={
+                "geographic_column": "region",
+                "value_column": None,
+                "aggregate_function": "count",
+            },
+            created_by=orguser,
+            org=org,
+        )
+        dashboard = Dashboard.objects.create(
+            title="Map Dashboard",
+            dashboard_type="native",
+            grid_columns=12,
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "Tab 1",
+                    "layout_config": [],
+                    "components": {
+                        "chart-map": {
+                            "id": "chart-map",
+                            "type": "chart",
+                            "config": {"chartId": map_chart.id, "chartType": "map"},
+                        }
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+        OrgWarehouse.objects.create(wtype="postgres", credentials="{}", org=org)
+        snapshot = ReportService.create_snapshot(
+            title="Map Report",
+            dashboard_id=dashboard.id,
+            date_column={},  # no period-locking needed for this test
+            orguser=orguser,
+        )
+        request = mock_request(orguser)
+        update_general_access(
+            request, "report", str(snapshot.id), GeneralAccessPayload(mode="public")
+        )
+        snapshot.refresh_from_db()
+
+        request = _make_public_request(
+            body={
+                "schema_name": "someone_elses_schema",
+                "table_name": "someone_elses_table",
+                "geographic_column": "someone_elses_column",
+                "value_column": "someone_elses_secret_column",
+            }
+        )
+        with patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ) as mock_get_client, patch(
+            "ddpui.api.public_api.charts_service.execute_map_data_overlay"
+        ) as mock_execute:
+            mock_get_client.return_value = MagicMock()
+            mock_execute.return_value = {"data": [], "count": 0}
+            response = get_public_report_map_data(
+                request, snapshot.public_share_token, chart_id=map_chart.id
+            )
+
+        assert response.get("is_valid") is True
+        sent_map_payload = mock_execute.call_args[0][0]
+        assert sent_map_payload.schema_name == "public"
+        assert sent_map_payload.table_name == "orders"
+        assert sent_map_payload.geographic_column == "region"
+        assert sent_map_payload.value_column == "region"  # fallback placeholder
+        assert sent_map_payload.metrics[0].column is None  # true COUNT(*)
+        assert sent_map_payload.metrics[0].aggregation == "count"
 
 
 # ================================================================================

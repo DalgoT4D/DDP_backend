@@ -686,46 +686,31 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
 
         payload = json.loads(request.body) if request.body else {}
 
-        # schema_name/table_name are overwritten with the chart's own values
-        # below, but MapDataOverlayPayload requires them to construct.
+        ec = chart.extra_config or {}
+        geographic_column = ec.get("geographic_column")
+        if not geographic_column:
+            raise Exception(f"Chart {chart_id} is missing a geographic column")
+        value_column = ec.get("value_column")
+        metrics = ec.get("metrics") or [
+            {
+                "column": value_column,
+                "aggregation": ec.get("aggregate_function", "sum"),
+                "alias": "value",
+            }
+        ]
+
+        # schema_name/table_name/geographic_column/value_column/metrics always
+        # come from the chart's own saved config, never from the request, so
+        # a caller can't read an arbitrary column via this endpoint.
         payload["schema_name"] = chart.schema_name
         payload["table_name"] = chart.table_name
-
-        # Add metrics from chart configuration if not provided
-        # IMPORTANT: Always use 'value' as alias to match private API behavior
-        if "metrics" not in payload and chart.extra_config.get("metrics"):
-            # Transform metrics to use 'value' alias (same as private API)
-            original_metrics = chart.extra_config["metrics"]
-            payload["metrics"] = [
-                {
-                    "column": original_metrics[0]["column"],
-                    "aggregation": original_metrics[0]["aggregation"],
-                    "alias": "value",  # Force alias to 'value' like private API
-                }
-            ]
-        elif "metrics" not in payload:
-            # Fallback: create a metric from value_column and aggregate_function
-            payload["metrics"] = [
-                {
-                    "column": payload.get("value_column"),
-                    "aggregation": payload.get("aggregate_function", "sum"),
-                    "alias": "value",  # Force alias to 'value' like private API
-                }
-            ]
+        payload["geographic_column"] = geographic_column
+        # value_column is required on this schema but None for count-only charts.
+        payload["value_column"] = value_column or geographic_column
+        payload["metrics"] = metrics
 
         # Convert payload to MapDataOverlayPayload
         map_payload = MapDataOverlayPayload(**payload)
-
-        # Validate required fields
-        if not all(
-            [
-                map_payload.schema_name,
-                map_payload.table_name,
-                map_payload.geographic_column,
-                map_payload.value_column,
-            ]
-        ):
-            raise Exception("Missing required fields for map data")
 
         if not map_payload.metrics:
             raise Exception("Missing metrics - at least one metric is required")
@@ -1420,32 +1405,30 @@ def get_public_report_map_data(request, token: str, chart_id: int):
 
         payload = json.loads(request.body) if request.body else {}
 
-        # Add metrics from payload if not provided (same logic as dashboard map endpoint)
-        if "metrics" not in payload and payload.get("value_column"):
-            payload["metrics"] = [
-                {
-                    "column": payload.get("value_column"),
-                    "aggregation": payload.get("aggregate_function", "sum"),
-                    "alias": "value",
-                }
-            ]
+        ec = chart_config.get("extra_config") or {}
+        geographic_column = ec.get("geographic_column")
+        if not geographic_column:
+            raise Exception(f"Chart {chart_id} is missing a geographic column")
+        value_column = ec.get("value_column")
+        metrics = ec.get("metrics") or [
+            {
+                "column": value_column,
+                "aggregation": ec.get("aggregate_function", "sum"),
+                "alias": "value",
+            }
+        ]
 
-        # schema_name/table_name are overwritten with the frozen config's own
-        # values below, but MapDataOverlayPayload requires them to construct.
+        # schema_name/table_name/geographic_column/value_column/metrics always
+        # come from the chart's own frozen config, never from the request, so
+        # a caller can't read an arbitrary column via this endpoint.
         payload["schema_name"] = chart_config["schema_name"]
         payload["table_name"] = chart_config["table_name"]
+        payload["geographic_column"] = geographic_column
+        # value_column is required on this schema but None for count-only charts.
+        payload["value_column"] = value_column or geographic_column
+        payload["metrics"] = metrics
 
         map_payload = MapDataOverlayPayload(**payload)
-
-        if not all(
-            [
-                map_payload.schema_name,
-                map_payload.table_name,
-                map_payload.geographic_column,
-                map_payload.value_column,
-            ]
-        ):
-            raise Exception("Missing required fields for map data")
 
         if not map_payload.metrics:
             raise Exception("Missing metrics - at least one metric is required")
