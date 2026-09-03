@@ -1258,7 +1258,7 @@ def test_post_resend_invitation(mock_awsses: Mock, orguser):
     invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
     request = mock_request(orguser=orguser)
     post_resend_invitation(request, invitation.id)
-    mock_awsses.assert_called_once_with("email", orguser.user.email, invite_url)
+    mock_awsses.assert_called_once_with("email", orguser.user.email, invite_url, org_name=orguser.org.name)
     invitation.refresh_from_db()
     assert invitation.invited_on > original_invited_on
 
