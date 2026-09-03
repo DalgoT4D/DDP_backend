@@ -371,6 +371,27 @@ def add_grants(
                 existing.save(update_fields=["access_level"])
             written.append(existing)
         else:
+            # Check for a cascade row (inherited from a parent dashboard share).
+            # Upgrading above the cascade level is allowed — creates a direct
+            # override. Downgrading to the same or lower level is blocked because
+            # the cascade already grants that level and a lower direct share would
+            # be meaningless and confusing.
+            cascade_row = ResourceShare.objects.filter(
+                org=org,
+                resource_type=rtype,
+                resource_id=resource_id_str,
+                principal_type=grant.principal_type,
+                principal_id=grant.principal_id,
+                parent__isnull=False,
+            ).first()
+            if (
+                cascade_row is not None
+                and LEVEL_RANK[grant.access_level] <= LEVEL_RANK[cascade_row.access_level]
+            ):
+                raise GrantError(
+                    f"inherited access already grants {cascade_row.access_level}; "
+                    "cannot assign a lower or equal level directly"
+                )
             written.append(
                 ResourceShare.objects.create(
                     org=org,
