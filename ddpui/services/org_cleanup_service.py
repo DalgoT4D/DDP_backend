@@ -6,7 +6,6 @@ from ninja.errors import HttpError
 
 from django.db import connection
 
-from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import Org, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask
@@ -27,7 +26,6 @@ from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.s3_utils import bulk_delete_files, list_objects
-from ddpui.services.dashboard_service import collect_widget_image_keys
 
 logger = CustomLogger("ddpui")
 
@@ -398,32 +396,6 @@ class OrgCleanupService:
                         "keeping user %s (%d other org membership(s))", user.email, remaining
                     )
 
-    def delete_dashboard_images(self):
-        """Delete every S3-hosted image referenced by this org's dashboard text
-        widgets. `delete_org` cascades Dashboard rows away via the DB (never routing
-        through DashboardService.delete_dashboard_safely, which does this same cleanup
-        for a single manual dashboard delete) — without this, those images would be
-        orphaned in S3 forever whenever an org (e.g. an expired trial) is deleted.
-        """
-        bucket = os.getenv("S3_IMAGES_BUCKET")
-        if not bucket:
-            logger.info("S3_IMAGES_BUCKET not configured — skipping dashboard image cleanup")
-            return
-
-        keys: list[str] = []
-        for dashboard in Dashboard.objects.filter(org=self.org):
-            keys.extend(collect_widget_image_keys(dashboard.tabs or []))
-
-        logger.info(f"will delete {len(keys)} dashboard widget image(s) for {self.org.slug}")
-        if not self.dry_run and keys:
-            try:
-                bulk_delete_files(bucket, keys)
-                logger.info(f"deleted {len(keys)} dashboard widget image(s) for {self.org.slug}")
-            except Exception as err:  # pylint: disable=broad-exception-caught
-                logger.error(
-                    f"failed to bulk delete dashboard widget images for {self.org.slug}: {err}"
-                )
-
     def delete_elementary_setup(self):
         """Clean up everything Elementary-related for this org:
           - Prefect deployment(s) for the EDR send-report task
@@ -507,11 +479,6 @@ class OrgCleanupService:
 
         # delete org users
         self.delete_orgusers()
-
-        # delete dashboard widget images from S3 (dashboards themselves cascade away
-        # with the org below; this must run before that so the tabs/imageKeys are
-        # still readable)
-        self.delete_dashboard_images()
 
         # Elementary cleanup (S3 reports + EDR pipeline + OrgTask) already
         # ran as part of delete_transformation_layer above — no separate call

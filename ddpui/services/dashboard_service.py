@@ -39,7 +39,7 @@ from ddpui.core.charts.charts_service import (
 from ddpui.schemas.dashboard_schema import DashboardTabSchema
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
-from ddpui.utils.s3_utils import upload_file, delete_file, copy_file, bulk_delete_files
+from ddpui.utils.s3_utils import upload_file, delete_file, copy_file
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.schemas.dashboard_schema import DashboardUpdate, FilterUpdate
 
@@ -1132,19 +1132,6 @@ def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, 
     # Clear any user landing page preferences pointing to this dashboard
     OrgUser.objects.filter(landing_dashboard=dashboard).update(landing_dashboard=None)
 
-    # Best-effort: delete any S3-hosted widget images before the dashboard itself is
-    # gone, so they don't sit orphaned in the bucket forever. A failure here must not
-    # block the actual dashboard deletion the user asked for.
-    image_keys = collect_widget_image_keys(dashboard.tabs or [])
-    if image_keys:
-        try:
-            bulk_delete_files(_get_widget_image_bucket(), image_keys)
-        except Exception as err:
-            logger.error(
-                f"Failed to delete {len(image_keys)} widget image(s) for dashboard "
-                f"{dashboard_id}: {err}"
-            )
-
     # Delete the dashboard
     dashboard_title = dashboard.title
     dashboard.delete()
@@ -1271,18 +1258,3 @@ def remap_widget_images(tabs: list, dest_org: Org) -> list:
             cfg["imageUrl"] = new_url
             cfg["imageKey"] = new_key
     return new_tabs
-
-
-def collect_widget_image_keys(tabs: list) -> List[str]:
-    """Return every non-empty imageKey referenced by a text/image widget across all tabs.
-
-    Used when a dashboard (or a whole org) is deleted, so its S3-hosted images can be
-    cleaned up alongside it instead of being left orphaned in the bucket forever.
-    """
-    keys = []
-    for tab in tabs or []:
-        for component in (tab.get("components") or {}).values():
-            image_key = (component.get("config") or {}).get("imageKey")
-            if image_key:
-                keys.append(image_key)
-    return keys
