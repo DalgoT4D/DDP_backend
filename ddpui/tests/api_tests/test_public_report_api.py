@@ -22,7 +22,7 @@ django.setup()
 
 from django.contrib.auth.models import User
 from django.test import RequestFactory
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
@@ -46,7 +46,7 @@ pytestmark = pytest.mark.django_db
 rf = RequestFactory()
 
 
-def _make_public_request(body=None):
+def _make_public_request(body=None, query_params=None):
     """Create a simple mock request for public endpoints (no auth needed)"""
     if body:
         request = rf.post(
@@ -55,7 +55,7 @@ def _make_public_request(body=None):
             content_type="application/json",
         )
     else:
-        request = rf.get("/api/v1/public/reports/")
+        request = rf.get("/api/v1/public/reports/", data=query_params or {})
     request.META["REMOTE_ADDR"] = "127.0.0.1"
     request.META["HTTP_USER_AGENT"] = "TestAgent"
     return request
@@ -171,9 +171,9 @@ def sample_chart(orguser, org):
 
 @pytest.fixture
 def public_snapshot(orguser, org, sample_dashboard, sample_filter, sample_chart):
-    """A snapshot that has been made public"""
-    from ddpui.api.report_api import toggle_report_sharing
-    from ddpui.schemas.dashboard_schema import ShareToggle
+    """A snapshot that has been made public via the unified general-access endpoint."""
+    from ddpui.api.access_api import update_general_access
+    from ddpui.schemas.access.resource_share_schema import GeneralAccessPayload
     from ddpui.tests.api_tests.test_user_org_api import mock_request
 
     snapshot = ReportService.create_snapshot(
@@ -189,9 +189,8 @@ def public_snapshot(orguser, org, sample_dashboard, sample_filter, sample_chart)
         orguser=orguser,
     )
 
-    # Make it public via the API
     request = mock_request(orguser)
-    toggle_report_sharing(request, snapshot.id, ShareToggle(is_public=True))
+    update_general_access(request, "report", str(snapshot.id), GeneralAccessPayload(mode="public"))
     snapshot.refresh_from_db()
 
     yield snapshot
@@ -532,6 +531,63 @@ class TestGetPublicReportTableData:
             called_payload = mock_preview_fn.call_args[0][1]
             assert "search" not in (called_payload.extra_config or {})
 
+    def test_dashboard_filters_resolved_and_passed(self, public_snapshot, seed_db):
+        """A valid {filter_id: value} dashboard_filters query param is parsed
+        and resolved against the frozen dashboard config."""
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ), patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
+        ) as mock_preview_fn:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_resolve.return_value = [{"filter_id": "5", "value": "2025-01-15"}]
+            mock_preview_fn.return_value = {
+                "columns": [],
+                "column_types": {},
+                "data": [],
+                "page": 0,
+                "limit": 100,
+            }
+
+            request = _make_public_request()
+            get_public_report_table_data(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters='{"5": "2025-01-15"}',
+            )
+
+            mock_resolve.assert_called_once()
+
+    def test_non_dict_json_dashboard_filters_skips_resolution(self, public_snapshot, seed_db):
+        """dashboard_filters='[1,2,3]' is valid JSON but not a dict — treated
+        as no filters, same as the private report endpoints."""
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
+        ) as mock_preview_fn:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_preview_fn.return_value = {
+                "columns": [],
+                "column_types": {},
+                "data": [],
+                "page": 0,
+                "limit": 100,
+            }
+
+            request = _make_public_request()
+            get_public_report_table_data(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters="[1,2,3]",
+            )
+
+            mock_resolve.assert_not_called()
+
 
 # ================================================================================
 # Test get_public_report_table_total_rows
@@ -590,6 +646,47 @@ class TestGetPublicReportTableTotalRows:
             called_payload = mock_total.call_args[0][1]
             assert called_payload.extra_config["search"] == "bangalore"
 
+    def test_dashboard_filters_resolved_and_passed(self, public_snapshot, seed_db):
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ), patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_total_rows"
+        ) as mock_total:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_resolve.return_value = [{"filter_id": "5", "value": "2025-01-15"}]
+            mock_total.return_value = 3
+
+            request = _make_public_request()
+            get_public_report_table_total_rows(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters='{"5": "2025-01-15"}',
+            )
+
+            mock_resolve.assert_called_once()
+
+    def test_non_dict_json_dashboard_filters_skips_resolution(self, public_snapshot, seed_db):
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_total_rows"
+        ) as mock_total:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_total.return_value = 0
+
+            request = _make_public_request()
+            get_public_report_table_total_rows(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters="[1,2,3]",
+            )
+
+            mock_resolve.assert_not_called()
+
 
 # ================================================================================
 # Test get_public_report_map_data
@@ -602,12 +699,12 @@ class TestGetPublicReportMapData:
     def test_invalid_token(self, seed_db):
         """Invalid token returns 404"""
         request = _make_public_request(body={"schema_name": "public", "table_name": "orders"})
-        status, response = get_public_report_map_data(request, "bad-token")
+        status, response = get_public_report_map_data(request, "bad-token", chart_id=1)
 
         assert status == 404
         assert response.is_valid is False
 
-    def test_no_warehouse(self, public_snapshot, seed_db):
+    def test_no_warehouse(self, public_snapshot, sample_chart, seed_db):
         """No warehouse configured returns 404"""
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow:
             mock_ow.filter.return_value.first.return_value = None
@@ -621,11 +718,96 @@ class TestGetPublicReportMapData:
                 }
             )
             status, response = get_public_report_map_data(
-                request, public_snapshot.public_share_token
+                request, public_snapshot.public_share_token, chart_id=sample_chart.id
             )
 
             assert status == 404
             assert response.is_valid is False
+
+    def test_geographic_column_and_metrics_from_frozen_config_not_request(
+        self, orguser, org, seed_db
+    ):
+        """schema_name/table_name/geographic_column/value_column in the request
+        body are ignored — the frozen chart config always wins, including for
+        a count-only chart whose saved value_column is None."""
+        from ddpui.api.access_api import update_general_access
+        from ddpui.schemas.access.resource_share_schema import GeneralAccessPayload
+        from ddpui.tests.api_tests.test_user_org_api import mock_request
+
+        map_chart = Chart.objects.create(
+            title="Count Only Map",
+            chart_type="map",
+            schema_name="public",
+            table_name="orders",
+            extra_config={
+                "geographic_column": "region",
+                "value_column": None,
+                "aggregate_function": "count",
+            },
+            created_by=orguser,
+            org=org,
+        )
+        dashboard = Dashboard.objects.create(
+            title="Map Dashboard",
+            dashboard_type="native",
+            grid_columns=12,
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "Tab 1",
+                    "layout_config": [],
+                    "components": {
+                        "chart-map": {
+                            "id": "chart-map",
+                            "type": "chart",
+                            "config": {"chartId": map_chart.id, "chartType": "map"},
+                        }
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+        OrgWarehouse.objects.create(wtype="postgres", credentials="{}", org=org)
+        snapshot = ReportService.create_snapshot(
+            title="Map Report",
+            dashboard_id=dashboard.id,
+            date_column={},  # no period-locking needed for this test
+            orguser=orguser,
+        )
+        request = mock_request(orguser)
+        update_general_access(
+            request, "report", str(snapshot.id), GeneralAccessPayload(mode="public")
+        )
+        snapshot.refresh_from_db()
+
+        request = _make_public_request(
+            body={
+                "schema_name": "someone_elses_schema",
+                "table_name": "someone_elses_table",
+                "geographic_column": "someone_elses_column",
+                "value_column": "someone_elses_secret_column",
+            }
+        )
+        with patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ) as mock_get_client, patch(
+            "ddpui.api.public_api.charts_service.execute_map_data_overlay"
+        ) as mock_execute:
+            mock_get_client.return_value = MagicMock()
+            mock_execute.return_value = {"data": [], "count": 0}
+            response = get_public_report_map_data(
+                request, snapshot.public_share_token, chart_id=map_chart.id
+            )
+
+        assert response.get("is_valid") is True
+        sent_map_payload = mock_execute.call_args[0][0]
+        assert sent_map_payload.schema_name == "public"
+        assert sent_map_payload.table_name == "orders"
+        assert sent_map_payload.geographic_column == "region"
+        assert sent_map_payload.value_column == "region"  # fallback placeholder
+        assert sent_map_payload.metrics[0].column is None  # true COUNT(*)
+        assert sent_map_payload.metrics[0].aggregation == "count"
 
 
 # ================================================================================
@@ -861,3 +1043,146 @@ class TestGetPublicFilterPreview:
 
             assert status == 404
             assert response.is_valid is False
+
+
+# ================================================================================
+# allow_public_sharing runtime gate — spec: admin can revoke without touching
+# individual resources; existing links must return 404 immediately.
+# ================================================================================
+
+
+class TestAllowPublicSharingGate:
+    """Anonymous endpoints must respect the org-level allow_public_sharing toggle."""
+
+    def test_dashboard_hidden_when_org_disallows(self, public_dashboard, org, seed_db):
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.api.public_api import get_public_dashboard
+
+        OrgPreferences.objects.create(org=org, allow_public_sharing=False)
+        request = _make_public_request()
+        result = get_public_dashboard(request, public_dashboard.public_share_token)
+        status, _ = result
+        assert status == 404
+
+    def test_dashboard_visible_when_org_allows(self, public_dashboard, org, seed_db):
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.api.public_api import get_public_dashboard
+
+        OrgPreferences.objects.create(org=org, allow_public_sharing=True)
+        request = _make_public_request()
+        result = get_public_dashboard(request, public_dashboard.public_share_token)
+        assert not isinstance(result, tuple)
+
+    def test_report_hidden_when_org_disallows(self, public_snapshot, org, seed_db):
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.api.public_api import get_public_report
+
+        OrgPreferences.objects.create(org=org, allow_public_sharing=False)
+        request = _make_public_request()
+        result = get_public_report(request, public_snapshot.public_share_token)
+        status, _ = result
+        assert status == 404
+
+    def test_render_secret_bypasses_org_toggle(self, public_snapshot, org, seed_db):
+        """Spec: server-side PDF rendering must work even when org disallows public sharing."""
+        from django.conf import settings
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.api.public_api import _get_public_report_snapshot
+
+        OrgPreferences.objects.create(org=org, allow_public_sharing=False)
+        settings.RENDER_SECRET = "test-secret"
+        request = _make_public_request()
+        request.META["HTTP_X_RENDER_SECRET"] = "test-secret"
+        result = _get_public_report_snapshot(public_snapshot.public_share_token, request=request)
+        assert result.id == public_snapshot.id
+
+
+# ================================================================================
+# Story 7: Public link (O01, O02, O04, Q03)
+# ================================================================================
+
+
+class TestPublicLinkStory7:
+    """Story 7 — Public link on/off + org toggle + anonymous inner chart access."""
+
+    def test_O01_dashboard_with_public_link_and_org_allow_returns_200(
+        self, public_dashboard, org, seed_db
+    ):
+        """Public link enabled on resource + allow_public_sharing=True → anonymous 200.
+        Alias for test_dashboard_visible_when_org_allows in the gate class."""
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.api.public_api import get_public_dashboard
+
+        OrgPreferences.objects.create(org=org, allow_public_sharing=True)
+        request = _make_public_request()
+        result = get_public_dashboard(request, public_dashboard.public_share_token)
+        assert not isinstance(result, tuple)  # success is the response object, not (status, body)
+
+    def test_O02_dashboard_public_link_disabled_returns_not_found(self, orguser, org, seed_db):
+        """Resource-level is_public=False → anonymous GET returns 404."""
+        from ddpui.api.public_api import get_public_dashboard
+
+        d = Dashboard.objects.create(
+            title="Not Public",
+            org=org,
+            created_by=orguser,
+            is_public=False,
+            public_share_token="token-nopub-1",
+            dashboard_type="native",
+            grid_columns=12,
+        )
+        try:
+            request = _make_public_request()
+            status, _ = get_public_dashboard(request, d.public_share_token)
+            assert status == 404
+        finally:
+            d.delete()
+
+    def test_O04_org_toggle_off_then_on_token_still_valid(self, public_dashboard, org, seed_db):
+        """Toggle allow_public_sharing off → 404, then back on → same token works again."""
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.api.public_api import get_public_dashboard
+
+        prefs = OrgPreferences.objects.create(org=org, allow_public_sharing=False)
+        request = _make_public_request()
+        status, _ = get_public_dashboard(request, public_dashboard.public_share_token)
+        assert status == 404
+
+        prefs.allow_public_sharing = True
+        prefs.save()
+        result = get_public_dashboard(request, public_dashboard.public_share_token)
+        assert not isinstance(result, tuple)  # visible again
+
+    def test_Q03_public_dashboard_inner_chart_metadata_accessible_anonymously(
+        self, public_dashboard, org, orguser, seed_db
+    ):
+        """Anonymous viewer of a public dashboard can fetch metadata for its
+        inner charts regardless of any chart-level access controls — the
+        chart is 'inherited' by being inside the public dashboard."""
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.api.public_api import get_public_chart_metadata
+
+        OrgPreferences.objects.create(org=org, allow_public_sharing=True)
+        # Create a chart in the dashboard's org (public_dashboard's tabs point at chartId=1
+        # but there's no real chart 1 — create one with id=1 for the fixture layout).
+        chart = Chart.objects.create(
+            id=1,
+            title="Inner Chart",
+            org=org,
+            chart_type="bar",
+            schema_name="s",
+            table_name="t",
+            computation_type="raw",
+            extra_config={},
+            created_by=orguser,
+        )
+        try:
+            request = _make_public_request()
+            result = get_public_chart_metadata(
+                request, public_dashboard.public_share_token, chart.id
+            )
+            # Success returns a dict (not the tuple error form)
+            assert not isinstance(result, tuple)
+            assert result["is_valid"] is True
+        finally:
+            chart.delete()

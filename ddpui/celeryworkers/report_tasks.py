@@ -3,15 +3,15 @@
 import re
 
 from ddpui.celery import app
+from ddpui.core.notifications.notifications_functions import create_notification
+from ddpui.core.notifications.templates import render_share_report_email
+from ddpui.core.notifications.triggers.report_share import notify_report_shared
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
 from ddpui.models.report import ReportSnapshot
-from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
-from ddpui.utils.awsses import send_email_with_attachment
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.email_templates import render_share_report_email
 
 logger = CustomLogger("ddpui.celeryworkers.report_tasks")
 
@@ -46,8 +46,7 @@ def send_report_email_task(
     if snapshot.is_public and snapshot.public_share_token:
         public_url = ReportService._build_public_url(snapshot.public_share_token)
 
-    # Start with all recipients as failed; remove as they succeed
-    failed_recipients = list(recipient_emails)
+    failed_recipients: list = list(recipient_emails)
 
     try:
         # Ensure a share token exists for PDF generation
@@ -74,23 +73,20 @@ def send_report_email_task(
 
         email_subject = subject if subject else f"Report: {report_title}"
 
-        for recipient in recipient_emails:
-            try:
-                send_email_with_attachment(
-                    to_email=recipient,
-                    subject=email_subject,
-                    text_body=plain_text,
-                    html_body=html_body,
-                    attachment_bytes=pdf_bytes,
-                    attachment_filename=filename,
-                )
-                failed_recipients.remove(recipient)
-                logger.info(f"Sent report email to {recipient}")
-            except Exception as e:
-                logger.error(
-                    f"Failed to send report email to {recipient}: {e}",
-                    exc_info=True,
-                )
+        # Fan out through the notifications trigger:
+        # - Email PDF to every recipient
+        # - Bell entry for recipients that resolve to an OrgUser in the sender's org
+        failed_recipients = notify_report_shared(
+            sender=orguser,
+            snapshot=snapshot,
+            recipient_emails=recipient_emails,
+            email_subject=email_subject,
+            plain_body=plain_text,
+            html_body=html_body,
+            pdf_bytes=pdf_bytes,
+            filename=filename,
+            private_url=private_url,
+        )
 
         sent_count = len(recipient_emails) - len(failed_recipients)
         logger.info(
