@@ -165,6 +165,8 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     # Get warehouse client
     warehouse = charts_service.get_warehouse_client(org_warehouse)
 
+    charts_service.validate_payload_columns(warehouse, payload)
+
     # Build query
     query_builder = charts_service.build_chart_query(payload, org_warehouse)
     logger.debug(f"Query built for {chart_id_str}: {query_builder}")

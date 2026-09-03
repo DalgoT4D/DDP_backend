@@ -503,6 +503,59 @@ def build_pivot_table_query(
     return query_builder
 
 
+def validate_payload_columns(
+    warehouse: Warehouse,
+    payload: ChartDataPayload,
+) -> None:
+    """Check that every column the payload references actually exists in the table.
+
+    Catches stale column references in saved chart configurations — e.g. a
+    warehouse column renamed after the chart was created — before the query
+    builder emits SQL that the database will reject.
+    """
+    try:
+        table_columns = warehouse.get_table_columns(payload.schema_name, payload.table_name)
+    except Exception as err:
+        raise ValueError(
+            f"Could not read columns for {payload.schema_name}.{payload.table_name}"
+        ) from err
+
+    actual_col_names = {col["name"] for col in table_columns}
+
+    referenced_columns: set[str] = set()
+
+    if payload.dimension_col:
+        referenced_columns.add(payload.dimension_col)
+    if payload.extra_dimension:
+        referenced_columns.add(payload.extra_dimension)
+    if payload.dimensions:
+        referenced_columns.update(d for d in payload.dimensions if d and d.strip())
+    if payload.metrics:
+        for metric in payload.metrics:
+            if metric.column and not metric.column_expression:
+                referenced_columns.add(metric.column)
+    if payload.row_dimensions:
+        referenced_columns.update(payload.row_dimensions)
+    if payload.column_dimensions:
+        referenced_columns.update(payload.column_dimensions)
+    if payload.geographic_column:
+        referenced_columns.add(payload.geographic_column)
+    if payload.extra_config and payload.extra_config.get("filters"):
+        for f in payload.extra_config["filters"]:
+            col = f.get("column")
+            if col:
+                referenced_columns.add(col)
+
+    missing_columns = referenced_columns - actual_col_names
+    if missing_columns:
+        raise ValueError(
+            f"Column(s) {missing_columns} not found in "
+            f"{payload.schema_name}.{payload.table_name}. "
+            f"The chart configuration may reference columns that were renamed or removed. "
+            f"Available columns: {sorted(actual_col_names)}"
+        )
+
+
 def build_chart_query(
     payload: ChartDataPayload, org_warehouse: OrgWarehouse = None
 ) -> AggQueryBuilder:
@@ -1614,6 +1667,8 @@ def get_chart_data_table_preview(
     """
     warehouse = get_warehouse_client(org_warehouse)
 
+    validate_payload_columns(warehouse, payload)
+
     # Use the same query builder as chart data
     query_builder = build_chart_query(payload, org_warehouse)
 
@@ -1754,6 +1809,8 @@ def get_chart_data_total_rows(
 ) -> int:
     """Get total number of rows for the chart data query"""
     warehouse = get_warehouse_client(org_warehouse)
+
+    validate_payload_columns(warehouse, payload)
 
     # Use the same query builder as chart data
     query_builder = build_chart_query(payload, org_warehouse)
