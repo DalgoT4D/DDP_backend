@@ -374,7 +374,6 @@ def list_available_layers(request, layer_type: str = "country"):
         return []
 
 
-
 @charts_router.post("/map-data-overlay/", response=dict)
 @has_permission(["can_view_charts"])
 def get_map_data_overlay(request, payload: MapDataOverlayPayload):
