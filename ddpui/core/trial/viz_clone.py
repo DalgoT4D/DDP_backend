@@ -34,7 +34,7 @@ from ddpui.models.visualization import Chart
 from ddpui.schemas.alert_schema import AlertCreate
 from ddpui.schemas.kpi_schema import KPICreate, KPIExtraConfig
 from ddpui.services.chart_service import ChartData, ChartService
-from ddpui.services.dashboard_service import DashboardService, FilterData
+from ddpui.services.dashboard_service import DashboardService, FilterData, remap_widget_images
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.viz_clone")
@@ -238,7 +238,7 @@ def _clone_dashboards(
             dashboard_type=d.dashboard_type,
             grid_columns=d.grid_columns,
             target_screen_size=d.target_screen_size,
-            tabs=_remap_dashboard_tabs(d.tabs, chart_map, kpi_map),
+            tabs=remap_widget_images(_remap_dashboard_tabs(d.tabs, chart_map, kpi_map), trial_org),
             filter_layout=d.filter_layout,
             is_published=d.is_published,
             is_public=is_public,

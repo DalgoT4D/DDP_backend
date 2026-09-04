@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any, Set, Union, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import json
+import os
 import time
 import uuid
 
@@ -42,6 +43,7 @@ from ddpui.core.charts.charts_service import (
 from ddpui.schemas.dashboard_schema import DashboardTabSchema
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
+from ddpui.utils.s3_utils import upload_file, delete_file, copy_file
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.schemas.dashboard_schema import DashboardUpdate, FilterUpdate
 
@@ -98,6 +100,27 @@ class FilterValidationError(DashboardServiceError):
 
     def __init__(self, message: str):
         super().__init__(message, "FILTER_VALIDATION_ERROR")
+
+
+class WidgetImageValidationError(DashboardServiceError):
+    """Raised when a widget image upload fails content-type/size validation"""
+
+    def __init__(self, message: str):
+        super().__init__(message, "WIDGET_IMAGE_VALIDATION_ERROR")
+
+
+class WidgetImagePermissionError(DashboardServiceError):
+    """Raised when an image_key doesn't belong to the caller's org"""
+
+    def __init__(self, message: str = "Image does not belong to this organization"):
+        super().__init__(message, "WIDGET_IMAGE_PERMISSION_DENIED")
+
+
+class WidgetImageStorageError(DashboardServiceError):
+    """Raised when an S3 upload/delete for a widget image fails"""
+
+    def __init__(self, message: str):
+        super().__init__(message, "WIDGET_IMAGE_STORAGE_ERROR")
 
 
 # =============================================================================
@@ -1148,3 +1171,123 @@ def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, 
 
     logger.info(f"Dashboard '{dashboard_title}' deleted by {orguser.user.email}")
     return True, ""
+
+
+# =============================================================================
+# Widget Images (dashboard text/image widgets)
+# =============================================================================
+
+ALLOWED_WIDGET_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+MAX_WIDGET_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+WIDGET_IMAGE_CONTENT_TYPE_TO_EXT = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/webp": "webp",
+}
+
+
+def _get_widget_image_bucket() -> str:
+    bucket = os.getenv("S3_IMAGES_BUCKET")
+    if not bucket:
+        raise WidgetImageStorageError("S3_IMAGES_BUCKET environment variable is not set")
+    return bucket
+
+
+def upload_widget_image(file_bytes: bytes, content_type: str, org: Org) -> Tuple[str, str]:
+    """Validate and upload a dashboard widget image to S3.
+
+    Unlike the org logo, this doesn't persist anywhere on a model — a
+    dashboard can hold many widget images, each embedded inline in that
+    dashboard's own JSON config — so this only returns (url, key) for the
+    caller to store there.
+    """
+    if content_type not in ALLOWED_WIDGET_IMAGE_CONTENT_TYPES:
+        raise WidgetImageValidationError(
+            f"Invalid file type: {content_type}. Allowed types: "
+            f"{', '.join(sorted(ALLOWED_WIDGET_IMAGE_CONTENT_TYPES))}"
+        )
+    if len(file_bytes) > MAX_WIDGET_IMAGE_SIZE_BYTES:
+        raise WidgetImageValidationError("File size exceeds the 5MB limit")
+
+    bucket = _get_widget_image_bucket()
+    ext = WIDGET_IMAGE_CONTENT_TYPE_TO_EXT[content_type]
+    # Keyed by org.pk, not org.slug — slug is nullable and not unique-enforced
+    # (plain slugify(org.name) with no collision check), so two orgs could share
+    # a slug and pass each other's ownership check in delete_widget_image below.
+    # pk is the DB-guaranteed-unique, immutable identifier this needs.
+    image_key = f"orgs/{org.pk}/dashboards/images/{uuid.uuid4()}.{ext}"
+    try:
+        image_url = upload_file(bucket, image_key, file_bytes, content_type)
+    except Exception as err:
+        logger.error(f"S3 upload failed for widget image, org {org.slug}: {err}")
+        raise WidgetImageStorageError("Failed to upload image to S3") from err
+
+    logger.info(f"Uploaded dashboard widget image for {org.slug} to s3://{bucket}/{image_key}")
+    return image_url, image_key
+
+
+def delete_widget_image(image_key: str, org: Org) -> None:
+    """Delete a dashboard widget image from S3.
+
+    Only deletes keys under this org's own prefix, so one org can't delete
+    another org's S3 objects by passing an arbitrary key. Keyed by org.pk (see
+    upload_widget_image) rather than slug, which isn't guaranteed unique.
+    """
+    expected_prefix = f"orgs/{org.pk}/dashboards/images/"
+    if not image_key.startswith(expected_prefix):
+        raise WidgetImagePermissionError()
+
+    bucket = _get_widget_image_bucket()
+    try:
+        delete_file(bucket, image_key)
+    except Exception as err:
+        logger.error(f"S3 delete failed for widget image {image_key}: {err}")
+        raise WidgetImageStorageError("Failed to delete image from S3") from err
+    logger.info(f"Deleted dashboard widget image s3://{bucket}/{image_key}")
+
+
+def copy_widget_image(image_key: str, dest_org: Org) -> Tuple[str, str]:
+    """Copy an existing widget image to a new key scoped to dest_org.
+
+    Used when a dashboard's tabs are duplicated onto a new Dashboard row (same-org
+    duplicate, or trial-org cloning). A naive deep-copy of tabs would leave the copy
+    pointing at the ORIGINAL image_key, so removing/replacing the image on either
+    dashboard would silently delete it out from under the other.
+    """
+    ext = image_key.rsplit(".", 1)[-1] if "." in image_key else "png"
+    new_image_key = f"orgs/{dest_org.pk}/dashboards/images/{uuid.uuid4()}.{ext}"
+    bucket = _get_widget_image_bucket()
+    try:
+        new_image_url = copy_file(bucket, image_key, new_image_key)
+    except Exception as err:
+        logger.error(f"S3 copy failed for widget image {image_key} -> {new_image_key}: {err}")
+        raise WidgetImageStorageError("Failed to copy image to S3") from err
+    return new_image_url, new_image_key
+
+
+def remap_widget_images(tabs: list, dest_org: Org) -> list:
+    """Deep-copy `tabs` and give every text/image widget's S3-hosted image its own
+    independent copy, scoped to dest_org, rewriting imageUrl/imageKey in place.
+
+    If a single image fails to copy (e.g. a transient S3 error), that one widget is
+    left pointing at the original image rather than failing the whole duplicate/clone —
+    the pre-existing shared-key behavior, not a new failure mode.
+    """
+    import copy as _copy
+
+    new_tabs = _copy.deepcopy(tabs) or []
+    for tab in new_tabs:
+        for component in (tab.get("components") or {}).values():
+            cfg = component.get("config") or {}
+            image_key = cfg.get("imageKey")
+            if not image_key:
+                continue
+            try:
+                new_url, new_key = copy_widget_image(image_key, dest_org)
+            except WidgetImageStorageError as err:
+                logger.warning(f"Skipping widget image copy for {image_key}: {err.message}")
+                continue
+            cfg["imageUrl"] = new_url
+            cfg["imageKey"] = new_key
+    return new_tabs
