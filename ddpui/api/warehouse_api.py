@@ -108,12 +108,12 @@ def get_column_values(request, schema_name: str, table_name: str, column_name: s
         query_builder.limit_rows(500)
 
         # Execute query
-        wclient = dbtautomation_service._get_wclient(org_warehouse)
+        wclient = WarehouseFactory.get_warehouse_client(org_warehouse)
         sql_stmt = query_builder.build()
         compiled_stmt = sql_stmt.compile(
             bind=wclient.engine, compile_kwargs={"literal_binds": True}
         )
-        results = wclient.run_query(str(compiled_stmt))
+        results = wclient.execute(compiled_stmt)
 
         if results and len(results) > 0:
             # Extract the column values from the query results, filter out empty strings
