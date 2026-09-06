@@ -258,6 +258,20 @@ class AdminNotificationSchema(Schema):
         )
 
 
+class AdminNotificationHistoryResponse(Schema):
+    """one page of sent broadcasts. The history grows by one row per broadcast and
+    is never pruned, so the route pages it rather than returning the whole table.
+
+    Field names mirror the user-facing notification history wire shape
+    (notifications_functions.fetch_user_notifications_v1) so both lists page the
+    same way on the frontend."""
+
+    res: List[AdminNotificationSchema]
+    page: int
+    total_pages: int
+    total_notifications: int
+
+
 class OrgDeletionImpactSchema(Schema):
     """
     what deleting an org would destroy. Drives the confirm dialog's warning.

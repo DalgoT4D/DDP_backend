@@ -1176,7 +1176,11 @@ def test_admin_notification_history_shows_audience_channels_and_recipient_count(
     platform_admin_request, org
 ):
     """history resolves target_org_ids to org names and reports audience,
-    channels, time, and recipient count only (plan.md §3.3, §4.3)"""
+    channels, time, and recipient count only (plan.md §3.3, §4.3)
+
+    The route is now paginated, so the rows live under .res -- the response went
+    from a bare List[AdminNotificationSchema] to a page object. Every assertion
+    below is unchanged; only the path to the rows moved."""
     created = post_admin_notification(
         platform_admin_request,
         AdminCreateNotificationSchema(
@@ -1185,9 +1189,98 @@ def test_admin_notification_history_shows_audience_channels_and_recipient_count(
     )
 
     history = get_admin_notifications(platform_admin_request)
-    entry = next(item for item in history if item.id == created.id)
+    entry = next(item for item in history.res if item.id == created.id)
 
     assert entry.target_org_names == [org.name]
     assert entry.send_email is False
     assert entry.recipient_count == 1
     assert entry.sent_time is not None
+
+
+def _send_broadcasts(platform_admin_request, org, count: int) -> None:
+    """Send `count` broadcasts to one org, oldest first. History is ordered by
+    -timestamp, so the LAST one sent is the first row on page 1."""
+    for index in range(count):
+        post_admin_notification(
+            platform_admin_request,
+            AdminCreateNotificationSchema(
+                message=f"broadcast-{index}",
+                email_subject="subject",
+                org_ids=[org.id],
+                send_email=False,
+            ),
+        )
+
+
+def test_admin_notification_history_paginates_by_default(platform_admin_request, org):
+    """the unpaginated list was unbounded -- it now returns one page, with the
+    server-side total so the client can render the page count"""
+    _send_broadcasts(platform_admin_request, org, 12)
+
+    history = get_admin_notifications(platform_admin_request)
+
+    assert len(history.res) == 10
+    assert history.page == 1
+    assert history.total_pages == 2
+    assert history.total_notifications == 12
+
+
+def test_admin_notification_history_honours_page_and_limit(platform_admin_request, org):
+    """page/limit select a slice; the total stays the full count, not the slice"""
+    _send_broadcasts(platform_admin_request, org, 12)
+
+    history = get_admin_notifications(platform_admin_request, page=2, limit=5)
+
+    assert len(history.res) == 5
+    assert history.page == 2
+    assert history.total_pages == 3
+    assert history.total_notifications == 12
+
+
+def test_admin_notification_history_pages_do_not_overlap(platform_admin_request, org):
+    """consecutive pages are disjoint and together cover every broadcast -- an
+    off-by-one in the slice would silently drop or repeat a row"""
+    _send_broadcasts(platform_admin_request, org, 12)
+
+    page_one = get_admin_notifications(platform_admin_request, page=1, limit=5)
+    page_two = get_admin_notifications(platform_admin_request, page=2, limit=5)
+    page_three = get_admin_notifications(platform_admin_request, page=3, limit=5)
+
+    ids_one = [item.id for item in page_one.res]
+    ids_two = [item.id for item in page_two.res]
+    ids_three = [item.id for item in page_three.res]
+
+    assert set(ids_one).isdisjoint(ids_two)
+    assert set(ids_two).isdisjoint(ids_three)
+    assert len(set(ids_one + ids_two + ids_three)) == 12
+
+
+def test_admin_notification_history_newest_first(platform_admin_request, org):
+    """page 1 opens on the most recent broadcast, not the oldest"""
+    _send_broadcasts(platform_admin_request, org, 12)
+
+    history = get_admin_notifications(platform_admin_request, page=1, limit=5)
+
+    assert history.res[0].message == "broadcast-11"
+
+
+def test_admin_notification_history_clamps_an_out_of_range_page(platform_admin_request, org):
+    """a page past the end clamps to the last page (Django get_page) rather than
+    500-ing -- reachable by a stale bookmark or a shrinking list"""
+    _send_broadcasts(platform_admin_request, org, 12)
+
+    history = get_admin_notifications(platform_admin_request, page=99, limit=5)
+
+    assert history.page == 3
+    assert len(history.res) == 2
+    assert history.total_notifications == 12
+
+
+def test_admin_notification_history_empty_is_one_page(platform_admin_request):
+    """no broadcasts yet: an empty page, not an error or a zero page count"""
+    history = get_admin_notifications(platform_admin_request)
+
+    assert history.res == []
+    assert history.page == 1
+    assert history.total_pages == 1
+    assert history.total_notifications == 0

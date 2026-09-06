@@ -191,7 +191,10 @@ def test_create_admin_notification_persists_audience_channels_and_server_author(
 
 def test_get_admin_notification_history_resolves_org_names_and_recipient_count():
     """history resolves target_org_ids to org names and reports the true
-    recipient count, regardless of which channels were chosen (plan.md §4.3)"""
+    recipient count, regardless of which channels were chosen (plan.md §4.3)
+
+    The service is now paged, so the rows live under .res. Both assertions below
+    are unchanged; only the path to the rows moved."""
     org = Org.objects.create(name="History Org", slug="history-org")
     OrgUser.objects.create(user=User.objects.create(username="h@x.org", email="h@x.org"), org=org)
 
@@ -200,8 +203,8 @@ def test_get_admin_notification_history_resolves_org_names_and_recipient_count()
         AdminCreateNotificationSchema(message="hist", email_subject="subject", org_ids=[org.id]),
     )
 
-    history = admin_service.get_admin_notification_history()
-    entry = next(item for item in history if item.id == notification.id)
+    history = admin_service.get_admin_notification_history(page=1, limit=10)
+    entry = next(item for item in history.res if item.id == notification.id)
 
     assert entry.target_org_names == ["History Org"]
     assert entry.recipient_count == 1

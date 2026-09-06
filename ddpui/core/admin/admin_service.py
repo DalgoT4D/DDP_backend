@@ -5,6 +5,8 @@ Handlers stay thin (parse -> call service -> respond); this module owns the ORM.
 
 from typing import List, Optional, Tuple
 
+from django.core.paginator import Paginator
+
 from ddpui.core.admin.exceptions import AdminOrgCreateError, AdminOrgDeleteError
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import (
@@ -25,6 +27,7 @@ from ddpui.schemas.admin_schema import (
     AdminFeatureFlagCatalogItem,
     AdminCreateNotificationSchema,
     AdminNotificationSchema,
+    AdminNotificationHistoryResponse,
     OrgDeletionImpactSchema,
 )
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
@@ -359,7 +362,24 @@ def notification_response(notification: Notification) -> AdminNotificationSchema
     return AdminNotificationSchema.from_model(notification, target_org_names, recipient_count)
 
 
-def get_admin_notification_history() -> List[AdminNotificationSchema]:
-    """Review sent broadcasts: audience, channels, time, recipient count only."""
+def get_admin_notification_history(page: int, limit: int) -> AdminNotificationHistoryResponse:
+    """Review sent broadcasts: audience, channels, time, recipient count only.
+
+    Paged with django's Paginator, the same way the user-facing notification
+    history is (notifications_functions.py) -- the unpaginated version grew
+    without bound, and notification_response costs two queries per row, so the
+    page size is what bounds the cost. get_page (not page) is deliberate: it
+    clamps an out-of-range page instead of raising, so a stale bookmark or a
+    list that shrank under the reader lands on the last page.
+    """
     notifications = Notification.objects.filter(sent_time__isnull=False).order_by("-timestamp")
-    return [notification_response(n) for n in notifications]
+
+    paginator = Paginator(notifications, limit)
+    paginated_notifications = paginator.get_page(page)
+
+    return AdminNotificationHistoryResponse(
+        res=[notification_response(n) for n in paginated_notifications],
+        page=paginated_notifications.number,
+        total_pages=paginated_notifications.paginator.num_pages,
+        total_notifications=paginated_notifications.paginator.count,
+    )

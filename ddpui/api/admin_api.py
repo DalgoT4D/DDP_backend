@@ -36,6 +36,7 @@ from ddpui.schemas.admin_schema import (
     AdminNotificationPreviewResponseSchema,
     AdminCreateNotificationSchema,
     AdminNotificationSchema,
+    AdminNotificationHistoryResponse,
 )
 from ddpui.core.admin import admin_service
 from ddpui.core.admin.exceptions import AdminOrgCreateError, AdminOrgDeleteError
@@ -328,6 +329,11 @@ def get_admin_flag_orgs(request, flag_name: str):
 # service functions (do NOT extend the broken/ungated /api/notifications/ HTTP
 # path -- research.md §3.3). Immediate send only: no scheduling, no cancel.
 
+# Rows per page of broadcast history. Matches DEFAULT_PAGE_SIZE in the frontend's
+# constants/notifications.ts, so the first page the table renders is the first page
+# the server builds -- a mismatch would make the client fetch 10 and paginate 20.
+ADMIN_NOTIFICATION_HISTORY_PAGE_SIZE = 10
+
 
 @admin_router.post("/notifications/preview", response=AdminNotificationPreviewResponseSchema)
 @platform_admin_required
@@ -352,9 +358,12 @@ def post_admin_notification(request, payload: AdminCreateNotificationSchema):
     return admin_service.notification_response(notification)
 
 
-@admin_router.get("/notifications", response=List[AdminNotificationSchema])
+@admin_router.get("/notifications", response=AdminNotificationHistoryResponse)
 @platform_admin_required
-def get_admin_notifications(request):
+def get_admin_notifications(
+    request, page: int = 1, limit: int = ADMIN_NOTIFICATION_HISTORY_PAGE_SIZE
+):
     """Review sent broadcasts: audience (resolved to org names), channels, time,
-    and recipient count only -- no read status, no recipient list."""
-    return admin_service.get_admin_notification_history()
+    and recipient count only -- no read status, no recipient list. Paged, because
+    the history only ever grows."""
+    return admin_service.get_admin_notification_history(page, limit)
