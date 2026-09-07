@@ -1247,14 +1247,23 @@ def delete_widget_image(image_key: str, org: Org) -> None:
     logger.info(f"Deleted dashboard widget image s3://{bucket}/{image_key}")
 
 
-def copy_widget_image(image_key: str, dest_org: Org) -> Tuple[str, str]:
+def copy_widget_image(image_key: str, source_org: Org, dest_org: Org) -> Tuple[str, str]:
     """Copy an existing widget image to a new key scoped to dest_org.
 
     Used when a dashboard's tabs are duplicated onto a new Dashboard row (same-org
     duplicate, or trial-org cloning). A naive deep-copy of tabs would leave the copy
     pointing at the ORIGINAL image_key, so removing/replacing the image on either
     dashboard would silently delete it out from under the other.
+
+    Requires image_key to actually live under source_org's own prefix — tabs is
+    arbitrary stored JSON, so without this check a crafted imageKey pointing at
+    another org's S3 path would get copied into dest_org, exposing that org's
+    private image.
     """
+    expected_prefix = f"orgs/{source_org.pk}/dashboards/images/"
+    if not image_key.startswith(expected_prefix):
+        raise WidgetImagePermissionError()
+
     ext = image_key.rsplit(".", 1)[-1] if "." in image_key else "png"
     new_image_key = f"orgs/{dest_org.pk}/dashboards/images/{uuid.uuid4()}.{ext}"
     bucket = _get_widget_image_bucket()
@@ -1266,13 +1275,15 @@ def copy_widget_image(image_key: str, dest_org: Org) -> Tuple[str, str]:
     return new_image_url, new_image_key
 
 
-def remap_widget_images(tabs: list, dest_org: Org) -> list:
+def remap_widget_images(tabs: list, source_org: Org, dest_org: Org) -> list:
     """Deep-copy `tabs` and give every text/image widget's S3-hosted image its own
     independent copy, scoped to dest_org, rewriting imageUrl/imageKey in place.
 
     If a single image fails to copy (e.g. a transient S3 error), that one widget is
     left pointing at the original image rather than failing the whole duplicate/clone —
-    the pre-existing shared-key behavior, not a new failure mode.
+    the pre-existing shared-key behavior, not a new failure mode. An image_key that
+    doesn't belong to source_org is a different case: it's a forged/foreign reference,
+    not something safe to retain, so it's stripped instead.
     """
     import copy as _copy
 
@@ -1284,7 +1295,12 @@ def remap_widget_images(tabs: list, dest_org: Org) -> list:
             if not image_key:
                 continue
             try:
-                new_url, new_key = copy_widget_image(image_key, dest_org)
+                new_url, new_key = copy_widget_image(image_key, source_org, dest_org)
+            except WidgetImagePermissionError:
+                logger.warning(f"Rejecting out-of-org widget image reference {image_key}")
+                cfg["imageUrl"] = None
+                cfg["imageKey"] = None
+                continue
             except WidgetImageStorageError as err:
                 logger.warning(f"Skipping widget image copy for {image_key}: {err.message}")
                 continue

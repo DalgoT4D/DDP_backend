@@ -40,6 +40,7 @@ from ddpui.services.dashboard_service import (
     WidgetImageStorageError,
     upload_widget_image,
     delete_widget_image,
+    copy_widget_image,
 )
 from ddpui.schemas.dashboard_schema import DashboardCreate, DashboardUpdate, DashboardTabSchema
 from ddpui.tests.api_tests.test_user_org_api import seed_db
@@ -830,3 +831,27 @@ class TestDeleteWidgetImage:
             delete_widget_image(image_key, org)
 
         mock_delete.assert_called_once_with("test-bucket", image_key)
+
+
+class TestCopyWidgetImage:
+    """Tests for copy_widget_image()"""
+
+    def test_copy_widget_image_wrong_source_org_prefix(self, org):
+        """An image_key outside source_org's own prefix must be rejected without
+        calling S3 — otherwise a dashboard's stored tabs JSON could carry a
+        crafted imageKey pointing at another org's S3 path, and duplicating/cloning
+        that dashboard would copy the foreign org's private image."""
+        other_org = Org.objects.create(
+            name="Another Org",
+            slug="other-org-copy",
+            airbyte_workspace_id="workspace-id-copy-test",
+        )
+        foreign_image_key = f"orgs/{other_org.pk}/dashboards/images/file.png"
+
+        try:
+            with patch("ddpui.services.dashboard_service.copy_file") as mock_copy:
+                with pytest.raises(WidgetImagePermissionError):
+                    copy_widget_image(foreign_image_key, org, org)
+                mock_copy.assert_not_called()
+        finally:
+            other_org.delete()

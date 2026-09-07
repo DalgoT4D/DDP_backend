@@ -120,6 +120,8 @@ def upload_dashboard_widget_image(request, file: UploadedFile = File(...)):
     the normal dashboard save flow.
     """
     orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
 
     try:
         image_url, image_key = upload_widget_image(
@@ -141,6 +143,8 @@ def delete_dashboard_widget_image(request, payload: WidgetImageDeleteRequest):
     """Delete a dashboard widget image from S3 (on explicit remove, or when
     replacing an image with a new upload)."""
     orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
 
     try:
         delete_widget_image(payload.image_key, orguser.org)
@@ -404,7 +408,7 @@ def duplicate_dashboard(request, dashboard_id: int):
         remapped_tabs = DashboardService.copy_tabs_with_filter_remapping(
             original_dashboard.tabs or [], filter_id_mapping
         )
-        new_dashboard.tabs = remap_widget_images(remapped_tabs, org)
+        new_dashboard.tabs = remap_widget_images(remapped_tabs, org, org)
         new_dashboard.save()
 
         logger.info(f"Duplicated dashboard {dashboard_id} as {new_dashboard.id} for org {org.id}")

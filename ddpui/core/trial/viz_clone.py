@@ -238,7 +238,9 @@ def _clone_dashboards(
             dashboard_type=d.dashboard_type,
             grid_columns=d.grid_columns,
             target_screen_size=d.target_screen_size,
-            tabs=remap_widget_images(_remap_dashboard_tabs(d.tabs, chart_map, kpi_map), trial_org),
+            tabs=remap_widget_images(
+                _remap_dashboard_tabs(d.tabs, chart_map, kpi_map), template_org, trial_org
+            ),
             filter_layout=d.filter_layout,
             is_published=d.is_published,
             is_public=is_public,
