@@ -4,10 +4,10 @@
     uv run python manage.py chat_with_data_eval --org test-ngo --seed
     uv run python manage.py chat_with_data_eval --org test-ngo --no-judge --run-name pre-merge-fix
 
-The golden items live in git (ddpui/core/ai/evals/golden_v1.jsonl) — the source
-of truth. --seed mirrors them into a Langfuse dataset so runs show side-by-side
-in the dataset UI; the run itself always reads the file, and links to the
-Langfuse items when the dataset exists. Real model calls: ~$1-2 per full run.
+Golden items come from a JSONL file (--file) or straight from a Langfuse
+dataset (--from-langfuse), so datasets curated in the Langfuse UI are runnable
+without an export step. --seed mirrors a file into a Langfuse dataset so runs
+show side-by-side in the dataset UI. Real model calls: ~$1-2 per full run.
 """
 
 import asyncio
@@ -32,6 +32,36 @@ def load_items(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
+def item_from_langfuse(ds_item) -> dict | None:
+    """One Langfuse dataset item → a golden dict, or None if unusable.
+
+    Accepts both shapes: items we seeded ({"question": ...} input with a
+    structured expected_output) and items created by hand in the Langfuse UI
+    (plain-string input/expectedOutput — the string becomes the judge's
+    answer_expectations, since there is no structured gold)."""
+    raw_input, expected = ds_item.input, ds_item.expected_output
+    if isinstance(raw_input, dict):
+        question = raw_input.get("question")
+    else:
+        question = str(raw_input or "").strip() or None
+    if not question:
+        return None
+
+    item = {"question": question}
+    if isinstance(expected, dict):
+        for key in ("expected_intent", "gold_sql", "expected_value", "answer_expectations"):
+            if expected.get(key):
+                item[key] = expected[key]
+    elif expected:
+        item["answer_expectations"] = str(expected)
+
+    meta = ds_item.metadata if isinstance(ds_item.metadata, dict) else {}
+    item["tags"] = meta.get("tags") or []
+    if meta.get("expected_tables"):
+        item["expected_tables"] = meta["expected_tables"]
+    return item
+
+
 class Command(BaseCommand):
     """Golden-set eval runner for Chat with Data."""
 
@@ -46,6 +76,11 @@ class Command(BaseCommand):
             help="Langfuse dataset to seed/link (one per golden file, e.g. golden-work-orders)",
         )
         parser.add_argument("--seed", action="store_true", help="mirror items into Langfuse")
+        parser.add_argument(
+            "--from-langfuse",
+            action="store_true",
+            help="load golden items from the Langfuse dataset (--dataset-name) instead of --file",
+        )
         parser.add_argument("--run-name", default=None, help="dataset run name")
         parser.add_argument(
             "--no-judge", action="store_true", help="skip the LLM faithfulness judge"
@@ -60,13 +95,27 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        items = load_items(Path(options["file"]))
+        client = get_langfuse()
+
+        if options["from_langfuse"]:
+            if options["seed"]:
+                raise CommandError("--seed and --from-langfuse are mutually exclusive")
+            if client is None:
+                raise CommandError("Langfuse is not configured (LANGFUSE_* keys)")
+            try:
+                dataset = client.get_dataset(options["dataset_name"])
+            except Exception as err:
+                raise CommandError(
+                    f"Langfuse dataset '{options['dataset_name']}' not found"
+                ) from err
+            items = [i for i in map(item_from_langfuse, dataset.items) if i]
+        else:
+            items = load_items(Path(options["file"]))
+
         if options["tag"]:
             items = [i for i in items if options["tag"] in (i.get("tags") or [])]
         if not items:
             raise CommandError("no golden items matched")
-
-        client = get_langfuse()
 
         if options["seed"]:
             self._seed(client, items, options["dataset_name"])
