@@ -30,11 +30,12 @@ from ddpui.core.ai.tools.registry import get_tools
 # Every middleware hook is its own graph node, so one model⇄tool cycle costs
 # ~12 steps with the current stack (7 before_model hooks incl. 5 PII rules +
 # model + 3 after_model + tools) — plus one more per org-defined PII rule.
-# 120 ≈ headroom for ~10 tool calls; a legitimate heavy turn uses ~9
-# (schemas → tables → details ×2 → profile ×2 → sql ×2 → chart). The real
-# runaway guard is sql_retry_limiter (3 failed queries), not this ceiling.
+# 160 ≈ headroom for ~13 tool calls; a legitimate heavy turn on a messy
+# warehouse uses ~12 (schemas → tables → details ×3 → profile ×2 → sql ×5
+# with retries — MAX_SQL_ATTEMPTS is 5). The real runaway guard is
+# sql_retry_limiter, not this ceiling.
 # If you add middleware, re-check test_realistic_discovery_turn_fits_in_the_recursion_limit.
-RECURSION_LIMIT = 120
+RECURSION_LIMIT = 160
 
 # Max tokens per model response; answers are short prose + small tables
 MODEL_MAX_TOKENS = 4096

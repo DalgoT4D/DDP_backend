@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from ddpui.core.ai.agent.chat_data_agent import build_agent
+from ddpui.core.ai.agent.middleware import MAX_SQL_ATTEMPTS
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.tests.core.ai.test_tools import FakeWarehouse
 
@@ -156,7 +157,7 @@ def test_retry_exhaustion_ends_with_deterministic_apology():
     final = result["messages"][-1]
     assert final.type == "ai"
     assert "rephrase" in final.content
-    assert model.calls == 3  # three attempts, then the limiter ended the run
+    assert model.calls == MAX_SQL_ATTEMPTS  # limiter ends the run at the cap
 
 
 def test_happy_path_runs_guarded_sql_and_answers():
