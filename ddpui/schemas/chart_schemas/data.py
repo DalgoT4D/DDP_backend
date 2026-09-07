@@ -1,8 +1,8 @@
 """Schemas for chart data fetch, transform, and preview endpoints."""
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-from ninja import Schema
+from ninja import Field, Schema
 
 from ddpui.schemas.chart_schemas.config import ChartMetric
 
@@ -54,6 +54,23 @@ class ChartDataResponse(Schema):
 
     data: dict
     echarts_config: dict
+
+
+class MapDataOverlayPayload(Schema):
+    """Schema for map data overlay requests (data layered onto a separately-fetched GeoJSON)."""
+
+    schema_name: str
+    table_name: str
+    geographic_column: str
+    value_column: Optional[str] = None  # Legacy simple-metric field; absent for calculated metrics
+    metrics: List[ChartMetric]
+    filters: Dict[str, Any] = Field(default_factory=dict)  # Drill-down filters (key-value pairs)
+    dashboard_filters: Optional[dict[str, Any]] = Field(
+        default_factory=dict
+    )  # Dashboard-level filters (dictionary of filter objects)
+    extra_config: Optional[Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # Additional configuration including chart-level filters, pagination, sorting, etc.
 
 
 class DataPreviewResponse(Schema):

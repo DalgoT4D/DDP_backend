@@ -78,6 +78,7 @@ class DashboardResponse(Schema):
     published_at: Optional[datetime] = None
     is_locked: bool = False
     locked_by: Optional[str] = None
+    is_favorite: bool = False
     created_by: Optional[str] = None  # creator's email; None if the creator was deleted
     org_id: int
     last_modified_by: Optional[str] = None

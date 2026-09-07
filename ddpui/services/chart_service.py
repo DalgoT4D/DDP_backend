@@ -4,9 +4,10 @@ This module encapsulates all chart-related business logic,
 separating it from the API layer for better testability and maintainability.
 """
 
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass
 
+from django.db import transaction
 from django.db.models import Q
 
 from ddpui.core.access.access_control import accessible_filter
@@ -16,6 +17,7 @@ from ddpui.models.visualization import Chart
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dashboard import Dashboard, DashboardComponentType
+from ddpui.services.favorite_service import FavoriteService
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.chart_service")
@@ -240,7 +242,9 @@ class ChartService:
             raise ChartPermissionError("Only the owner or an admin can delete this chart.")
 
         chart_title = chart.title
-        chart.delete()
+        with transaction.atomic():
+            chart.delete()
+            FavoriteService.remove_favorites_for_resource(ResourceType.CHART, chart_id)
 
         logger.info(f"Deleted chart '{chart_title}' (id={chart_id}) by {orguser.user.email}")
         return chart_title
@@ -284,8 +288,11 @@ class ChartService:
                 f"Charts not deletable by {orguser.user.email} (not owner or admin): {forbidden_ids}"
             )
 
+        deletable_ids = [chart.id for chart in deletable]
         deleted_titles = [chart.title for chart in deletable]
-        deleted_count = Chart.objects.filter(id__in=[chart.id for chart in deletable]).delete()[0]
+        with transaction.atomic():
+            deleted_count = Chart.objects.filter(id__in=deletable_ids).delete()[0]
+            FavoriteService.remove_favorites_for_resources(ResourceType.CHART, deletable_ids)
 
         logger.info(f"Bulk deleted {deleted_count} charts by {orguser.user.email}")
 
@@ -336,3 +343,21 @@ class ChartService:
                     break
 
         return dashboards_with_chart
+
+    @staticmethod
+    def favorite_chart(chart_id: int, org: Org, orguser: OrgUser) -> None:
+        ChartService.get_chart(chart_id, org)  # raises ChartNotFoundError if not in org
+        FavoriteService.add_favorite(ResourceType.CHART, chart_id, orguser)
+
+    @staticmethod
+    def unfavorite_chart(chart_id: int, org: Org, orguser: OrgUser) -> None:
+        ChartService.get_chart(chart_id, org)  # raises ChartNotFoundError if not in org
+        FavoriteService.remove_favorite(ResourceType.CHART, chart_id, orguser)
+
+    @staticmethod
+    def get_favorited_chart_ids(chart_ids: List[int], orguser: OrgUser) -> Set[int]:
+        return FavoriteService.get_favorited_ids(ResourceType.CHART, chart_ids, orguser)
+
+    @staticmethod
+    def is_chart_favorited(chart_id: int, orguser: OrgUser) -> bool:
+        return FavoriteService.is_favorited(ResourceType.CHART, chart_id, orguser)
