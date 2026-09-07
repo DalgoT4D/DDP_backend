@@ -91,10 +91,11 @@ def get_admin_orgs(request):
 @platform_admin_required
 @transaction.atomic
 def post_admin_org(request, payload: AdminCreateOrgSchema):
-    """Create an org + plan. No OrgUser is attached — the first admin is invited on the
-    Users tab."""
+    """Create an org + plan + its first admin. An org is never created without an owner:
+    payload.admin_email is required and is invited at ADMIN_ROLE through the same path
+    the Users tab uses, inside this transaction."""
     try:
-        org = admin_service.create_org(payload)
+        org = admin_service.create_org(payload, request.orguser)
     except AdminOrgCreateError as err:
         # @transaction.atomic rolls back the Org row; create_org already cleaned up any
         # Airbyte workspace on the failure path that provisioned one.

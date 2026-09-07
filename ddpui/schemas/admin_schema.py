@@ -75,12 +75,23 @@ class AdminOrgSchema(Schema):
 
 
 class AdminCreateOrgSchema(CreateOrgSchema):
-    """CreateOrgSchema with admin-friendly defaults, so the portal form only requires name"""
+    """CreateOrgSchema with admin-friendly defaults, so the portal form only requires
+    name and the org's first admin.
+
+    admin_email is required: an org must never be created without an owner, so the
+    payload cannot even express an ownerless org. There is deliberately NO role field
+    -- the first user is always invited at ADMIN_ROLE, resolved server-side, so a
+    caller cannot seed an org whose owner is an Analyst or Member.
+
+    Plain str rather than EmailStr, matching NewInvitationSchema.invited_email (the
+    same address goes on to that schema); invite_user_to_org lowercases and strips it.
+    """
 
     base_plan: str = OrgPlanType.FREE_TRIAL.value
     can_upgrade_plan: bool = True
     subscription_duration: str = "Monthly"
     superset_included: bool = False
+    admin_email: str
 
 
 class AdminUpdateOrgSchema(Schema):

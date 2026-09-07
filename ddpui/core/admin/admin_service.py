@@ -7,8 +7,10 @@ from typing import List, Optional, Tuple
 
 from django.core.paginator import Paginator
 
+from ddpui.auth import ADMIN_ROLE
 from ddpui.core.admin.exceptions import AdminOrgCreateError, AdminOrgDeleteError
 from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.role_based_access import Role
 from ddpui.models.org_user import (
     OrgUser,
     Invitation,
@@ -81,9 +83,62 @@ def org_user_count(org: Org) -> int:
 # --------------------------------------------------------------------------- #
 
 
-def create_org(payload: AdminCreateOrgSchema) -> Org:
-    """Create an org + its plan (AdminCreateOrgSchema IS-A CreateOrgSchema). Raises
-    AdminOrgCreateError on failure, for the API to map to 400."""
+def _delete_orphaned_workspace(org: Org, reason: str) -> None:
+    """Tear down the Airbyte workspace already provisioned for a half-created org.
+
+    The caller's @transaction.atomic rolls the Org/OrgPlans rows back, but the Airbyte
+    workspace is an external side effect the rollback cannot reach — without this it
+    survives as an orphan and blocks recreating the org under the same slug.
+    """
+    try:
+        airbyte_service.delete_workspace(org.airbyte_workspace_id)
+    except Exception:
+        logger.error(
+            f"failed to delete orphaned airbyte workspace {org.airbyte_workspace_id} "
+            f"for org {org.slug} after {reason}"
+        )
+
+
+def _invite_first_admin(org: Org, inviter: OrgUser, admin_email: str) -> Optional[str]:
+    """Invite the org's first admin through the same path the Users tab uses.
+
+    The role is resolved here, never taken from the caller: the first user of an org is
+    always an admin. Returns an error string (None on success) so the caller can treat
+    it exactly like create_org_plan's failure.
+    """
+    admin_role = Role.objects.filter(slug=ADMIN_ROLE).first()
+    if admin_role is None:
+        return f"role '{ADMIN_ROLE}' is missing — run 'manage.py loaddata seed/*.json'"
+
+    payload = NewInvitationSchema(invited_email=admin_email, invited_role_uuid=admin_role.uuid)
+    try:
+        _, error = orguserfunctions.invite_user_to_org(
+            org, inviter, payload, is_platform_admin=True
+        )
+    except Exception as err:
+        # awsses.send_text_message has no try/except, so an SES outage RAISES out of
+        # invite_user_to_org instead of returning an error. Left uncaught it would be a
+        # 500 and would leak the Airbyte workspace, so it is treated as any other
+        # invite failure.
+        logger.error(f"failed to invite {admin_email} as first admin of {org.slug}: {err}")
+        return "could not invite the organization admin"
+
+    return error
+
+
+def create_org(payload: AdminCreateOrgSchema, inviter: OrgUser) -> Org:
+    """Create an org + its plan + its first admin (AdminCreateOrgSchema IS-A
+    CreateOrgSchema). Raises AdminOrgCreateError on failure, for the API to map to 400.
+
+    An org is never created without an owner: the admin invite runs inside the caller's
+    @transaction.atomic, so if it fails the Org and OrgPlans rows roll back with it and
+    the Airbyte workspace is explicitly torn down.
+    """
+    admin_email = payload.admin_email.strip()
+    if not admin_email:
+        # checked before create_organization so a missing owner costs no Airbyte call
+        raise AdminOrgCreateError("an organization admin email is required")
+
     org, error = orgfunctions.create_organization(payload)
     if error:
         # create_organization already deleted the org on Airbyte failure; nothing persists.
@@ -91,20 +146,15 @@ def create_org(payload: AdminCreateOrgSchema) -> Org:
 
     _, plan_error = orgfunctions.create_org_plan(payload, org)
     if plan_error:
-        # the Org DB row persists at this point but the Airbyte workspace it already
-        # provisioned is not transactional — delete both explicitly rather than leaving
-        # an orphaned workspace behind when the caller's @transaction.atomic rolls the
-        # Org row back.
-        try:
-            airbyte_service.delete_workspace(org.airbyte_workspace_id)
-        except Exception:
-            logger.error(
-                f"failed to delete orphaned airbyte workspace {org.airbyte_workspace_id} "
-                f"for org {org.slug} after plan creation failure"
-            )
+        _delete_orphaned_workspace(org, "plan creation failure")
         raise AdminOrgCreateError(plan_error)
 
-    logger.info(f"admin created new org {org.name}")
+    invite_error = _invite_first_admin(org, inviter, admin_email)
+    if invite_error:
+        _delete_orphaned_workspace(org, "admin invite failure")
+        raise AdminOrgCreateError(invite_error)
+
+    logger.info(f"admin created new org {org.name} with admin {admin_email}")
     return org
 
 

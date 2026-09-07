@@ -15,6 +15,7 @@ import django
 import pytest
 from ninja.errors import HttpError
 from ninja.constants import NOT_SET
+from pydantic import ValidationError
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -79,6 +80,7 @@ from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.auth import (
     ACCOUNT_MANAGER_ROLE,
+    ADMIN_ROLE,
     SUPER_ADMIN_ROLE,
     ANALYST_ROLE,
     GUEST_ROLE,
@@ -229,12 +231,21 @@ def test_admin_list_orgs(platform_admin_request):
     assert "Beta Org" in by_name
 
 
+# ---------------------------------------------------------------------------- #
+# Org creation. An org must never be created without an admin: the create route
+# takes a required admin_email and invites that person through the SAME path the
+# Users tab uses, inside the same transaction. A failure at either step leaves
+# nothing behind.
+# ---------------------------------------------------------------------------- #
+
+
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 @patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
 @patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
 def test_admin_create_org_happy_path(mock_setup_airbyte, mock_connectors, platform_admin_request):
     """create org: Org + OrgPlans created; Airbyte workspace provisioned once"""
     mock_setup_airbyte.return_value = Mock(workspaceId="ws-abc")
-    payload = AdminCreateOrgSchema(name="Bhumi")
+    payload = AdminCreateOrgSchema(name="Bhumi", admin_email="owner@bhumi.org")
 
     response = post_admin_org(platform_admin_request, payload)
 
@@ -246,11 +257,93 @@ def test_admin_create_org_happy_path(mock_setup_airbyte, mock_connectors, platfo
     mock_setup_airbyte.assert_called_once()
 
 
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
+@patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
+def test_admin_create_org_invites_the_admin(
+    mock_setup_airbyte, mock_connectors, platform_admin_request
+):
+    """the org is created WITH a pending admin invitation, scoped to the new org"""
+    mock_setup_airbyte.return_value = Mock(workspaceId="ws-abc")
+
+    created = post_admin_org(
+        platform_admin_request, AdminCreateOrgSchema(name="Bhumi", admin_email="owner@bhumi.org")
+    )
+
+    invitation = Invitation.objects.get(invited_email="owner@bhumi.org")
+    assert invitation.invited_in_org_id == created.id
+    assert invitation.invited_new_role.slug == ADMIN_ROLE
+
+
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
+@patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
+def test_admin_create_org_always_invites_at_admin_role(
+    mock_setup_airbyte, mock_connectors, platform_admin_request
+):
+    """the first user's role is resolved server-side and is never client-supplied --
+    AdminCreateOrgSchema has no role field at all, so a caller cannot seed an org
+    whose owner is an Analyst or Member"""
+    mock_setup_airbyte.return_value = Mock(workspaceId="ws-abc")
+
+    assert "invited_role_uuid" not in AdminCreateOrgSchema.model_fields
+    assert "admin_role" not in AdminCreateOrgSchema.model_fields
+
+    post_admin_org(
+        platform_admin_request, AdminCreateOrgSchema(name="Bhumi", admin_email="owner@bhumi.org")
+    )
+
+    invitation = Invitation.objects.get(invited_email="owner@bhumi.org")
+    assert invitation.invited_new_role.level == _role(ADMIN_ROLE).level
+
+
+@patch("ddpui.utils.awsses.send_youve_been_added_email", Mock())
+@patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
+@patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
+def test_admin_create_org_adds_an_existing_dalgo_user_directly(
+    mock_setup_airbyte, mock_connectors, platform_admin_request
+):
+    """if the admin already has a platform account there is no invite to accept --
+    they become a real OrgUser at admin role the moment the org exists"""
+    mock_setup_airbyte.return_value = Mock(workspaceId="ws-abc")
+    User.objects.create(username="veteran@dalgo.org", email="veteran@dalgo.org")
+
+    created = post_admin_org(
+        platform_admin_request,
+        AdminCreateOrgSchema(name="Bhumi", admin_email="veteran@dalgo.org"),
+    )
+
+    orguser = OrgUser.objects.get(org_id=created.id, user__email="veteran@dalgo.org")
+    assert orguser.new_role.slug == ADMIN_ROLE
+    assert not Invitation.objects.filter(invited_email="veteran@dalgo.org").exists()
+
+
+def test_admin_create_org_requires_an_admin_email():
+    """admin_email is required by the schema -- an org cannot even be requested
+    without naming its owner"""
+    with pytest.raises(ValidationError):
+        AdminCreateOrgSchema(name="Ownerless")
+
+
+@patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
+def test_admin_create_org_rejects_a_blank_admin_email(mock_setup_airbyte, platform_admin_request):
+    """whitespace is not an owner -- rejected before Airbyte is ever called"""
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_org(
+            platform_admin_request, AdminCreateOrgSchema(name="Blank", admin_email="   ")
+        )
+
+    assert excinfo.value.status_code == 400
+    assert Org.objects.filter(name="Blank").count() == 0
+    mock_setup_airbyte.assert_not_called()
+
+
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 @patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
 def test_admin_create_org_rolls_back_on_airbyte_failure(mock_setup_airbyte, platform_admin_request):
     """a failed Airbyte call leaves ZERO trace — no orphaned Org or OrgPlans row"""
     mock_setup_airbyte.side_effect = Exception("airbyte is down")
-    payload = AdminCreateOrgSchema(name="Bhumi")
+    payload = AdminCreateOrgSchema(name="Bhumi", admin_email="owner@bhumi.org")
 
     with pytest.raises(HttpError) as excinfo:
         post_admin_org(platform_admin_request, payload)
@@ -258,6 +351,7 @@ def test_admin_create_org_rolls_back_on_airbyte_failure(mock_setup_airbyte, plat
     assert excinfo.value.status_code == 400
     assert Org.objects.filter(name="Bhumi").count() == 0
     assert OrgPlans.objects.filter(org__name="Bhumi").count() == 0
+    assert Invitation.objects.filter(invited_email="owner@bhumi.org").count() == 0
 
 
 @patch("ddpui.core.admin.admin_service.airbyte_service.delete_workspace")
@@ -281,12 +375,79 @@ def test_admin_create_org_rolls_back_when_plan_creation_fails(
     mock_create_plan.return_value = (None, "could not create plan")
 
     with pytest.raises(HttpError) as excinfo:
-        post_admin_org(platform_admin_request, AdminCreateOrgSchema(name="Halfway"))
+        post_admin_org(
+            platform_admin_request,
+            AdminCreateOrgSchema(name="Halfway", admin_email="owner@halfway.org"),
+        )
 
     assert excinfo.value.status_code == 400
     assert Org.objects.filter(name="Halfway").count() == 0  # rolled back, no orphan
     assert OrgPlans.objects.filter(org__name="Halfway").count() == 0
     mock_delete_workspace.assert_called_once()  # orphaned Airbyte workspace cleaned up
+
+
+@patch("ddpui.core.admin.admin_service.airbyte_service.delete_workspace")
+@patch("ddpui.core.admin.admin_service.orguserfunctions.invite_user_to_org")
+@patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
+@patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
+def test_admin_create_org_rolls_back_when_the_invite_is_rejected(
+    mock_setup_airbyte,
+    mock_connectors,
+    mock_invite,
+    mock_delete_workspace,
+    platform_admin_request,
+):
+    """
+    The whole point of the change: if the admin cannot be invited, the org must not
+    exist. Same treatment as the plan-failure path -- DB rows roll back and the
+    already-provisioned Airbyte workspace is explicitly deleted.
+    """
+    mock_setup_airbyte.return_value = Mock(workspaceId="ws-abc")
+    mock_invite.return_value = (None, "user already has an account")
+
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_org(
+            platform_admin_request,
+            AdminCreateOrgSchema(name="Ownerless", admin_email="taken@bhumi.org"),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert "user already has an account" in str(excinfo.value)
+    assert Org.objects.filter(name="Ownerless").count() == 0
+    assert OrgPlans.objects.filter(org__name="Ownerless").count() == 0
+    mock_delete_workspace.assert_called_once()
+
+
+@patch("ddpui.core.admin.admin_service.airbyte_service.delete_workspace")
+@patch("ddpui.utils.awsses.send_invite_user_email")
+@patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
+@patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
+def test_admin_create_org_rolls_back_when_the_invite_email_fails(
+    mock_setup_airbyte,
+    mock_connectors,
+    mock_send_email,
+    mock_delete_workspace,
+    platform_admin_request,
+):
+    """
+    awsses.send_text_message has no try/except, so an SES outage RAISES out of
+    invite_user_to_org rather than returning an error string. Without handling that
+    the caller gets a 500 and the Airbyte workspace leaks -- so it must be caught and
+    treated like any other invite failure.
+    """
+    mock_setup_airbyte.return_value = Mock(workspaceId="ws-abc")
+    mock_send_email.side_effect = Exception("SES is down")
+
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_org(
+            platform_admin_request,
+            AdminCreateOrgSchema(name="Nomail", admin_email="owner@nomail.org"),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert Org.objects.filter(name="Nomail").count() == 0
+    assert Invitation.objects.filter(invited_email="owner@nomail.org").count() == 0
+    mock_delete_workspace.assert_called_once()
 
 
 def test_admin_org_detail_404(platform_admin_request):
@@ -722,7 +883,8 @@ def test_week1_full_admin_lifecycle_flow(
     """
     The whole Week-1 super-admin story end to end, on real DB state:
 
-      1. admin creates an org via the portal (ZERO members)
+      1. admin creates an org via the portal — never ownerless: the org arrives with
+         a pending admin invitation, and no OrgUser until that admin accepts
       2. admin invites a user by email + role (email sending mocked)
       3. the user accepts — becomes an OrgUser of the target org at the right role
       4. admin changes the user's role
@@ -735,10 +897,18 @@ def test_week1_full_admin_lifecycle_flow(
 
     # -- Step 1: create an org via the admin portal --------------------------------
     mock_setup_airbyte.return_value = Mock(workspaceId="ws-akshara")
-    created = post_admin_org(admin_request, AdminCreateOrgSchema(name="Akshara"))
-    assert created.user_count == 0  # a freshly created org has ZERO members
+    created = post_admin_org(
+        admin_request, AdminCreateOrgSchema(name="Akshara", admin_email="owner@akshara.org")
+    )
     org1 = Org.objects.get(id=created.id)
+    # the org is never ownerless: its admin is invited in the same transaction. The
+    # invitee has no platform account yet, so there is a pending Invitation and no
+    # OrgUser until they accept (user_count counts members, not invitations).
+    assert created.user_count == 0
     assert OrgUser.objects.filter(org=org1).count() == 0
+    admin_invite = Invitation.objects.get(invited_email="owner@akshara.org")
+    assert admin_invite.invited_in_org_id == org1.id
+    assert admin_invite.invited_new_role.slug == ADMIN_ROLE
 
     # -- Step 2: invite a user (email sending mocked at the decorator level) --------
     post_admin_org_user_invite(
