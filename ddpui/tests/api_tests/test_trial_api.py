@@ -52,7 +52,7 @@ def seed_template_org(monkeypatch):
 
 
 class TestTrialSignup:
-    @patch("ddpui.api.trial_api.send_trial_verification_email")
+    @patch("ddpui.api.trial_api.send_verification")
     @patch("ddpui.api.trial_api.create_activation_token")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     def test_valid_new_email(
@@ -73,7 +73,7 @@ class TestTrialSignup:
         assert args[0] == "a@b.org"
         assert "tok123" in args[1]
 
-    @patch("ddpui.api.trial_api.send_trial_verification_email")
+    @patch("ddpui.api.trial_api.send_verification")
     @patch("ddpui.api.trial_api.create_activation_token")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     def test_existing_account_returns_409(self, mock_exists, mock_create_token, mock_send_email):
@@ -94,7 +94,7 @@ class TestTrialSignup:
 
         assert exc.value.status_code == 400
 
-    @patch("ddpui.api.trial_api.send_trial_verification_email")
+    @patch("ddpui.api.trial_api.send_verification")
     @patch("ddpui.api.trial_api.create_activation_token")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     def test_signup_opens_the_durable_record(
@@ -116,7 +116,7 @@ class TestTrialSignup:
         assert record.deleted_at is None
 
     @patch("ddpui.api.trial_api.record_signup")
-    @patch("ddpui.api.trial_api.send_trial_verification_email")
+    @patch("ddpui.api.trial_api.send_verification")
     @patch("ddpui.api.trial_api.create_activation_token")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     def test_signup_survives_a_record_failure(
@@ -133,7 +133,7 @@ class TestTrialSignup:
         assert result == {"status": "verification_sent"}
         mock_send_email.assert_called_once()
 
-    @patch("ddpui.api.trial_api.send_trial_verification_email")
+    @patch("ddpui.api.trial_api.send_verification")
     @patch("ddpui.api.trial_api.create_activation_token")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     def test_invalid_email_writes_no_record(self, mock_exists, mock_create_token, mock_send_email):
@@ -145,7 +145,7 @@ class TestTrialSignup:
 
         assert TrialSignup.objects.count() == 0
 
-    @patch("ddpui.api.trial_api.send_trial_verification_email")
+    @patch("ddpui.api.trial_api.send_verification")
     @patch("ddpui.api.trial_api.create_activation_token")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     def test_missing_frontend_url_returns_500(
@@ -163,7 +163,7 @@ class TestTrialSignup:
         mock_create_token.assert_not_called()
         mock_send_email.assert_not_called()
 
-    @patch("ddpui.api.trial_api.send_trial_verification_email")
+    @patch("ddpui.api.trial_api.send_verification")
     @patch("ddpui.api.trial_api.create_activation_token")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     def test_missing_template_org_returns_500(

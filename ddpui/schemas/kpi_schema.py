@@ -70,6 +70,8 @@ class KPIResponse(Schema):
     created_by: Optional[str]  # creator's email; None if the creator was deleted
     created_at: datetime
     updated_at: datetime
+    access_level: Optional[str] = None  # "view" | "edit"
+    is_private: bool = False
 
 
 class KPIListResponse(Schema):

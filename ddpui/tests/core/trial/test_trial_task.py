@@ -176,12 +176,12 @@ def _run_with_org(org_name="Trial a1b2c3d4 Acme", slug="trial-a1b2c3d4-acme"):
     return run
 
 
-@patch("ddpui.core.trial.tasks.awsses")
+@patch("ddpui.core.trial.tasks.biz_dev_notifications")
 @patch("ddpui.core.trial.tasks.OrgPlans")
 @patch("ddpui.core.trial.tasks.TaskProgress")
 @patch("ddpui.core.trial.tasks.clone_template_org")
 def test_clone_task_notifies_biz_dev_on_success(
-    mock_clone, mock_taskprogress_cls, mock_orgplans, mock_awsses
+    mock_clone, mock_taskprogress_cls, mock_orgplans, mock_biz_dev
 ):
     """A finished clone means an org now exists — biz-dev is told, with the signup's details."""
     from types import SimpleNamespace
@@ -195,7 +195,7 @@ def test_clone_task_notifies_biz_dev_on_success(
 
     clone_trial_org_task("task-notify", 5, "a@b.org", "Acme", "monitoring_evaluation")
 
-    subject, body = mock_awsses.send_biz_dev_notification.call_args[0]
+    subject, body = mock_biz_dev.send_notification.call_args[0]
     assert subject == "New org created: Trial a1b2c3d4 Acme"
     assert "A new org has been created." in body
     assert "  Slug:         trial-a1b2c3d4-acme\n" in body
@@ -206,12 +206,12 @@ def test_clone_task_notifies_biz_dev_on_success(
     assert "  Dalgo role:   Account Manager\n" in body
 
 
-@patch("ddpui.core.trial.tasks.awsses")
+@patch("ddpui.core.trial.tasks.biz_dev_notifications")
 @patch("ddpui.core.trial.tasks.OrgPlans")
 @patch("ddpui.core.trial.tasks.TaskProgress")
 @patch("ddpui.core.trial.tasks.clone_template_org")
 def test_clone_task_survives_a_failing_biz_dev_notification(
-    mock_clone, mock_taskprogress_cls, mock_orgplans, mock_awsses
+    mock_clone, mock_taskprogress_cls, mock_orgplans, mock_biz_dev
 ):
     """The clone is already done — a mail problem must not turn it into a failed task."""
     from ddpui.core.trial.tasks import clone_trial_org_task
@@ -225,14 +225,14 @@ def test_clone_task_survives_a_failing_biz_dev_notification(
 
     # still reported as completed, and nothing raised
     assert any(c.args[0].get("status") == "completed" for c in mock_progress.add.call_args_list)
-    mock_awsses.send_biz_dev_notification.assert_not_called()
+    mock_biz_dev.send_notification.assert_not_called()
 
 
-@patch("ddpui.core.trial.tasks.awsses")
+@patch("ddpui.core.trial.tasks.biz_dev_notifications")
 @patch("ddpui.core.trial.tasks.TaskProgress")
 @patch("ddpui.core.trial.tasks.clone_template_org")
 def test_clone_task_does_not_notify_biz_dev_on_failure(
-    mock_clone, mock_taskprogress_cls, mock_awsses
+    mock_clone, mock_taskprogress_cls, mock_biz_dev
 ):
     """A failed clone is torn down — there is no org to announce."""
     from ddpui.core.trial.tasks import clone_trial_org_task
@@ -242,4 +242,4 @@ def test_clone_task_does_not_notify_biz_dev_on_failure(
 
     clone_trial_org_task("task-nomail", 5, "a@b.org", "Acme", "monitoring_evaluation")
 
-    mock_awsses.send_biz_dev_notification.assert_not_called()
+    mock_biz_dev.send_notification.assert_not_called()

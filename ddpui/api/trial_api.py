@@ -32,7 +32,7 @@ from ddpui.schemas.trial_schema import (
     TrialSignupSchema,
     TrialValidatePasswordSchema,
 )
-from ddpui.utils.awsses import send_trial_verification_email
+from ddpui.core.notifications.triggers.trial import send_verification
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.taskprogress import TaskProgress
@@ -82,7 +82,7 @@ def trial_signup(request, payload: TrialSignupSchema):  # pylint: disable=unused
         ActivationTokenData(email=payload.email, org_name=payload.org_name, role=payload.role)
     )
     verify_url = f"{settings.FRONTEND_URL_V2}/free-trial/activate?token={token}"
-    send_trial_verification_email(payload.email, verify_url)
+    send_verification(payload.email, verify_url)
 
     return {"status": "verification_sent"}
 

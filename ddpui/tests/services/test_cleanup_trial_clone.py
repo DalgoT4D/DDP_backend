@@ -391,7 +391,7 @@ def test_expired_deletion_is_registered_as_an_hourly_beat_task():
     assert schedule != crontab(minute=0, hour=0)
 
 
-@patch("ddpui.management.commands.cleanup_trial_clone.awsses.send_trial_ops_alert")
+@patch("ddpui.management.commands.cleanup_trial_clone.trial_notifications.send_ops_alert")
 @patch("ddpui.management.commands.cleanup_trial_clone.time.sleep")
 @patch("ddpui.management.commands.cleanup_trial_clone.drop_trial_database")
 @patch("ddpui.management.commands.cleanup_trial_clone.delete_trial_org")
@@ -414,7 +414,7 @@ def test_expired_alerts_once_per_sweep_listing_every_failure(
     assert f"trial-{email_hash8('second@x.org')}-acme" in body
 
 
-@patch("ddpui.management.commands.cleanup_trial_clone.awsses.send_trial_ops_alert")
+@patch("ddpui.management.commands.cleanup_trial_clone.trial_notifications.send_ops_alert")
 @patch("ddpui.management.commands.cleanup_trial_clone.drop_trial_database")
 @patch("ddpui.management.commands.cleanup_trial_clone.delete_trial_org")
 def test_expired_stays_silent_when_every_teardown_works(mock_delete_org, mock_drop, mock_alert):

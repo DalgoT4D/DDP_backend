@@ -9,7 +9,8 @@ class UserPreferences(models.Model):
     orguser = models.OneToOneField(OrgUser, on_delete=models.CASCADE, related_name="preferences")
     enable_discord_notifications = models.BooleanField(default=False)  # deprecated
     discord_webhook = models.URLField(blank=True, null=True)  # deprecated
-    enable_email_notifications = models.BooleanField(default=False)
+    enable_email_notifications = models.BooleanField(default=True)
+    enable_schema_change_notifications = models.BooleanField(default=True)
     disclaimer_shown = models.BooleanField(default=False)
     last_visited_transform_tab = models.CharField(
         max_length=10,
@@ -41,6 +42,7 @@ class UserPreferences(models.Model):
         """Return a dict representation of the model"""
         return {
             "enable_email_notifications": self.enable_email_notifications,
+            "enable_schema_change_notifications": self.enable_schema_change_notifications,
             "disclaimer_shown": self.disclaimer_shown,
             "last_visited_transform_tab": self.last_visited_transform_tab,
             "trial_walkthrough": self.trial_walkthrough,

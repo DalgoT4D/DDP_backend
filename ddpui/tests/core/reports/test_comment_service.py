@@ -603,7 +603,7 @@ class TestCreateComment:
 class TestListComments:
     """Integration tests for CommentService.list_comments"""
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_returns_comments_with_is_new(
         self, mock_send, snapshot, author_orguser, other_orguser, org
     ):

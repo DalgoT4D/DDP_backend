@@ -6,8 +6,10 @@ Tests:
 """
 
 import os
+import json
 import django
 import pytest
+from unittest.mock import patch, MagicMock
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -15,12 +17,13 @@ django.setup()
 
 from django.contrib.auth.models import User
 from django.test import RequestFactory
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard
+from ddpui.models.visualization import Chart
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.api.public_api import get_public_dashboard
+from ddpui.api.public_api import get_public_dashboard, get_public_map_data_overlay
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
@@ -28,9 +31,14 @@ pytestmark = pytest.mark.django_db
 rf = RequestFactory()
 
 
-def _make_public_request():
+def _make_public_request(body=None):
     """A public endpoint request — no auth, but the handler reads IP / user agent"""
-    request = rf.get("/api/v1/public/dashboards/")
+    if body:
+        request = rf.post(
+            "/api/v1/public/dashboards/", data=json.dumps(body), content_type="application/json"
+        )
+    else:
+        request = rf.get("/api/v1/public/dashboards/")
     request.META["REMOTE_ADDR"] = "127.0.0.1"
     request.META["HTTP_USER_AGENT"] = "TestAgent"
     return request
@@ -148,3 +156,168 @@ class TestGetPublicDashboard:
 
         assert status == 404
         assert response.is_valid is False
+
+
+@pytest.fixture
+def map_chart(orguser, org):
+    chart = Chart.objects.create(
+        title="Public Map Chart",
+        chart_type="map",
+        schema_name="public",
+        table_name="orders",
+        extra_config={
+            "geographic_column": "region",
+            "value_column": "amount",
+            "aggregate_function": "sum",
+        },
+        created_by=orguser,
+        org=org,
+    )
+    yield chart
+    try:
+        chart.refresh_from_db()
+        chart.delete()
+    except Chart.DoesNotExist:
+        pass
+
+
+@pytest.fixture
+def org_warehouse(org):
+    warehouse = OrgWarehouse.objects.create(wtype="postgres", credentials="{}", org=org)
+    yield warehouse
+    warehouse.delete()
+
+
+class TestGetPublicMapDataOverlay:
+    """Tests for get_public_map_data_overlay endpoint"""
+
+    def test_dashboard_not_found(self, seed_db):
+        request = _make_public_request(body={"geographic_column": "region"})
+        status, response = get_public_map_data_overlay(request, "bad-token", chart_id=1)
+
+        assert status == 404
+        assert response.is_valid is False
+
+    def test_chart_not_map_type_returns_404(self, public_dashboard, org, orguser, seed_db):
+        """A chart_id belonging to a non-map chart is rejected."""
+        bar_chart = Chart.objects.create(
+            title="Bar Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="orders",
+            extra_config={},
+            created_by=orguser,
+            org=org,
+        )
+        request = _make_public_request(body={})
+
+        status, response = get_public_map_data_overlay(
+            request, public_dashboard.public_share_token, chart_id=bar_chart.id
+        )
+
+        assert status == 404
+        assert response.is_valid is False
+
+    def test_success_overwrites_schema_and_table_from_chart(
+        self, public_dashboard, map_chart, org_warehouse, seed_db
+    ):
+        """schema_name/table_name/geographic_column/value_column in the request
+        body are all ignored — the chart's own saved config always wins, so a
+        caller can't read an arbitrary column via this endpoint."""
+        request = _make_public_request(
+            body={
+                "schema_name": "someone_elses_schema",
+                "table_name": "someone_elses_table",
+                "geographic_column": "someone_elses_column",
+                "value_column": "someone_elses_secret_column",
+                "aggregate_function": "sum",
+            }
+        )
+
+        with patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ) as mock_get_client, patch(
+            "ddpui.api.public_api.charts_service.execute_map_data_overlay"
+        ) as mock_execute:
+            mock_get_client.return_value = MagicMock()
+            mock_execute.return_value = {"data": [{"name": "Karnataka", "value": 5.0}], "count": 1}
+            response = get_public_map_data_overlay(
+                request, public_dashboard.public_share_token, chart_id=map_chart.id
+            )
+
+        assert response.get("is_valid") is True
+        sent_map_payload = mock_execute.call_args[0][0]
+        assert sent_map_payload.schema_name == "public"
+        assert sent_map_payload.table_name == "orders"
+        assert sent_map_payload.geographic_column == "region"
+        assert sent_map_payload.value_column == "amount"
+        assert sent_map_payload.metrics[0].column == "amount"
+        assert sent_map_payload.metrics[0].aggregation == "sum"
+
+    def test_dashboard_filters_resolved_and_passed(
+        self, public_dashboard, map_chart, org_warehouse, seed_db
+    ):
+        request = _make_public_request(
+            body={
+                "geographic_column": "region",
+                "value_column": "amount",
+                "aggregate_function": "sum",
+                "dashboard_filters": {"5": "2025-01-15"},
+            }
+        )
+
+        with patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ) as mock_get_client, patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.execute_map_data_overlay"
+        ) as mock_execute:
+            mock_get_client.return_value = MagicMock()
+            mock_resolve.return_value = [{"filter_id": "5", "value": "2025-01-15"}]
+            mock_execute.return_value = {"data": [], "count": 0}
+            get_public_map_data_overlay(
+                request, public_dashboard.public_share_token, chart_id=map_chart.id
+            )
+
+        mock_resolve.assert_called_once()
+        resolved_filters_arg = mock_execute.call_args[0][3]
+        assert resolved_filters_arg == [{"filter_id": "5", "value": "2025-01-15"}]
+
+    def test_count_only_chart_does_not_crash(
+        self, public_dashboard, orguser, org, org_warehouse, seed_db
+    ):
+        """A count-only map chart has value_column=None in its saved config —
+        must not crash building MapDataOverlayPayload (value_column is a
+        required schema field)."""
+        count_chart = Chart.objects.create(
+            title="Count Only Map",
+            chart_type="map",
+            schema_name="public",
+            table_name="orders",
+            extra_config={
+                "geographic_column": "region",
+                "value_column": None,
+                "aggregate_function": "count",
+            },
+            created_by=orguser,
+            org=org,
+        )
+        request = _make_public_request(body={})
+
+        with patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ) as mock_get_client, patch(
+            "ddpui.api.public_api.charts_service.execute_map_data_overlay"
+        ) as mock_execute:
+            mock_get_client.return_value = MagicMock()
+            mock_execute.return_value = {"data": [], "count": 0}
+            response = get_public_map_data_overlay(
+                request, public_dashboard.public_share_token, chart_id=count_chart.id
+            )
+
+        assert response.get("is_valid") is True
+        sent_map_payload = mock_execute.call_args[0][0]
+        assert sent_map_payload.value_column == "region"  # fallback placeholder
+        assert sent_map_payload.metrics[0].column is None  # true COUNT(*)
+        assert sent_map_payload.metrics[0].aggregation == "count"

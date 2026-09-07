@@ -18,7 +18,7 @@ from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.metric import KPI, Metric
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, OrgUserGroup
 from ddpui.schemas.alert_schema import (
     AlertCreate,
     AlertListItem,
@@ -28,6 +28,8 @@ from ddpui.schemas.alert_schema import (
     AlertTestRequest,
     AlertTestResponse,
     AlertToggle,
+    AlertTransferCandidatesResponse,
+    AlertTransferOwnershipPayload,
     AlertUpdate,
     KpiRagContext,
     LogDeliveryOut,
@@ -50,8 +52,9 @@ alert_router = Router()
 
 
 def _build_recipient_out(recipients: list, org_id: int) -> list[RecipientOut]:
-    """Render stored JSON recipients with OrgUser names resolved."""
+    """Render stored JSON recipients with OrgUser and group names resolved."""
     out: list[RecipientOut] = []
+
     orguser_ids = [r["orguser_id"] for r in recipients if r.get("type") == "orguser"]
     name_by_id: dict[int, str] = {}
     if orguser_ids:
@@ -59,13 +62,29 @@ def _build_recipient_out(recipients: list, org_id: int) -> list[RecipientOut]:
             full = (ou.user.first_name + " " + ou.user.last_name).strip()
             name_by_id[ou.id] = full or ou.user.email
 
+    group_ids = [r["user_group_id"] for r in recipients if r.get("type") == "user_group"]
+    group_name_by_id: dict[int, str] = {}
+    if group_ids:
+        for g in OrgUserGroup.objects.filter(id__in=group_ids, org_id=org_id):
+            group_name_by_id[g.id] = g.name
+
     for r in recipients:
-        if r.get("type") == "orguser":
+        rtype = r.get("type")
+        if rtype == "orguser":
             out.append(
                 RecipientOut(
                     type="orguser",
                     orguser_id=r.get("orguser_id"),
                     orguser_name=name_by_id.get(r.get("orguser_id")),
+                )
+            )
+        elif rtype == "user_group":
+            gid = r.get("user_group_id")
+            out.append(
+                RecipientOut(
+                    type="user_group",
+                    user_group_id=gid,
+                    user_group_name=group_name_by_id.get(gid),
                 )
             )
         else:
@@ -121,6 +140,7 @@ def _build_alert_response(alert: Alert) -> AlertResponse:
         recipients=_build_recipient_out(alert.recipients or [], alert.org_id),
         created_at=alert.created_at,
         updated_at=alert.updated_at,
+        created_by_email=(alert.created_by.user.email if alert.created_by else None),
     )
 
 
@@ -180,6 +200,7 @@ def _build_list_item(alert: Alert) -> AlertListItem:
         is_active=alert.is_active,
         last_fire_at=last_fire_at,
         fire_streak=AlertService.compute_fire_streak(alert),
+        created_by_email=(alert.created_by.user.email if alert.created_by else None),
     )
 
 
@@ -335,6 +356,8 @@ def update_alert(request, alert_id: int, payload: AlertUpdate):
         alert = AlertService.update_alert(alert_id, orguser.org, orguser, payload)
     except AlertNotFoundError:
         raise HttpError(404, "Alert not found") from None
+    except AlertPermissionError as e:
+        raise HttpError(403, e.message) from None
     except AlertValidationError as e:
         raise HttpError(400, e.message) from None
 
@@ -386,6 +409,8 @@ def toggle_alert(request, alert_id: int, payload: AlertToggle):
         alert = AlertService.toggle_alert(alert_id, orguser.org, orguser, payload.is_active)
     except AlertNotFoundError:
         raise HttpError(404, "Alert not found") from None
+    except AlertPermissionError as e:
+        raise HttpError(403, e.message) from None
 
     create_audit_log(
         org=orguser.org,
@@ -394,6 +419,54 @@ def toggle_alert(request, alert_id: int, payload: AlertToggle):
         resource_id=str(alert.id),
         action=AuditLogAction.UPDATE,
         resource_fields={"name": alert.name, "is_active": payload.is_active},
+    )
+
+    return _build_alert_response(alert)
+
+
+@alert_router.get(
+    "/{alert_id}/transfer-candidates/",
+    response=AlertTransferCandidatesResponse,
+)
+@has_permission(["can_edit_alerts"])
+def list_alert_transfer_candidates(request, alert_id: int):
+    """Org members eligible to receive ownership of this alert. Owner-or-admin gated."""
+    orguser: OrgUser = request.orguser
+    try:
+        candidates = AlertService.list_transfer_candidates(alert_id, orguser.org, orguser)
+    except AlertNotFoundError:
+        raise HttpError(404, "Alert not found") from None
+    except AlertPermissionError as e:
+        raise HttpError(403, e.message) from None
+    return AlertTransferCandidatesResponse(candidates=candidates)
+
+
+@alert_router.post("/{alert_id}/transfer-ownership/", response=AlertResponse)
+@has_permission(["can_edit_alerts"])
+def transfer_alert_ownership(request, alert_id: int, payload: AlertTransferOwnershipPayload):
+    """Transfer alert.created_by to another org member. Owner-or-admin gated."""
+    orguser: OrgUser = request.orguser
+    try:
+        alert = AlertService.transfer_ownership(
+            alert_id, orguser.org, orguser, payload.to_orguser_id
+        )
+    except AlertNotFoundError:
+        raise HttpError(404, "Alert not found") from None
+    except AlertPermissionError as e:
+        raise HttpError(403, e.message) from None
+    except AlertValidationError as e:
+        raise HttpError(400, e.message) from None
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.ALERT,
+        resource_id=str(alert_id),
+        action=AuditLogAction.UPDATE,
+        resource_fields={
+            "name": alert.name,
+            "transferred_to": (alert.created_by.user.email if alert.created_by else None),
+        },
     )
 
     return _build_alert_response(alert)

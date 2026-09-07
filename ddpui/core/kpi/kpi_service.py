@@ -6,9 +6,11 @@ from datetime import date as date_type, datetime, timezone
 from django.db.models import Q
 from sqlalchemy import column, literal_column, func, and_
 
+from ddpui.core.access.access_control import accessible_filter
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import ResourceType
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.core.charts.charts_service import (
@@ -85,7 +87,7 @@ from ddpui.core.kpi.exceptions import (
     KPIValidationError,
     KPIPermissionError,
 )
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.access.ownership import is_creator_or_admin
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -127,7 +129,7 @@ class KPIService:
             )
 
     @staticmethod
-    def kpi_to_response(kpi: KPI) -> KPIResponse:
+    def kpi_to_response(kpi: KPI, access_level: Optional[str] = None) -> KPIResponse:
         """Convert a KPI model instance to KPIResponse schema."""
         m = kpi.metric
         return KPIResponse(
@@ -159,6 +161,8 @@ class KPIService:
             created_by=kpi.created_by.user.email if kpi.created_by else None,
             created_at=kpi.created_at,
             updated_at=kpi.updated_at,
+            access_level=access_level,
+            is_private=kpi.is_private,
         )
 
     @staticmethod
@@ -182,13 +186,14 @@ class KPIService:
     @staticmethod
     def list_kpis(
         org: Org,
+        orguser: OrgUser,
         page: int = 1,
         page_size: int = 10,
         search: Optional[str] = None,
         program_tag: Optional[str] = None,
         metric_type: Optional[str] = None,
     ) -> tuple:
-        query = Q(org=org)
+        query = Q(org=org) & accessible_filter(orguser, ResourceType.KPI)
 
         if search:
             query &= Q(name__icontains=search) | Q(program_tags__icontains=search)
@@ -324,7 +329,7 @@ class KPIService:
 
         # Authorize before computing dashboard usage so a non-owner is denied
         # without learning which dashboards depend on the KPI
-        if not can_delete_resource(orguser, kpi):
+        if not is_creator_or_admin(orguser, kpi):
             raise KPIPermissionError("Only the owner or an admin can delete this KPI.")
 
         dashboards = KPIService.get_kpi_dashboards(kpi_id, org)

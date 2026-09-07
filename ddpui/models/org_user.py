@@ -75,9 +75,9 @@ class OrgUser(models.Model):
     new_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True)
     email_verified = models.BooleanField(default=False)
     llm_optin = models.BooleanField(default=False)  # deprecated
-    has_seen_rbac_notice = models.BooleanField(
+    has_seen_resource_sharing_notice = models.BooleanField(
         default=False,
-        help_text="Whether the user has seen the one-time RBAC v2 migration notice",
+        help_text="Whether the user has seen the one-time resource-sharing introduction carousel",
     )
     landing_dashboard = models.ForeignKey(
         "ddpui.dashboard",
@@ -120,7 +120,7 @@ class OrgUserUpdatev1(Schema):
     role_uuid: Optional[uuid.UUID] = None
     email: Optional[str] = None
     active: Optional[bool] = None
-    has_seen_rbac_notice: Optional[bool] = None
+    has_seen_resource_sharing_notice: Optional[bool] = None
 
 
 class OrgUserUpdateNewRole(Schema):
@@ -154,7 +154,7 @@ class OrgUserResponse(Schema):
     plan_start_date: datetime | None = None
     plan_end_date: datetime | None = None
     work_domain: str | None = None
-    has_seen_rbac_notice: bool = False
+    has_seen_resource_sharing_notice: bool = False
 
 
 class Invitation(models.Model):
@@ -240,3 +240,48 @@ class LogoutPayload(BaseModel):
     """the payload for the login workflow"""
 
     refresh: str
+
+
+class OrgUserGroup(models.Model):
+    """A named set of ``OrgUser``s within one org (e.g. "Funders")."""
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="user_groups")
+    name = models.CharField(max_length=255)
+    created_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        null=True,
+    )
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "orguser_group"
+
+    def __str__(self):
+        return f"{self.name} (org={self.org_id})"
+
+
+class OrgUserGroupMember(models.Model):
+    """One membership row: a group has this ``OrgUser`` (active) or this
+    ``invitation`` (invited, not yet a user) as a member. When the invitation
+    is accepted, ``orguser`` is set and ``invitation`` becomes NULL via
+    ``on_delete=SET_NULL``."""
+
+    group = models.ForeignKey(OrgUserGroup, on_delete=models.CASCADE, related_name="members")
+    orguser = models.ForeignKey(OrgUser, on_delete=models.CASCADE, null=True)
+    invitation = models.ForeignKey(Invitation, on_delete=models.SET_NULL, null=True)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "orguser_group_member"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "invitation"], name="uq_orguser_group_member_invitation"
+            )
+        ]
+
+    def __str__(self):
+        principal = self.orguser_id if self.orguser_id is not None else f"inv:{self.invitation_id}"
+        return f"group={self.group_id} member={principal}"
