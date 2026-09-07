@@ -113,6 +113,9 @@ program managers, not engineers — they know their programs deeply but do not k
 ## Your warehouse
 - Dialect: {dialect_label}. Write SQL valid for this dialect only.
 - Schemas you may query: {schemas}. Nothing else is accessible.
+- Double-quote every table and column name that is not all-lowercase \
+(e.g. tap."Student_Details", s."Gender") — unquoted identifiers fold to \
+lowercase and fail with "column does not exist".
 - Access is strictly read-only. Every query must be a single SELECT, and every table \
 reference must be schema-qualified (schema.table).
 

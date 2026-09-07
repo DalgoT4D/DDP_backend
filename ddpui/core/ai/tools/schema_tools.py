@@ -55,4 +55,18 @@ def get_table_details(schema_name: str, table_name: str, runtime: ToolRuntime[Ru
     columns = ctx.warehouse.get_table_columns(schema_name, table_name)
     col_lines = [f"{col['name']}: {col['data_type']}" for col in columns]
 
-    return f"Table {schema_name}.{table_name}\n\nColumns:\n" + "\n".join(col_lines)
+    details = f"Table {schema_name}.{table_name}\n\nColumns:\n" + "\n".join(col_lines)
+
+    # Mixed-case identifiers (Airbyte raw tables like TLM26_StudentDetails)
+    # fold to lowercase in postgres unless double-quoted — an unquoted
+    # reference errors with "column does not exist" and burns a retry.
+    if ctx.dialect == "postgres":
+        mixed = [n for n in [table_name] + [c["name"] for c in columns] if n != n.lower()]
+        if mixed:
+            details += (
+                "\n\nNOTE: these identifiers are case-sensitive and MUST be "
+                'double-quoted in SQL, e.g. '
+                f'{schema_name}."{table_name}" and "{mixed[-1]}": '
+                + ", ".join(f'"{n}"' for n in mixed)
+            )
+    return details
