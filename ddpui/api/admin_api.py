@@ -1,6 +1,7 @@
 """
-Admin Portal API — cross-org endpoints for the Dalgo ops team, gated by
-@platform_admin_required rather than per-org permission slugs.
+Admin Portal API — cross-org endpoints for the Dalgo ops team, gated on the
+`can_manage_platform` permission, which seed/003_role_permissions.json grants to the
+super-admin role alone (customers are created at `admin`).
 """
 
 from typing import Dict, List
@@ -10,7 +11,7 @@ from ninja.errors import HttpError
 from django.db import transaction
 from django.utils import timezone
 
-from ddpui.auth import platform_admin_required
+from ddpui.auth import has_permission
 from ddpui.models.org import Org
 from ddpui.models.org_user import (
     OrgUser,
@@ -45,15 +46,15 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui")
 
 # No separate admin session: signs in through the normal POST /api/v2/login/, and
-# authority comes from @platform_admin_required on each route.
+# authority comes from @has_permission(["can_manage_platform"]) on each route.
 admin_router = Router()
 
 
 @admin_router.get("/currentuser", response=AdminCurrentUserSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def get_admin_currentuser(request):
-    """Identity for the admin portal — read by the frontend AdminGuard. A dedicated
-    route rather than /api/currentuserv2, which is gated on a per-org permission."""
+    """Identity for the admin portal — read by the frontend AdminGuard. is_platform_admin
+    is always True here: the route is gated, so reaching the body proves the permission."""
     user = request.orguser.user
     return {"email": user.email, "is_platform_admin": True}
 
@@ -73,7 +74,7 @@ def _admin_org_response(org: Org) -> AdminOrgSchema:
 
 
 @admin_router.get("/stats", response=AdminStatsSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def get_admin_stats(request):
     """Dashboard counts: total orgs and total users across the whole platform."""
     total_orgs, total_users = admin_service.get_platform_stats()
@@ -81,14 +82,14 @@ def get_admin_stats(request):
 
 
 @admin_router.get("/orgs", response=List[AdminOrgSchema])
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def get_admin_orgs(request):
     """List every org (active and inactive) with its user count."""
     return [_admin_org_response(org) for org in admin_service.list_orgs()]
 
 
 @admin_router.post("/orgs", response=AdminOrgSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 @transaction.atomic
 def post_admin_org(request, payload: AdminCreateOrgSchema):
     """Create an org + plan + its first admin. An org is never created without an owner:
@@ -105,7 +106,7 @@ def post_admin_org(request, payload: AdminCreateOrgSchema):
 
 
 @admin_router.get("/orgs/{org_id}", response=AdminOrgSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def get_admin_org(request, org_id: int):
     """Org detail (Overview facts)."""
     org = _get_org_or_404(org_id)
@@ -113,7 +114,7 @@ def get_admin_org(request, org_id: int):
 
 
 @admin_router.put("/orgs/{org_id}", response=AdminOrgSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def put_admin_org(request, org_id: int, payload: AdminUpdateOrgSchema):
     """Edit an org's name / viz_url / base_plan. slug is never touched (locked)."""
     org = _get_org_or_404(org_id)
@@ -122,7 +123,7 @@ def put_admin_org(request, org_id: int, payload: AdminUpdateOrgSchema):
 
 
 @admin_router.get("/orgs/{org_id}/delete-impact", response=OrgDeletionImpactSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def get_admin_org_delete_impact(request, org_id: int):
     """Count everything deleting this org would destroy, so the confirm dialog can
     warn before the action."""
@@ -131,7 +132,7 @@ def get_admin_org_delete_impact(request, org_id: int):
 
 
 @admin_router.delete("/orgs/{org_id}", response=AdminSuccessSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def delete_admin_org(request, org_id: int):
     """Hard-delete an org: Airbyte workspace, Prefect deployments/blocks, warehouse
     credentials, dbt/git setup, org users, and (via CASCADE) its dashboards/charts/
@@ -163,7 +164,7 @@ def _get_orguser_or_404(org: Org, orguser_id: int) -> OrgUser:
 
 
 @admin_router.get("/orgs/{org_id}/users", response=AdminOrgUsersResponse)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def get_admin_org_users(request, org_id: int):
     """List an org's users plus its pending invitations."""
     org = _get_org_or_404(org_id)
@@ -180,7 +181,7 @@ def get_admin_org_users(request, org_id: int):
 
 
 @admin_router.post("/orgs/{org_id}/users/invite", response=AdminInvitationSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def post_admin_org_user_invite(request, org_id: int, payload: NewInvitationSchema):
     """Invite a user into the org at any role — the inviter-level cap is skipped for a
     platform admin."""
@@ -206,7 +207,7 @@ def post_admin_org_user_invite(request, org_id: int, payload: NewInvitationSchem
 
 
 @admin_router.put("/orgs/{org_id}/users/{orguser_id}/role", response=AdminOrgUserSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def put_admin_org_user_role(request, org_id: int, orguser_id: int, payload: AdminChangeRoleSchema):
     """Change a user's role in the org. Role-level cap skipped for the platform admin."""
     org = _get_org_or_404(org_id)
@@ -223,7 +224,7 @@ def put_admin_org_user_role(request, org_id: int, orguser_id: int, payload: Admi
 
 
 @admin_router.get("/orgs/{org_id}/users/{orguser_id}/removal-impact", response=RemovalImpactSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def get_admin_org_user_removal_impact(request, org_id: int, orguser_id: int):
     """Count the content removing this user would orphan, so the confirm dialog can
     warn before the action."""
@@ -238,7 +239,7 @@ def get_admin_org_user_removal_impact(request, org_id: int, orguser_id: int):
 
 
 @admin_router.delete("/orgs/{org_id}/users/{orguser_id}", response=AdminSuccessSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def delete_admin_org_user(request, org_id: int, orguser_id: int):
     """Remove a user from the org. Their created content is orphaned (created_by
     SET_NULL), not deleted. Callers should show the removal-impact warning first."""
@@ -254,7 +255,7 @@ def delete_admin_org_user(request, org_id: int, orguser_id: int):
 
 
 @admin_router.delete("/orgs/{org_id}/invitations/{invitation_id}", response=AdminSuccessSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def delete_admin_org_invitation(request, org_id: int, invitation_id: int):
     """Cancel a pending invitation, scoped to the target org (404 on a wrong-org id)."""
     org = _get_org_or_404(org_id)
@@ -275,7 +276,7 @@ def delete_admin_org_invitation(request, org_id: int, invitation_id: int):
 
 
 @admin_router.get("/flags/catalog", response=List[AdminFeatureFlagCatalogItem])
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def get_admin_flags_catalog(request):
     """The fixed FEATURE_FLAGS registry, so the frontend renders from one source of
     truth instead of a hand-maintained TS enum."""
@@ -283,7 +284,7 @@ def get_admin_flags_catalog(request):
 
 
 @admin_router.get("/orgs/{org_id}/flags", response=Dict[str, bool])
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def get_admin_org_flags(request, org_id: int):
     """All flags for this org: global default merged with any org-specific override."""
     org = _get_org_or_404(org_id)
@@ -291,7 +292,7 @@ def get_admin_org_flags(request, org_id: int):
 
 
 @admin_router.put("/orgs/{org_id}/flags/{flag_name}", response=Dict[str, bool])
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def put_admin_org_flag(request, org_id: int, flag_name: str, payload: AdminSetOrgFlagSchema):
     """Turn one flag on/off for a single org."""
     org = _get_org_or_404(org_id)
@@ -302,7 +303,7 @@ def put_admin_org_flag(request, org_id: int, flag_name: str, payload: AdminSetOr
 
 
 @admin_router.delete("/orgs/{org_id}/flags/{flag_name}", response=Dict[str, bool])
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def delete_admin_org_flag(request, org_id: int, flag_name: str):
     """Clear this org's override for a flag, falling back to the global default."""
     org = _get_org_or_404(org_id)
@@ -313,7 +314,7 @@ def delete_admin_org_flag(request, org_id: int, flag_name: str):
 
 
 @admin_router.get("/flags/{flag_name}/orgs", response=List[AdminFlagOrgStatusItem])
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def get_admin_flag_orgs(request, flag_name: str):
     """Every org's current status for one flag -- powers the portal-wide Feature Flags
     table. Read-only: each row's toggle calls the existing single-org
@@ -337,7 +338,7 @@ ADMIN_NOTIFICATION_HISTORY_PAGE_SIZE = 10
 
 
 @admin_router.post("/notifications/preview", response=AdminNotificationPreviewResponseSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def post_admin_notification_preview(request, payload: AdminNotificationAudienceSchema):
     """One combined recipient count across the whole chosen audience -- never the
     recipient list itself, and never a per-org breakdown."""
@@ -346,7 +347,7 @@ def post_admin_notification_preview(request, payload: AdminNotificationAudienceS
 
 
 @admin_router.post("/notifications", response=AdminNotificationSchema)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def post_admin_notification(request, payload: AdminCreateNotificationSchema):
     """Send a broadcast immediately. author is derived server-side from the
     signed-in platform admin -- never taken from the client. A 0-recipient
@@ -360,7 +361,7 @@ def post_admin_notification(request, payload: AdminCreateNotificationSchema):
 
 
 @admin_router.get("/notifications", response=AdminNotificationHistoryResponse)
-@platform_admin_required
+@has_permission(["can_manage_platform"])
 def get_admin_notifications(
     request, page: int = 1, limit: int = ADMIN_NOTIFICATION_HISTORY_PAGE_SIZE
 ):

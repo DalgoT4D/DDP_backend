@@ -2,7 +2,8 @@
 Tests for the admin service layer (ddpui/core/admin/admin_service.py).
 
 The admin portal has no session of its own — it authenticates through the shared
-POST /api/v2/login/ and each route is gated by @platform_admin_required. What is left
+POST /api/v2/login/ and each route is gated by @has_permission, on the
+can_manage_platform permission held by the super-admin role. What is left
 here is the org / invitation / removal-impact business logic.
 """
 

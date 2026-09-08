@@ -1,8 +1,11 @@
 """
 Tests for the Admin Portal API and its platform-admin gate.
 
+The gate is the `can_manage_platform` permission, held by super-admin alone, so
+"platform admin" here means "this OrgUser's role is super-admin" — make_platform_admin().
+
 Milestone 1 acceptance (features/admin-portal/plan.md §6, §7):
-  - non-platform-admin -> 403 on a guarded admin route
+  - non-platform-admin -> refused on a guarded admin route
   - platform admin      -> 200 on the same route
   - /currentuserv2 surfaces is_platform_admin
 """
@@ -60,15 +63,16 @@ from ddpui.routes import drf_authentication_failed_handler
 from rest_framework.exceptions import AuthenticationFailed
 from ddpui.api.user_org_api import (
     get_current_user_v2,
+    get_organization_users,
     post_organization_user_invite_v1,
     post_login_v2,
 )
+from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.core import orguserfunctions
 from ddpui.models.org import Org
 from ddpui.models.org_plans import OrgPlans
 from ddpui.models.org_user import (
     OrgUser,
-    UserAttributes,
     Invitation,
     NewInvitationSchema,
     AcceptInvitationSchema,
@@ -84,6 +88,8 @@ from ddpui.auth import (
     SUPER_ADMIN_ROLE,
     ANALYST_ROLE,
     GUEST_ROLE,
+    PLATFORM_ADMIN_PERMISSION,
+    UNAUTHORIZED,
 )
 from ddpui.core.admin import admin_service
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
@@ -121,32 +127,44 @@ def orguser(authuser, org, seed_db):
     orguser.delete()
 
 
-# ---- the guard: /admin/currentuser 403 vs 200 ---------------------------------
+def make_platform_admin(orguser: OrgUser) -> OrgUser:
+    """promote an OrgUser to super-admin, the role holding can_manage_platform.
+
+    mock_request() reads request.permissions off the row's role, so promoting the row is
+    all the gate needs — the production path.
+    """
+    orguser.new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
+    orguser.save()
+    return orguser
+
+
+# ---- the guard: /admin/currentuser refused vs 200 -----------------------------
+# A permission failure is 404 "unauthorized", not 403 -- has_permission catches its own
+# HttpError and re-raises 404 (ddpui/auth.py), as it does for every gated endpoint.
 
 
 def test_admin_currentuser_forbidden_for_non_platform_admin(orguser):
-    """a user without is_platform_admin is refused with 403"""
-    request = mock_request(orguser)
-    # no UserAttributes row at all -> not a platform admin
-    with pytest.raises(HttpError) as excinfo:
-        get_admin_currentuser(request)
-    assert excinfo.value.status_code == 403
-    assert str(excinfo.value) == "platform admin access required"
-
-
-def test_admin_currentuser_forbidden_when_flag_false(orguser):
-    """a user whose is_platform_admin is explicitly False is refused with 403"""
-    UserAttributes.objects.create(user=orguser.user, is_platform_admin=False)
+    """an org admin (no can_manage_platform) is refused"""
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
         get_admin_currentuser(request)
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 404
+    assert str(excinfo.value) == UNAUTHORIZED
+
+
+def test_admin_currentuser_forbidden_for_roleless_orguser(orguser):
+    """an OrgUser with no role at all resolves to no permissions, and is refused"""
+    orguser.new_role = None
+    orguser.save()
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        get_admin_currentuser(request)
+    assert excinfo.value.status_code == 404
 
 
 def test_admin_currentuser_ok_for_platform_admin(orguser):
-    """a platform admin gets 200"""
-    UserAttributes.objects.create(user=orguser.user, is_platform_admin=True)
-    request = mock_request(orguser)
+    """a super-admin gets 200"""
+    request = mock_request(make_platform_admin(orguser))
     response = get_admin_currentuser(request)
     assert response == {"email": orguser.user.email, "is_platform_admin": True}
 
@@ -155,31 +173,56 @@ def test_admin_currentuser_ok_for_platform_admin(orguser):
 
 
 def test_currentuserv2_reports_platform_admin_true(orguser):
-    """currentuserv2 returns is_platform_admin: true for a platform admin"""
-    UserAttributes.objects.create(user=orguser.user, is_platform_admin=True)
-    request = mock_request(orguser)
+    """currentuserv2 reports is_platform_admin: true for a super-admin membership"""
+    request = mock_request(make_platform_admin(orguser))
     response = get_current_user_v2(request)
     assert len(response) == 1
     assert response[0].is_platform_admin is True
+    # the flag is a convenience over the permission list, which carries the same fact
+    assert PLATFORM_ADMIN_PERMISSION in {p["slug"] for p in response[0].permissions}
 
 
 def test_currentuserv2_reports_platform_admin_false(orguser):
-    """currentuserv2 defaults is_platform_admin to false for a normal user"""
+    """currentuserv2 reports false for an org admin, who lacks the permission"""
     request = mock_request(orguser)
     response = get_current_user_v2(request)
     assert len(response) == 1
     assert response[0].is_platform_admin is False
+    assert PLATFORM_ADMIN_PERMISSION not in {p["slug"] for p in response[0].permissions}
+
+
+# ---- every OrgUserResponse mapper agrees on the flag --------------------------
+# from_orguser() and the two inline builders all derive it through
+# holds_platform_admin(), so a super-admin never reads False on one endpoint.
+
+
+def test_from_orguser_reports_platform_admin(orguser):
+    """from_orguser -- the canonical mapper -- derives the flag from the role's permissions"""
+    assert from_orguser(orguser).is_platform_admin is False
+    assert from_orguser(make_platform_admin(orguser)).is_platform_admin is True
+
+
+def test_get_organization_users_reports_platform_admin(orguser):
+    """the org user list carries the flag per row, from that row's own role"""
+    make_platform_admin(orguser)
+    _make_member(orguser.org, "plain@admin-test-org.org", ADMIN_ROLE)
+
+    response = get_organization_users(mock_request(orguser))
+
+    by_email = {row.email: row.is_platform_admin for row in response}
+    assert by_email[orguser.user.email] is True
+    assert by_email["plain@admin-test-org.org"] is False
 
 
 # ---- /admin/stats: guarded + correct counts -----------------------------------
 
 
 def test_admin_stats_forbidden_for_non_platform_admin(orguser):
-    """a non-platform-admin is refused with 403 on /admin/stats"""
+    """a non-platform-admin is refused on /admin/stats"""
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
         get_admin_stats(request)
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 404
 
 
 def test_admin_stats_returns_counts_for_platform_admin(orguser):
@@ -189,7 +232,7 @@ def test_admin_stats_returns_counts_for_platform_admin(orguser):
     total_users counts distinct users across orgs: the same user belonging to two
     orgs still counts once.
     """
-    UserAttributes.objects.create(user=orguser.user, is_platform_admin=True)
+    make_platform_admin(orguser)
     # a second org that the same user also belongs to -> proves distinct-user count
     org2 = Org.objects.create(name="admin-test-org-2", slug="admin-test-org-2")
     OrgUser.objects.create(
@@ -208,17 +251,16 @@ def test_admin_stats_returns_counts_for_platform_admin(orguser):
 
 @pytest.fixture
 def platform_admin_request(orguser):
-    """a mock request from a platform admin"""
-    UserAttributes.objects.create(user=orguser.user, is_platform_admin=True)
-    return mock_request(orguser)
+    """a mock request from a platform admin (super-admin role -> can_manage_platform)"""
+    return mock_request(make_platform_admin(orguser))
 
 
 def test_admin_orgs_forbidden_for_non_platform_admin(orguser):
-    """the org list route is gated too — non-admin gets 403"""
+    """the org list route is gated too — non-admin is refused"""
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
         get_admin_orgs(request)
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 404
 
 
 def test_admin_list_orgs(platform_admin_request):
@@ -488,12 +530,12 @@ def test_admin_edit_org_updates_base_plan(platform_admin_request):
 
 
 def test_admin_org_delete_impact_forbidden_for_non_platform_admin(orguser):
-    """the delete-impact route is gated too — non-admin gets 403"""
+    """the delete-impact route is gated too — non-admin is refused"""
     org = Org.objects.create(name="Impact Org", slug="impact-org")
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
         get_admin_org_delete_impact(request, org.id)
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 404
 
 
 def test_admin_org_delete_impact_404(platform_admin_request):
@@ -532,12 +574,12 @@ def test_admin_org_delete_impact_counts(platform_admin_request):
 
 
 def test_admin_delete_org_forbidden_for_non_platform_admin(orguser):
-    """the delete route is gated too — non-admin gets 403"""
+    """the delete route is gated too — non-admin is refused"""
     org = Org.objects.create(name="Delete-Guard Org", slug="delete-guard-org")
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
         delete_admin_org(request, org.id)
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 404
 
 
 def test_admin_delete_org_404(platform_admin_request):
@@ -617,7 +659,7 @@ def bhumi(seed_db):
 
 
 def test_admin_users_routes_forbidden_for_non_platform_admin(orguser, akshara):
-    """a non-platform-admin is refused with 403 on the Users-tab routes"""
+    """a non-platform-admin is refused on the Users-tab routes"""
     request = mock_request(orguser)
     for call in (
         lambda: get_admin_org_users(request, akshara.id),
@@ -626,7 +668,7 @@ def test_admin_users_routes_forbidden_for_non_platform_admin(orguser, akshara):
     ):
         with pytest.raises(HttpError) as excinfo:
             call()
-        assert excinfo.value.status_code == 403
+        assert excinfo.value.status_code == 404
 
 
 # ---- invite (cross-org) + invite-cap-skip -------------------------------------
@@ -655,24 +697,25 @@ def test_admin_invite_into_org_records_target_org(platform_admin_request, akshar
 @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 def test_admin_invite_cap_skipped_for_platform_admin(platform_admin_request, akshara):
     """
-    INVITE-CAP-SKIP (plan §8 #1): the platform admin's own role is account-manager
-    (level 4). A regular inviter at level 4 CANNOT invite a super-admin (level 5) —
-    proven by the contrast assertion below. Via the admin portal the cap is skipped,
-    so the same admin CAN invite at super-admin.
+    INVITE-CAP-SKIP (plan §8 #1): the single-org invite path caps the invited role at the
+    inviter's own level, so an org admin (level 4) CANNOT invite a super-admin (level 5) —
+    the contrast assertion below. The admin-portal path skips that cap.
+
+    The skip is belt-and-braces now that a platform admin holds level 5 anyway; it stays
+    explicit in case can_manage_platform is ever granted to a lower role.
     """
     super_admin_uuid = _role(SUPER_ADMIN_ROLE).uuid
 
-    # contrast: as a regular single-org inviter, account-manager -> super-admin is refused
+    # contrast: a regular single-org inviter at admin level -> super-admin is refused
+    org_admin = _make_member(akshara, "orgadmin@akshara.org", ADMIN_ROLE)
     regular_payload = NewInvitationSchema(
         invited_email="wouldberefused@akshara.org",
         invited_role_uuid=super_admin_uuid,
     )
-    _, regular_error = orguserfunctions.invite_user_v1(
-        platform_admin_request.orguser, regular_payload
-    )
+    _, regular_error = orguserfunctions.invite_user_v1(org_admin, regular_payload)
     assert regular_error == "Insufficient permissions for this operation"
 
-    # via the admin portal the SAME admin may invite at super-admin (cap skipped)
+    # via the admin portal the cap is skipped: invite at super-admin into Akshara
     payload = NewInvitationSchema(
         invited_email="bigboss@akshara.org",
         invited_role_uuid=super_admin_uuid,
@@ -1020,7 +1063,8 @@ def test_week1_full_admin_lifecycle_flow(
 # ---- router auth: no separate admin session ----------------------------------
 # The admin portal signs in through the shared POST /api/v2/login/ and the admin
 # router inherits the API-wide CustomJwtAuthMiddleware, exactly like every other
-# router. Authority is @platform_admin_required on each route, so the guarantee worth
+# router. Authority is @has_permission([PLATFORM_ADMIN_PERMISSION]) on each route, so
+# the guarantee worth
 # holding is: a signed-in NON-admin is refused. Asserted by calling the view functions
 # directly, per this repo's testing skill (no ninja TestClient).
 
@@ -1046,7 +1090,7 @@ def test_admin_router_has_no_separate_session_auth():
     assert opted_out == set()
 
 
-# The 403-for-a-signed-in-non-admin and 200-for-a-platform-admin guarantees this
+# The refused-for-a-signed-in-non-admin and 200-for-a-platform-admin guarantees this
 # section depends on are asserted once, at the top of this file:
 # test_admin_currentuser_forbidden_for_non_platform_admin / _ok_for_platform_admin.
 
@@ -1061,11 +1105,17 @@ def test_v2_login_response_carries_is_platform_admin(seed_db):
     `response=` schema (it must return a JsonResponse to set cookies), so nothing else
     pins this key — without this test, dropping it from lookup_user() would silently
     break the admin sign-in. See lookup_user() in ddpui/core/orguserfunctions.py.
+
+    The login body has no org context, so the key reports whether the user holds
+    can_manage_platform through ANY of their memberships.
     """
     user = User.objects.create_user(
         username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
     )
-    UserAttributes.objects.create(user=user, is_platform_admin=True)
+    login_org = Org.objects.create(name="login-admin-org", slug="login-admin-org")
+    OrgUser.objects.create(
+        user=user, org=login_org, new_role=Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
+    )
 
     with patch("ddpui.auth.RedisClient.get_instance") as mock_redis, patch(
         "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}
@@ -1090,10 +1140,10 @@ def test_v2_login_reports_is_platform_admin_false_for_a_normal_user(seed_db):
     it does not know about platform admins — so a normal user must come back with
     is_platform_admin False, not a missing key and not an error. This is exactly what the
     admin sign-in form refuses on, so a regression here would silently let a non-admin
-    into the admin shell (the backend would still 403 every route, but the UX breaks).
+    into the admin shell (the backend would still refuse every route, but the UX breaks).
     """
     User.objects.create_user(username="ops@dalgo.org", email="ops@dalgo.org", password="Secret@123")
-    # no UserAttributes row at all -> lookup_user creates one, defaulting the flag False
+    # no OrgUser rows at all -> no role grants can_manage_platform -> False
 
     with patch("ddpui.auth.RedisClient.get_instance") as mock_redis, patch(
         "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}
@@ -1134,11 +1184,11 @@ def test_v2_login_bad_credentials_maps_to_401_not_500():
 
 
 def test_admin_flags_catalog_forbidden_for_non_platform_admin(orguser):
-    """the catalog route is gated too — non-admin gets 403"""
+    """the catalog route is gated too — non-admin is refused"""
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
         get_admin_flags_catalog(request)
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 404
 
 
 def test_admin_flags_catalog_lists_the_registry(platform_admin_request):
@@ -1156,7 +1206,7 @@ def test_admin_get_org_flags_forbidden_for_non_platform_admin(orguser, org):
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
         get_admin_org_flags(request, org.id)
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 404
 
 
 def test_admin_get_org_flags_defaults_all_off(platform_admin_request, org):
@@ -1221,22 +1271,22 @@ def test_get_admin_flag_orgs_reflects_each_orgs_current_status(platform_admin_re
 
 
 def test_get_admin_flag_orgs_forbidden_for_non_platform_admin(orguser):
-    """the read route is gated too -- non-admin gets 403"""
+    """the read route is gated too -- non-admin is refused"""
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
         get_admin_flag_orgs(request, "REPORTS")
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 404
 
 
 # ---- notifications tab (M2) ---------------------------------------------------
 
 
 def test_admin_notification_preview_forbidden_for_non_platform_admin(orguser):
-    """the preview route is gated too — non-admin gets 403"""
+    """the preview route is gated too — non-admin is refused"""
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
         post_admin_notification_preview(request, AdminNotificationAudienceSchema())
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 404
 
 
 def test_admin_notification_preview_whole_platform(platform_admin_request, org):
@@ -1259,14 +1309,14 @@ def test_admin_notification_preview_merges_multiple_orgs(platform_admin_request,
 
 
 def test_admin_notification_create_forbidden_for_non_platform_admin(orguser):
-    """the create route is gated too — non-admin gets 403"""
+    """the create route is gated too — non-admin is refused"""
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
         post_admin_notification(
             request,
             AdminCreateNotificationSchema(message="hi", email_subject="subject"),
         )
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 404
 
 
 def test_admin_notification_create_derives_author_from_the_signed_in_admin(
@@ -1335,11 +1385,11 @@ def test_admin_notification_create_blocks_both_channels_off(platform_admin_reque
 
 
 def test_admin_notification_history_forbidden_for_non_platform_admin(orguser):
-    """the history route is gated too — non-admin gets 403"""
+    """the history route is gated too — non-admin is refused"""
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
         get_admin_notifications(request)
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 404
 
 
 def test_admin_notification_history_shows_audience_channels_and_recipient_count(

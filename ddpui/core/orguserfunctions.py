@@ -11,7 +11,7 @@ from django.contrib.auth.models import User
 from django.utils.text import slugify
 from django.utils import timezone as django_timezone
 
-from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE, user_has_platform_admin_permission
 from ddpui.models.org import Org, OrgType
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
@@ -69,7 +69,8 @@ def lookup_user(email: str):
         "active": user.is_active,
         "can_create_orgs": userattributes.can_create_orgs,
         "is_consultant": userattributes.is_consultant,
-        "is_platform_admin": userattributes.is_platform_admin,
+        # from the user's roles, not UserAttributes: no org context here, so "in some org"
+        "is_platform_admin": user_has_platform_admin_permission(user),
     }
 
 

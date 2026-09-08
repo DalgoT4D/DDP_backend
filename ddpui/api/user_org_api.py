@@ -56,6 +56,7 @@ from ddpui.ddpairbyte import airbytehelpers
 
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.feature_flags import get_all_feature_flags_for_org
+from ddpui.utils.orguserhelpers import holds_platform_admin, permissions_for_role
 from ddpui.utils.response_wrapper import api_response, ApiResponse
 from ddpui.core.org_logo.exceptions import (
     OrgLogoNotFoundError,
@@ -91,10 +92,6 @@ def get_current_user_v2(request, org_slug: str = None):
     if org_preferences is None:
         org_preferences = OrgPreferences.objects.create(org=org)
 
-    # is_platform_admin is a global (per-User) flag, so it's the same for every OrgUser row
-    user_attributes = UserAttributes.objects.filter(user=user).first()
-    is_platform_admin = bool(user_attributes and user_attributes.is_platform_admin)
-
     # Get org default dashboard
     org_default_dashboard = None
     from ddpui.models.dashboard import Dashboard
@@ -126,6 +123,8 @@ def get_current_user_v2(request, org_slug: str = None):
         if curr_orguser.org.orgtncs.exists():
             curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
 
+        row_permissions = permissions_for_role(curr_orguser.new_role)
+
         res.append(
             OrgUserResponse(
                 user_id=user.id,
@@ -134,10 +133,7 @@ def get_current_user_v2(request, org_slug: str = None):
                 active=user.is_active,
                 new_role_slug=curr_orguser.new_role.slug,
                 wtype=warehouse.wtype if warehouse else None,
-                permissions=[
-                    {"slug": rolep.permission.slug, "name": rolep.permission.name}
-                    for rolep in curr_orguser.new_role.rolepermissions.all()
-                ],
+                permissions=row_permissions,
                 is_demo=(
                     curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
                 ),
@@ -147,7 +143,8 @@ def get_current_user_v2(request, org_slug: str = None):
                 subscription_plan=(curr_orguser.org.base_plan() if curr_orguser.org else None),
                 work_domain=curr_orguser.work_domain,
                 has_seen_rbac_notice=curr_orguser.has_seen_rbac_notice,
-                is_platform_admin=is_platform_admin,
+                # per row, from that row's own role
+                is_platform_admin=holds_platform_admin(row_permissions),
             )
         )
 
@@ -245,6 +242,7 @@ def get_organization_users(request):
     ):
         if curr_orguser.org.orgtncs.exists():
             curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
+        row_permissions = permissions_for_role(curr_orguser.new_role)
         res.append(
             OrgUserResponse(
                 user_id=curr_orguser.user.id,
@@ -253,14 +251,12 @@ def get_organization_users(request):
                 active=curr_orguser.user.is_active,
                 new_role_slug=curr_orguser.new_role.slug,
                 wtype=warehouse.wtype if warehouse else None,
-                permissions=[
-                    {"slug": rolep.permission.slug, "name": rolep.permission.name}
-                    for rolep in curr_orguser.new_role.rolepermissions.all()
-                ],
+                permissions=row_permissions,
                 is_demo=(
                     curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
                 ),
                 subscription_plan=(curr_orguser.org.base_plan() if curr_orguser.org else None),
+                is_platform_admin=holds_platform_admin(row_permissions),
             )
         )
 

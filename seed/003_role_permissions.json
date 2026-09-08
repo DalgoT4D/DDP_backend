@@ -1766,5 +1766,13 @@
             "role": 5,
             "permission": 82
         }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 222,
+        "fields": {
+            "role": 1,
+            "permission": 86
+        }
     }
 ]

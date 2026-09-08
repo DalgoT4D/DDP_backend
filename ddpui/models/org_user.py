@@ -146,6 +146,8 @@ class OrgUserResponse(Schema):
     subscription_plan: str | None = None
     work_domain: str | None = None
     has_seen_rbac_notice: bool = False
+    # convenience for the frontend: whether this membership's role grants
+    # can_manage_platform, a fact `permissions` above already carries
     is_platform_admin: bool = False
 
 
