@@ -69,6 +69,16 @@ WAREHOUSE_DATA = {
 }
 
 
+def lock_workspace_for_test(orgdbt: OrgDbt, orguser: OrgUser):
+    """Give endpoint-domain tests the lock required by the production contract."""
+    return CanvasLock.objects.create(
+        dbt=orgdbt,
+        locked_by=orguser,
+        lock_token=str(uuid.uuid4()),
+        expires_at=timezone.now() + timedelta(minutes=2),
+    )
+
+
 def create_canvas_graph(orgdbt):
     """Helper function to create a sample canvas graph with nodes and edges"""
     # Create canvas nodes
@@ -1388,6 +1398,7 @@ def test_post_create_src_model_node_model_not_found(seed_db, orguser):
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     with pytest.raises(HttpError) as excinfo:
         post_create_src_model_node(request, str(uuid.uuid4()))
@@ -1420,6 +1431,7 @@ def test_post_create_src_model_node_source_type_success(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create SOURCE type dbt model
     org_dbt_model = OrgDbtModel.objects.create(
@@ -1496,6 +1508,7 @@ def test_post_create_src_model_node_model_type_success(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create MODEL type dbt model
     org_dbt_model = OrgDbtModel.objects.create(
@@ -1558,6 +1571,7 @@ def test_post_create_src_model_node_existing_node_returns_existing(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create dbt model
     org_dbt_model = OrgDbtModel.objects.create(
@@ -1615,6 +1629,7 @@ def test_post_create_src_model_node_source_definition_error(mock_ensure_source, 
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create SOURCE type dbt model
     org_dbt_model = OrgDbtModel.objects.create(
@@ -1663,6 +1678,7 @@ def test_post_create_src_model_node_update_cols_error(mock_update_cols, seed_db,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create MODEL type dbt model
     org_dbt_model = OrgDbtModel.objects.create(
@@ -1715,6 +1731,7 @@ def test_post_create_src_model_node_source_no_existing_node_calls_all_functions(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create SOURCE type dbt model
     org_dbt_model = OrgDbtModel.objects.create(
@@ -1773,6 +1790,7 @@ def test_post_create_src_model_node_model_no_existing_node_calls_required_functi
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create MODEL type dbt model
     org_dbt_model = OrgDbtModel.objects.create(
@@ -1862,6 +1880,7 @@ def test_post_add_operation_node_input_node_not_found(seed_db, orguser):
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     payload = CreateOperationNodePayload(
         config={},
@@ -1901,6 +1920,7 @@ def test_post_add_operation_node_single_input_operation_success(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create a source node to use as input
     org_dbt_model = OrgDbtModel.objects.create(
@@ -1991,6 +2011,7 @@ def test_post_add_operation_node_multi_input_operation_success(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create two source models for join
     org_dbt_model1 = OrgDbtModel.objects.create(
@@ -2102,6 +2123,7 @@ def test_post_add_operation_node_invalid_operation_config(mock_validate_config, 
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create input node
     input_node = CanvasNode.objects.create(
@@ -2158,6 +2180,7 @@ def test_post_add_operation_node_get_output_cols_error(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create input node
     input_node = CanvasNode.objects.create(
@@ -2215,6 +2238,7 @@ def test_post_add_operation_node_validate_inputs_error(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create input node
     input_node = CanvasNode.objects.create(
@@ -2274,6 +2298,7 @@ def test_post_add_operation_node_verify_function_calls(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create input node
     input_node = CanvasNode.objects.create(
@@ -2382,6 +2407,7 @@ def test_put_operation_node_operation_node_not_found(seed_db, orguser):
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     payload = EditOperationNodePayload(config={}, op_type="aggregate", source_columns=["id"])
 
@@ -2411,6 +2437,7 @@ def test_put_operation_node_non_operation_node(seed_db, orguser):
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create a source node (not operation node)
     source_node = CanvasNode.objects.create(
@@ -2453,6 +2480,7 @@ def test_put_operation_node_single_input_operation_success(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create an existing operation node
     existing_operation = CanvasNode.objects.create(
@@ -2531,6 +2559,7 @@ def test_put_operation_node_multi_input_operation_success(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create two source models for join
     org_dbt_model1 = OrgDbtModel.objects.create(
@@ -2665,6 +2694,7 @@ def test_put_operation_node_invalid_operation_config(mock_validate_config, seed_
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create existing operation node
     existing_operation = CanvasNode.objects.create(
@@ -2720,6 +2750,7 @@ def test_put_operation_node_get_output_cols_error(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create existing operation node
     existing_operation = CanvasNode.objects.create(
@@ -2778,6 +2809,7 @@ def test_put_operation_node_validate_inputs_error(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create existing operation node
     existing_operation = CanvasNode.objects.create(
@@ -2838,6 +2870,7 @@ def test_put_operation_node_verify_function_calls(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create existing operation node
     existing_operation = CanvasNode.objects.create(
@@ -2916,6 +2949,7 @@ def test_put_operation_node_edge_cleanup_for_multi_input_operation(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create models for the multi-input operation
     org_dbt_model1 = OrgDbtModel.objects.create(
@@ -3064,6 +3098,7 @@ def test_post_terminate_operation_node_operation_node_not_found(seed_db, orguser
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     payload = TerminateChainAndCreateModelPayload(
         name="test_model", display_name="Test Model", dest_schema="public"
@@ -3096,6 +3131,7 @@ def test_post_terminate_operation_node_non_operation_node(seed_db, orguser):
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create a source node instead of operation
     source_node = CanvasNode.objects.create(
@@ -3145,6 +3181,7 @@ def test_post_terminate_operation_node_create_new_model_success(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create operation node
     operation_node = CanvasNode.objects.create(
@@ -3224,6 +3261,7 @@ def test_post_terminate_operation_node_update_existing_model_success(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create existing dbt model
     existing_dbt_model = OrgDbtModel.objects.create(
@@ -3315,6 +3353,7 @@ def test_post_terminate_operation_node_create_dbt_model_error(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create operation node
     operation_node = CanvasNode.objects.create(
@@ -3373,6 +3412,7 @@ def test_post_terminate_operation_node_with_rel_dir_to_models(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create operation node
     operation_node = CanvasNode.objects.create(
@@ -3441,6 +3481,7 @@ def test_post_terminate_operation_node_with_root_directory_edge_case(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
     # Create operation node
     operation_node = CanvasNode.objects.create(
         orgdbt=orgdbt,
@@ -3509,6 +3550,7 @@ def test_post_terminate_operation_node_traverse_graph_error(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create operation node
     operation_node = CanvasNode.objects.create(
@@ -3565,6 +3607,7 @@ def test_post_terminate_operation_node_verify_transaction_atomicity(
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
+    lock_workspace_for_test(orgdbt, orguser)
 
     # Create operation node
     operation_node = CanvasNode.objects.create(

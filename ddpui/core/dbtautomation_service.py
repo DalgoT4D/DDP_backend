@@ -935,6 +935,11 @@ def convert_canvas_node_to_frontend_format(
         "name": canvas_node.name,
         "operation_config": canvas_node.operation_config,
         "output_columns": canvas_node.output_cols,
+        "position": (
+            {"x": canvas_node.position_x, "y": canvas_node.position_y}
+            if canvas_node.position_x is not None and canvas_node.position_y is not None
+            else None
+        ),
         "dbtmodel": (
             {
                 "schema": canvas_node.dbtmodel.schema,

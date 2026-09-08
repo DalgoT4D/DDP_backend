@@ -1,4 +1,5 @@
 import uuid
+import math
 import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -27,6 +28,7 @@ from ddpui.schemas.dbt_workflow_schema import (
     ModelSrcInputsForMultiInputOp,
     validate_operation_config_v2,
     TerminateChainAndCreateModelPayload,
+    UpdateCanvasLayoutPayload,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.taskprogress import TaskProgress
@@ -54,6 +56,24 @@ from ddpui.utils.transform_workflow_helpers import (
 transform_router = Router()
 load_dotenv()
 logger = CustomLogger("ddpui")
+
+MAX_CANVAS_LAYOUT_NODES = 5000
+MAX_CANVAS_COORDINATE = 10_000_000
+CANVAS_LOCK_DURATION = timedelta(minutes=2)
+
+
+def _canvas_lock_response(lock: CanvasLock) -> LockCanvasResponseSchema:
+    """Serialize the backend lock record for the canvas lock API."""
+    return LockCanvasResponseSchema(
+        lock_token=lock.lock_token,
+        expires_at=lock.expires_at.isoformat(),
+        locked_by=lock.locked_by.user.email,
+    )
+
+
+def _locked_workspace(orgdbt: OrgDbt) -> OrgDbt:
+    """Serialize lock lifecycle changes on the stable workspace row."""
+    return OrgDbt.objects.select_for_update().get(pk=orgdbt.pk)
 
 
 @transform_router.post("/dbt_project/")
@@ -255,7 +275,7 @@ def get_warehouse_datatypes(request):
 @transform_router.post("/dbt_project/canvas/lock/", response=LockCanvasResponseSchema)
 @has_permission(["can_edit_dbt_model"])
 def lock_canvas(request):
-    """Lock canvas for editing"""
+    """Acquire or idempotently refresh the current user's canvas lock."""
     orguser: OrgUser = request.orguser
     org = orguser.org
 
@@ -264,40 +284,36 @@ def lock_canvas(request):
     if orgdbt is None:
         raise HttpError(404, "dbt workspace not setup")
 
-    # Check if already locked
-    try:
-        lock: CanvasLock = orgdbt.canvas_lock
-        if not lock.is_expired():
-            if lock.locked_by == orguser:
-                # Refresh lock with 2-minute duration
-                lock.expires_at = timezone.now() + timedelta(minutes=2)
-                lock.save()
-                return LockCanvasResponseSchema(
-                    lock_token=lock.lock_token,
-                    expires_at=lock.expires_at.isoformat(),
-                    locked_by=lock.locked_by.user.email,
-                )
-            else:
+    # Locking the OrgDbt row closes the race where two requests both observe
+    # that the OneToOne CanvasLock row does not exist and then try to create it.
+    with transaction.atomic():
+        orgdbt = _locked_workspace(orgdbt)
+        lock = (
+            CanvasLock.objects.select_for_update()
+            .select_related("locked_by__user")
+            .filter(dbt=orgdbt)
+            .first()
+        )
+
+        if lock and not lock.is_expired():
+            if lock.locked_by_id != orguser.id:
                 raise HttpError(423, f"Canvas is already locked by {lock.locked_by.user.email}")
-        else:
-            # Delete expired lock
+
+            lock.expires_at = timezone.now() + CANVAS_LOCK_DURATION
+            lock.save(update_fields=["expires_at", "updated_at"])
+            return _canvas_lock_response(lock)
+
+        if lock:
             lock.delete()
-    except CanvasLock.DoesNotExist:
-        pass
 
-    # Create new lock with 2-minute duration
-    lock = CanvasLock.objects.create(
-        dbt=orgdbt,
-        locked_by=orguser,
-        lock_token=str(uuid.uuid4()),
-        expires_at=timezone.now() + timedelta(minutes=2),
-    )
-
-    return LockCanvasResponseSchema(
-        lock_token=lock.lock_token,
-        expires_at=lock.expires_at.isoformat(),
-        locked_by=lock.locked_by.user.email,
-    )
+        lock = CanvasLock.objects.create(
+            dbt=orgdbt,
+            locked_by=orguser,
+            lock_token=str(uuid.uuid4()),
+            expires_at=timezone.now() + CANVAS_LOCK_DURATION,
+        )
+        lock = CanvasLock.objects.select_related("locked_by__user").get(pk=lock.pk)
+        return _canvas_lock_response(lock)
 
 
 @transform_router.put("/dbt_project/canvas/lock/refresh/")
@@ -312,26 +328,27 @@ def refresh_canvas_lock(request):
     if orgdbt is None:
         raise HttpError(404, "dbt workspace not setup")
 
-    try:
-        lock: CanvasLock = orgdbt.canvas_lock
+    with transaction.atomic():
+        orgdbt = _locked_workspace(orgdbt)
+        lock = (
+            CanvasLock.objects.select_for_update()
+            .select_related("locked_by__user")
+            .filter(dbt=orgdbt)
+            .first()
+        )
+        if lock is None:
+            raise HttpError(404, "No active lock found")
         if lock.is_expired():
             raise HttpError(410, "Lock has expired")
-        if lock.locked_by != orguser:
+        if lock.locked_by_id != orguser.id:
             raise HttpError(403, "You can only refresh your own locks")
 
-        # Refresh lock with 2-minute duration
-        lock.expires_at = timezone.now() + timedelta(minutes=2)
-        lock.save()
+        lock.expires_at = timezone.now() + CANVAS_LOCK_DURATION
+        lock.save(update_fields=["expires_at", "updated_at"])
 
-        logger.info(f"Refreshed lock for canvas")
+        logger.info("Refreshed lock for canvas")
 
-        return LockCanvasResponseSchema(
-            lock_token=lock.lock_token,
-            expires_at=lock.expires_at.isoformat(),
-            locked_by=lock.locked_by.user.email,
-        )
-    except CanvasLock.DoesNotExist:
-        raise HttpError(404, "No active lock found")
+        return _canvas_lock_response(lock)
 
 
 @transform_router.delete("/dbt_project/canvas/lock/")
@@ -346,19 +363,20 @@ def unlock_canvas(request):
     if orgdbt is None:
         raise HttpError(404, "dbt workspace not setup")
 
-    try:
-        lock = orgdbt.canvas_lock
-        if lock.locked_by != orguser:
+    with transaction.atomic():
+        orgdbt = _locked_workspace(orgdbt)
+        lock = CanvasLock.objects.select_for_update().filter(dbt=orgdbt).first()
+        if lock is None:
+            return {"success": True}
+        if lock.locked_by_id != orguser.id:
             raise HttpError(403, "You can only unlock your own locks")
         lock.delete()
-    except CanvasLock.DoesNotExist:
-        pass  # Already unlocked
 
     return {"success": True}
 
 
 # Canvas Lock Helper Function
-def validate_canvas_lock(orguser: OrgUser, orgdbt):
+def validate_canvas_lock(orguser: OrgUser, orgdbt: OrgDbt):
     """
     Validate that the canvas is properly locked by the requesting user.
     Similar to dashboard lock validation but for canvas operations.
@@ -372,20 +390,25 @@ def validate_canvas_lock(orguser: OrgUser, orgdbt):
         HttpError: 423 if canvas is locked by another user
         HttpError: 410 if canvas lock has expired
     """
-    # Check canvas lock status
-    try:
-        lock: CanvasLock = orgdbt.canvas_lock
+    with transaction.atomic():
+        orgdbt = _locked_workspace(orgdbt)
+        lock = (
+            CanvasLock.objects.select_for_update()
+            .select_related("locked_by__user")
+            .filter(dbt=orgdbt)
+            .first()
+        )
+        if lock is None:
+            raise HttpError(
+                423, "Canvas is not locked. Please acquire a lock before making changes."
+            )
         if lock.is_expired():
-            # Clean up expired lock
-            lock.delete()
             raise HttpError(410, "Canvas lock has expired. Please acquire a new lock.")
-        elif lock.locked_by != orguser:
+        if lock.locked_by_id != orguser.id:
             raise HttpError(423, f"Canvas is locked by {lock.locked_by.user.email}")
-        # Lock is valid and owned by the user - refresh expiry and proceed
-        lock.expires_at = timezone.now() + timedelta(minutes=2)
-        lock.save()
-    except CanvasLock.DoesNotExist:
-        raise HttpError(423, "Canvas is not locked. Please acquire a lock before making changes.")
+
+        lock.expires_at = timezone.now() + CANVAS_LOCK_DURATION
+        lock.save(update_fields=["expires_at", "updated_at"])
 
 
 # ==============================================================================
@@ -458,7 +481,7 @@ def delete_orgdbtmodel(request, model_uuid, canvas_lock_id: str = None, cascade:
 
     validate_canvas_lock(orguser, orgdbt)
 
-    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
+    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid, orgdbt=orgdbt).first()
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
@@ -569,6 +592,78 @@ def get_dbt_project_DAG_v2(request):
         raise HttpError(500, f"Failed to generate DAG: {str(e)}")
 
 
+@transform_router.put("/v2/dbt_project/graph/layout/")
+@has_permission(["can_edit_dbt_model"])
+def put_canvas_layout(request, payload: UpdateCanvasLayoutPayload):
+    """Persist an atomic batch of top-left React Flow node coordinates."""
+    orguser: OrgUser = request.orguser
+    orgdbt = orguser.org.dbt
+
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    if not payload.nodes:
+        raise HttpError(422, "at least one canvas node position is required")
+
+    if len(payload.nodes) > MAX_CANVAS_LAYOUT_NODES:
+        raise HttpError(
+            422,
+            f"canvas layout update cannot exceed {MAX_CANVAS_LAYOUT_NODES} nodes",
+        )
+
+    node_uuids = [item.uuid for item in payload.nodes]
+    if len(node_uuids) != len(set(node_uuids)):
+        raise HttpError(422, "canvas layout update contains duplicate node UUIDs")
+
+    for item in payload.nodes:
+        coordinates = (item.position.x, item.position.y)
+        if not all(math.isfinite(coordinate) for coordinate in coordinates):
+            raise HttpError(422, "canvas coordinates must be finite numbers")
+        if any(abs(coordinate) > MAX_CANVAS_COORDINATE for coordinate in coordinates):
+            raise HttpError(
+                422,
+                f"canvas coordinates must be within +/-{MAX_CANVAS_COORDINATE}",
+            )
+
+    with transaction.atomic():
+        validate_canvas_lock(orguser, orgdbt)
+        canvas_nodes = list(
+            CanvasNode.objects.select_for_update().filter(
+                orgdbt=orgdbt,
+                uuid__in=node_uuids,
+            )
+        )
+        node_by_uuid = {node.uuid: node for node in canvas_nodes}
+
+        # Scope the lookup to this workspace and return one generic error so a
+        # caller cannot use this endpoint to discover another org's node UUIDs.
+        if len(node_by_uuid) != len(node_uuids):
+            raise HttpError(422, "one or more canvas nodes were not found")
+
+        now = timezone.now()
+        for item in payload.nodes:
+            canvas_node = node_by_uuid[item.uuid]
+            canvas_node.position_x = item.position.x
+            canvas_node.position_y = item.position.y
+            canvas_node.updated_at = now
+
+        CanvasNode.objects.bulk_update(
+            canvas_nodes,
+            ["position_x", "position_y", "updated_at"],
+        )
+
+    return {
+        "updated": len(payload.nodes),
+        "nodes": [
+            {
+                "uuid": str(item.uuid),
+                "position": {"x": item.position.x, "y": item.position.y},
+            }
+            for item in payload.nodes
+        ],
+    }
+
+
 # V2 CRUD operations for CanvasNode
 @transform_router.post("/v2/dbt_project/models/{dbtmodel_uuid}/nodes/")
 @has_permission(["can_create_dbt_model"])
@@ -589,9 +684,9 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    try:
-        # TODO: apply canvas locking logic
+    validate_canvas_lock(orguser, orgdbt)
 
+    try:
         org_dbt_model = OrgDbtModel.objects.filter(uuid=dbtmodel_uuid, orgdbt=orgdbt).first()
         if not org_dbt_model:
             raise HttpError(404, "model not found")
@@ -681,9 +776,9 @@ def post_add_operation_node(request, payload: CreateOperationNodePayload):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    logger.info(f"creating operation: {payload.op_type}")
+    validate_canvas_lock(orguser, orgdbt)
 
-    # TODO: apply canvas locking logic
+    logger.info(f"creating operation: {payload.op_type}")
 
     try:
         main_input_node: CanvasNode = CanvasNode.objects.select_related("dbtmodel").get(
@@ -822,9 +917,9 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    logger.info(f"updating operation: {payload.op_type}")
+    validate_canvas_lock(orguser, orgdbt)
 
-    # TODO: apply canvas locking logic
+    logger.info(f"updating operation: {payload.op_type}")
 
     # Fetch the operation node first, outside the main try block
     try:
@@ -958,7 +1053,7 @@ def post_terminate_operation_node(
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    # TODO: apply canvas locking logic
+    validate_canvas_lock(orguser, orgdbt)
 
     try:
         terminal_node = CanvasNode.objects.get(
@@ -1066,6 +1161,8 @@ def delete_canvas_node(request, node_uuid: str):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
+    validate_canvas_lock(orguser, orgdbt)
+
     try:
         canvas_node = CanvasNode.objects.get(uuid=node_uuid, orgdbt=orgdbt)
         dbtmodel = canvas_node.dbtmodel
@@ -1170,6 +1267,8 @@ def sync_remote_dbtproject_to_canvas(request):
             "success": True,
             "message": "dbt workspace is not of GIT type, skipping sync to canvas",
         }
+
+    validate_canvas_lock(orguser, orgdbt)
 
     # Get warehouse
     try:
