@@ -3,7 +3,7 @@ from django.core.management.base import BaseCommand
 from ddpui.models.org import Org
 from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
-from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
+from ddpui.ddpdbt.dbthelpers import create_or_update_dbt_profile_secret_blk
 from ddpui.ddpdbt.elementary_service import create_elementary_profile
 
 
@@ -53,7 +53,7 @@ class Command(BaseCommand):
 
         secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
 
-        create_or_update_org_cli_block(org, warehouse, dbt_credentials)
+        create_or_update_dbt_profile_secret_blk(org, warehouse, dbt_credentials)
 
         create_elementary_profile(org)
 

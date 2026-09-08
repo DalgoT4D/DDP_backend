@@ -1,5 +1,4 @@
 import json
-import os
 from ninja import Router
 from ninja.errors import HttpError
 from django.utils import timezone
@@ -10,6 +9,7 @@ from ddpui.models.org_plans import OrgPlans
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
+    UpdateAccessDefaultsSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
 )
@@ -18,15 +18,21 @@ from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from django.db import transaction
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import LEVEL_RANK
 from ddpui.ddpdbt import elementary_service
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import (
     prefect_service,
 )
+from ddpui.core.notifications.templates import build_subscription_request_email
+from ddpui.core.notifications.triggers.biz_dev import biz_dev_recipients
 from ddpui.utils.awsses import send_text_message
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
 
 orgpreference_router = Router()
+
+logger = CustomLogger("ddpui.api.org_preferences_api")
 
 
 @orgpreference_router.post("/")
@@ -126,6 +132,28 @@ def update_discord_notifications(request, payload: UpdateDiscordNotificationsSch
     return {"success": True, "res": org_preferences.to_json()}
 
 
+@orgpreference_router.put("/access-defaults")
+@has_permission(["can_manage_access_defaults"])
+def update_access_defaults(request, payload: UpdateAccessDefaultsSchema):
+    """Updates org-wide access defaults (analyst/member default level + public sharing toggle)."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_preferences = OrgPreferences.objects.filter(org=org).first()
+    if org_preferences is None:
+        org_preferences = OrgPreferences.objects.create(org=org)
+
+    if LEVEL_RANK[payload.default_member_level] > LEVEL_RANK[payload.default_analyst_level]:
+        raise HttpError(400, "member floor cannot exceed analyst floor")
+
+    org_preferences.default_analyst_level = payload.default_analyst_level
+    org_preferences.default_member_level = payload.default_member_level
+    org_preferences.allow_public_sharing = payload.allow_public_sharing
+    org_preferences.save()
+
+    return {"success": True, "res": org_preferences.to_json()}
+
+
 @orgpreference_router.get("/")
 def get_org_preferences(request):
     """Gets preferences for an organization based on the logged-in user's organization"""
@@ -200,8 +228,18 @@ def get_org_plans(request):
 @orgpreference_router.post("/org-plan/upgrade")
 @has_permission(["can_initiate_org_plan_upgrade"])
 def initiate_upgrade_dalgo_plan(request):
-    """User can click on the upgrade button from the settings panel
-    which will trigger email to biz dev team"""
+    """Register a subscription/upgrade request and notify the biz-dev team by email.
+
+    Reached from two surfaces: the Billing settings page and the free-trial countdown pill in
+    the header. Both are once-per-org — `OrgPlans.upgrade_requested` is the flag, so a second
+    click (or a second browser tab) is a no-op that still returns 200 with
+    `already_requested: True` rather than an error, because from the user's point of view
+    their request IS registered.
+
+    Recipients come from the BIZ_DEV_EMAILS env var (comma-separated) so they can be changed
+    without a deploy. If it is unset or empty we deliberately leave `upgrade_requested` False:
+    nobody was told, so a later correctly-configured retry must still be able to send.
+    """
     orguser: OrgUser = request.orguser
     org = orguser.org
 
@@ -212,19 +250,31 @@ def initiate_upgrade_dalgo_plan(request):
 
     # trigger emails only once
     if org_plan.upgrade_requested:
-        return {"success": True, "res": "Upgrade request already sent"}
+        return {"success": True, "already_requested": True, "res": "Upgrade request already sent"}
 
-    biz_dev_emails = os.getenv("BIZ_DEV_EMAILS", []).split(",")
+    biz_dev_emails = biz_dev_recipients()
+    if not biz_dev_emails:
+        logger.error(
+            "BIZ_DEV_EMAILS is not configured; subscription request from org %s was not emailed",
+            org.slug,
+        )
+        raise HttpError(500, "Could not send the request, please contact support")
 
-    message = "Upgrade plan request from org: {org_name} with plan: {plan_name}".format(
-        org_name=org.name, plan_name=org_plan.features
-    )
-    subject = "Upgrade plan request from org: {org_name}".format(org_name=org.name)
+    subject, message = build_subscription_request_email(org, orguser, org_plan, timezone.now())
 
+    # send per-recipient so one bad/bouncing address cannot stop the others
+    delivered = 0
     for email in biz_dev_emails:
-        send_text_message(email, subject, message)
+        try:
+            send_text_message(email, subject, message)
+            delivered += 1
+        except Exception as err:  # skipcq PYL-W0703
+            logger.error("failed to email subscription request to %s: %s", email, err)
+
+    if delivered == 0:
+        raise HttpError(500, "Could not send the request, please contact support")
 
     org_plan.upgrade_requested = True
     org_plan.save()
 
-    return {"success": True}
+    return {"success": True, "already_requested": False}

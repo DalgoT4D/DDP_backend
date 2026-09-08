@@ -180,7 +180,7 @@ class TestDeleteChartPermissions:
 
         result = ChartService.delete_chart(chart_id, org, orguser)
 
-        assert result is True
+        assert result == "My Chart"
         assert not Chart.objects.filter(id=chart_id).exists()
 
     def test_delete_chart_non_admin_creator_can_delete_own(self, orguser2, org, seed_db):
@@ -200,7 +200,7 @@ class TestDeleteChartPermissions:
 
         result = ChartService.delete_chart(chart_id, org, orguser2)
 
-        assert result is True
+        assert result == "Analyst Chart"
         assert not Chart.objects.filter(id=chart_id).exists()
 
     def test_delete_chart_admin_can_delete_others(self, orguser, orguser2, org, seed_db):
@@ -219,7 +219,7 @@ class TestDeleteChartPermissions:
 
         result = ChartService.delete_chart(chart_id, org, orguser)
 
-        assert result is True
+        assert result == "Someone Else's Chart"
         assert not Chart.objects.filter(id=chart_id).exists()
 
 

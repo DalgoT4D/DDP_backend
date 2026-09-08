@@ -37,7 +37,7 @@ from ddpui.core.metric.exceptions import (
     MetricDeleteBlockedError,
     MetricPermissionError,
 )
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.access.ownership import is_creator_or_admin
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -278,12 +278,14 @@ class MetricService:
         return metric
 
     @staticmethod
-    def delete_metric(metric_id: int, org: Org, orguser: OrgUser) -> bool:
+    def delete_metric(metric_id: int, org: Org, orguser: OrgUser) -> str:
+        """Delete a metric. Returns its name, so callers (e.g. the API layer's
+        audit log) don't need a separate fetch of their own."""
         metric = MetricService.get_metric(metric_id, org)
 
         # Authorize before computing consumers so a non-owner is denied without
         # learning which charts/KPIs depend on the metric
-        if not can_delete_resource(orguser, metric):
+        if not is_creator_or_admin(orguser, metric):
             raise MetricPermissionError("Only the owner or an admin can delete this metric.")
 
         consumers = MetricService.get_metric_consumers(metric_id, org)
@@ -297,7 +299,7 @@ class MetricService:
         metric_name = metric.name
         metric.delete()
         logger.info(f"Deleted metric '{metric_name}' (id={metric_id}) by {orguser.user.email}")
-        return True
+        return metric_name
 
     @staticmethod
     def preview_metric_value(metric_id: int, org: Org) -> dict:

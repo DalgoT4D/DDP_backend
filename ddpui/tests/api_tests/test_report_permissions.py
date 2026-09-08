@@ -25,7 +25,7 @@ Actual permission matrix (from seed data):
 │ datetime_columns (view)     │     ✓     │    ✓    │    ✓     │    ✓    │   ✓   │
 └─────────────────────────────┴───────────┴─────────┴──────────┴─────────┴───────┘
 
-Note: Only Guest lacks create/edit/delete/share permissions for dashboards.
+Note: All roles have create/edit/delete/share permissions for dashboards in the resource-sharing model.
 """
 
 import os
@@ -59,8 +59,6 @@ from ddpui.api.report_api import (
     get_snapshot_view,
     update_snapshot,
     delete_snapshot,
-    toggle_report_sharing,
-    get_report_sharing_status,
     list_dashboard_datetime_columns,
     get_mentionable_users,
     get_comment_states,
@@ -79,7 +77,6 @@ from ddpui.schemas.report_schema import (
     CommentUpdate,
     MarkReadRequest,
 )
-from ddpui.schemas.dashboard_schema import ShareToggle
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
@@ -252,13 +249,15 @@ class TestRolePermissionsLoaded:
         assert "can_delete_dashboards" in request.permissions
         assert "can_share_dashboards" in request.permissions
 
-    def test_guest_has_only_view_dashboard_permission(self, guest_user):
+    def test_member_has_all_dashboard_permissions(self, guest_user):
+        # resource-sharing model: all roles can manage their own dashboards;
+        # access control governs visibility, not creation rights
         request = mock_request(guest_user)
         assert "can_view_dashboards" in request.permissions
-        assert "can_create_dashboards" not in request.permissions
-        assert "can_edit_dashboards" not in request.permissions
-        assert "can_delete_dashboards" not in request.permissions
-        assert "can_share_dashboards" not in request.permissions
+        assert "can_create_dashboards" in request.permissions
+        assert "can_edit_dashboards" in request.permissions
+        assert "can_delete_dashboards" in request.permissions
+        assert "can_share_dashboards" in request.permissions
 
 
 # ================================================================================
@@ -298,56 +297,65 @@ class TestReportViewPermissions:
     @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
     def test_guest_can_view_snapshot(self, mock_inject, guest_user, snapshot):
         request = mock_request(guest_user)
-        response = get_snapshot_view(request, snapshot.id)
+        response = get_snapshot_view(request, snapshot_id=snapshot.id)
         assert response["success"] is True
 
     @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
     def test_analyst_can_view_snapshot(self, mock_inject, analyst_user, snapshot):
         request = mock_request(analyst_user)
-        response = get_snapshot_view(request, snapshot.id)
+        response = get_snapshot_view(request, snapshot_id=snapshot.id)
         assert response["success"] is True
 
     @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
     def test_pipeline_manager_can_view_snapshot(self, mock_inject, pipeline_manager_user, snapshot):
         request = mock_request(pipeline_manager_user)
-        response = get_snapshot_view(request, snapshot.id)
+        response = get_snapshot_view(request, snapshot_id=snapshot.id)
         assert response["success"] is True
 
 
 # ================================================================================
-# Test Report Endpoints - Guest Cannot Create/Edit/Delete/Share
-# Guest is the ONLY role lacking these permissions
+# Test Report Endpoints - Member access control (resource-sharing model)
+# All roles have create/edit/delete/share dashboard permissions.
+# @has_access still blocks edits on resources owned by others.
 # ================================================================================
 
 
 class TestGuestReportRestrictions:
-    """Test that Guest cannot create, edit, delete, or share reports."""
+    """Test that Guest (member) cannot edit/delete reports they don't own.
 
-    def test_guest_cannot_create_snapshot(self, guest_user):
+    In the resource-sharing model, member has can_create/edit/delete/share_dashboards,
+    so permission checks pass. Access control (@has_access) still blocks edits on
+    resources owned by others.
+    """
+
+    def test_member_can_reach_create_snapshot_endpoint(self, guest_user):
+        # member now has can_create_dashboards; permission check passes,
+        # 400 (not 403) means the endpoint was reached
         request = mock_request(guest_user)
         payload = SnapshotCreate(
-            title="Guest Report",
+            title="Member Report",
             dashboard_id=1,
             date_column=DateColumnSchema(
                 schema_name="public", table_name="orders", column_name="created_at"
             ),
             period_end=date(2026, 3, 31),
         )
-        assert_permission_denied(create_snapshot, request, payload)
+        with pytest.raises(HttpError) as exc_info:
+            create_snapshot(request, payload)
+        assert exc_info.value.status_code == 400  # dashboard not found, not 403 permission denied
 
     def test_guest_cannot_update_snapshot(self, guest_user, snapshot):
         request = mock_request(guest_user)
         payload = SnapshotUpdate(summary="Guest edit attempt")
-        assert_permission_denied(update_snapshot, request, snapshot.id, payload)
+        assert_permission_denied(update_snapshot, request, snapshot_id=snapshot.id, payload=payload)
 
     def test_guest_cannot_delete_snapshot(self, guest_user, snapshot):
         request = mock_request(guest_user)
-        assert_permission_denied(delete_snapshot, request, snapshot.id)
+        assert_permission_denied(delete_snapshot, request, snapshot_id=snapshot.id)
 
-    def test_guest_cannot_toggle_sharing(self, guest_user, snapshot):
-        request = mock_request(guest_user)
-        payload = ShareToggle(is_public=True)
-        assert_permission_denied(toggle_report_sharing, request, snapshot.id, payload)
+    # Removed test_guest_cannot_toggle_sharing — the toggle_report_sharing
+    # endpoint was deleted; sharing now flows through PATCH /general-access
+    # (covered by test_access_api.py::test_non_edit_holder_cannot_change_mode).
 
 
 # ================================================================================
@@ -361,49 +369,64 @@ class TestNonGuestReportAccess:
     def test_super_admin_can_update_snapshot(self, super_admin_user, snapshot):
         request = mock_request(super_admin_user)
         payload = SnapshotUpdate(summary="Admin update")
-        response = update_snapshot(request, snapshot.id, payload)
+        response = update_snapshot(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
 
     def test_account_manager_can_update_snapshot(self, account_manager_user, snapshot):
         request = mock_request(account_manager_user)
         payload = SnapshotUpdate(summary="AcctMgr update")
-        response = update_snapshot(request, snapshot.id, payload)
+        response = update_snapshot(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
 
     def test_pipeline_manager_can_update_snapshot(self, pipeline_manager_user, snapshot):
         request = mock_request(pipeline_manager_user)
         payload = SnapshotUpdate(summary="PipeMgr update")
-        response = update_snapshot(request, snapshot.id, payload)
+        response = update_snapshot(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
 
     def test_analyst_can_update_snapshot(self, analyst_user, snapshot):
         request = mock_request(analyst_user)
         payload = SnapshotUpdate(summary="Analyst update")
-        response = update_snapshot(request, snapshot.id, payload)
+        response = update_snapshot(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
 
 
 # ================================================================================
-# Test Comment Endpoints - Guest Cannot Create/Update/Delete (can_edit_dashboards)
+# Test Comment Endpoints - Member comment restrictions (resource-sharing model)
+# Member has can_edit_dashboards + VIEW floor access to non-private reports,
+# so they can CREATE comments. They cannot UPDATE/DELETE others' comments
+# (service-layer author-only check).
 # ================================================================================
 
 
 class TestGuestCommentRestrictions:
-    """Test that Guest cannot create, update, or delete comments."""
+    """Member can create comments; cannot update/delete comments they don't own."""
 
-    def test_guest_cannot_create_comment(self, guest_user, snapshot):
+    @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
+    def test_member_can_create_comment(self, mock_mentions, guest_user, snapshot):
+        # member has can_edit_dashboards + VIEW floor access → comment creation succeeds
         request = mock_request(guest_user)
-        payload = CommentCreate(target_type="summary", content="Guest comment")
-        assert_permission_denied(create_comment, request, snapshot.id, payload)
+        payload = CommentCreate(target_type="summary", content="Member comment")
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
+        assert response["success"] is True
+        Comment.objects.filter(id=response["data"]["id"]).delete()
 
     def test_guest_cannot_update_comment(self, guest_user, snapshot, comment):
         request = mock_request(guest_user)
         payload = CommentUpdate(content="Guest edit")
-        assert_permission_denied(update_comment, request, snapshot.id, comment.id, payload)
+        assert_permission_denied(
+            update_comment,
+            request,
+            snapshot_id=snapshot.id,
+            comment_id=comment.id,
+            payload=payload,
+        )
 
     def test_guest_cannot_delete_comment(self, guest_user, snapshot, comment):
         request = mock_request(guest_user)
-        assert_permission_denied(delete_comment, request, snapshot.id, comment.id)
+        assert_permission_denied(
+            delete_comment, request, snapshot_id=snapshot.id, comment_id=comment.id
+        )
 
 
 # ================================================================================
@@ -416,18 +439,18 @@ class TestGuestCommentReadAccess:
 
     def test_guest_can_list_comments(self, guest_user, snapshot):
         request = mock_request(guest_user)
-        response = list_comments(request, snapshot.id, target_type="summary")
+        response = list_comments(request, snapshot_id=snapshot.id, target_type="summary")
         assert response["success"] is True
 
     def test_guest_can_get_comment_states(self, guest_user, snapshot):
         request = mock_request(guest_user)
-        response = get_comment_states(request, snapshot.id)
+        response = get_comment_states(request, snapshot_id=snapshot.id)
         assert response["success"] is True
 
     def test_guest_can_mark_as_read(self, guest_user, snapshot):
         request = mock_request(guest_user)
         payload = MarkReadRequest(target_type="summary")
-        response = mark_as_read(request, snapshot.id, payload)
+        response = mark_as_read(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
 
     def test_guest_can_get_mentionable_users(self, guest_user):
@@ -448,7 +471,7 @@ class TestNonGuestCommentAccess:
     def test_super_admin_can_create_comment(self, mock_mentions, super_admin_user, snapshot):
         request = mock_request(super_admin_user)
         payload = CommentCreate(target_type="summary", content="Admin comment")
-        response = create_comment(request, snapshot.id, payload)
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         Comment.objects.filter(id=response["data"]["id"]).delete()
 
@@ -458,7 +481,7 @@ class TestNonGuestCommentAccess:
     ):
         request = mock_request(account_manager_user)
         payload = CommentCreate(target_type="summary", content="AcctMgr comment")
-        response = create_comment(request, snapshot.id, payload)
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         Comment.objects.filter(id=response["data"]["id"]).delete()
 
@@ -468,7 +491,7 @@ class TestNonGuestCommentAccess:
     ):
         request = mock_request(pipeline_manager_user)
         payload = CommentCreate(target_type="summary", content="PipeMgr comment")
-        response = create_comment(request, snapshot.id, payload)
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         Comment.objects.filter(id=response["data"]["id"]).delete()
 
@@ -476,7 +499,7 @@ class TestNonGuestCommentAccess:
     def test_analyst_can_create_comment(self, mock_mentions, analyst_user, snapshot):
         request = mock_request(analyst_user)
         payload = CommentCreate(target_type="summary", content="Analyst comment")
-        response = create_comment(request, snapshot.id, payload)
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         Comment.objects.filter(id=response["data"]["id"]).delete()
 
@@ -486,60 +509,14 @@ class TestNonGuestCommentAccess:
 # ================================================================================
 
 
-class TestSharingStatusOwnerCheck:
-    """Test that non-owners get 403 from the service layer (not the permission decorator)."""
-
-    def test_guest_gets_403_from_service(self, guest_user, snapshot):
-        """Guest passes permission check (can_view_dashboards) but fails owner-only."""
-        request = mock_request(guest_user)
-        with pytest.raises(HttpError) as exc_info:
-            get_report_sharing_status(request, snapshot.id)
-        assert exc_info.value.status_code == 403
-
-    def test_non_owner_analyst_gets_403_from_service(self, analyst_user, snapshot):
-        """Analyst has can_view_dashboards but isn't the owner → 403."""
-        request = mock_request(analyst_user)
-        with pytest.raises(HttpError) as exc_info:
-            get_report_sharing_status(request, snapshot.id)
-        assert exc_info.value.status_code == 403
-
-    def test_owner_can_view_sharing_status(self, account_manager_user, snapshot):
-        """Owner (creator) can view sharing status."""
-        request = mock_request(account_manager_user)
-        response = get_report_sharing_status(request, snapshot.id)
-        assert response["success"] is True
-
-
-# ================================================================================
-# Test Sharing - creator-or-admin policy, incl. orphaned snapshots
-# ================================================================================
-
-
-class TestSharingCreatorOrAdmin:
-    """Admins can manage sharing of snapshots they didn't create — including
-    orphaned ones whose creator was deleted (created_by=None)."""
-
-    def test_admin_can_view_sharing_status_of_orphaned_snapshot(self, super_admin_user, snapshot):
-        """an admin can read sharing status after the creator is deleted"""
-        snapshot.created_by = None
-        snapshot.save()
-        request = mock_request(super_admin_user)
-
-        response = get_report_sharing_status(request, snapshot.id)
-
-        assert response["success"] is True
-
-    def test_admin_can_toggle_sharing_of_orphaned_snapshot(self, super_admin_user, snapshot):
-        """an admin can make an orphaned snapshot public"""
-        snapshot.created_by = None
-        snapshot.save()
-        request = mock_request(super_admin_user)
-
-        toggle_report_sharing(request, snapshot.id, ShareToggle(is_public=True))
-
-        snapshot.refresh_from_db()
-        assert snapshot.is_public is True
-        assert snapshot.public_share_token
+# Removed TestSharingStatusOwnerCheck + TestSharingCreatorOrAdmin — the
+# toggle_report_sharing / get_report_sharing_status endpoints were removed
+# when public/private moved to the unified PATCH /general-access endpoint.
+# Coverage equivalents:
+# - View-holder cannot toggle → test_access_api.py::test_non_edit_holder_cannot_change_mode
+# - Public link + org allow_public_sharing → test_access_api.py general-access section
+# - Orphaned resource share management → test_access_api.py::test_admin_can_transfer_ownership_even_when_not_owner
+#   and covered by test_access_api.py orphan tests
 
 
 # ================================================================================
@@ -554,14 +531,14 @@ class TestDeleteOwnerCheck:
         """Analyst isn't the owner or an admin → 403 on delete."""
         request = mock_request(analyst_user)
         with pytest.raises(HttpError) as exc_info:
-            delete_snapshot(request, snapshot.id)
+            delete_snapshot(request, snapshot_id=snapshot.id)
         assert exc_info.value.status_code == 403
 
     def test_owner_can_delete(self, account_manager_user, snapshot):
         """Owner (creator) can delete the snapshot."""
         snapshot_id = snapshot.id
         request = mock_request(account_manager_user)
-        response = delete_snapshot(request, snapshot_id)
+        response = delete_snapshot(request, snapshot_id=snapshot_id)
         assert response["success"] is True
 
 
@@ -579,7 +556,7 @@ class TestPdfExportPermissions:
         The actual PDF generation may fail (no Playwright), but permission is granted."""
         request = mock_request(guest_user)
         try:
-            export_report_pdf(request, snapshot.id)
+            export_report_pdf(request, snapshot_id=snapshot.id)
         except HttpError as e:
             # 500 = PDF generation failure (expected without Playwright)
             # 403/404 = permission denied (should NOT happen)
@@ -588,7 +565,7 @@ class TestPdfExportPermissions:
     def test_analyst_can_access_pdf_export(self, analyst_user, snapshot):
         request = mock_request(analyst_user)
         try:
-            export_report_pdf(request, snapshot.id)
+            export_report_pdf(request, snapshot_id=snapshot.id)
         except HttpError as e:
             assert e.status_code == 500, f"Expected 500 (PDF gen failure), got {e.status_code}"
 
@@ -606,6 +583,6 @@ class TestDatetimeColumnsPermissions:
         Will get 404 because dashboard doesn't exist, not 403."""
         request = mock_request(guest_user)
         with pytest.raises(HttpError) as exc_info:
-            list_dashboard_datetime_columns(request, 99999)
+            list_dashboard_datetime_columns(request, dashboard_id=99999)
         # 404 = dashboard not found (permission passed), not 403
         assert exc_info.value.status_code == 404

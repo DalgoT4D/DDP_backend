@@ -200,3 +200,116 @@ class TestCreateOrgAndUserCommand:
         user = User.objects.get(email=user_email)
         orguser = OrgUser.objects.get(org=org, user=user)
         assert orguser.new_role.slug == "super-admin"
+
+
+# ================================================================================
+# Test purge_old_audit_logs command
+# ================================================================================
+from datetime import timedelta
+from django.utils import timezone
+from ddpui.models.audit_log import AuditLog, AuditLogResourceType, AuditLogAction
+
+
+class TestPurgeOldAuditLogsCommand:
+    """Test cases for the purge_old_audit_logs management command"""
+
+    @pytest.fixture
+    def org_for_audit(self):
+        """Create an org for audit log tests"""
+        org = Org.objects.create(name="Audit Test Org", slug="audit-test-org")
+        yield org
+        org.delete()
+
+    def test_purge_deletes_old_entries(self, org_for_audit):
+        """Test that entries older than retention period are deleted"""
+        # Create old audit log entry (400 days old)
+        old_entry = AuditLog.objects.create(
+            org=org_for_audit,
+            resource_type=AuditLogResourceType.CHART,
+            resource_id="1",
+            action=AuditLogAction.CREATE,
+        )
+        old_entry.timestamp = timezone.now() - timedelta(days=400)
+        old_entry.save()
+
+        # Create recent entry (10 days old)
+        recent_entry = AuditLog.objects.create(
+            org=org_for_audit,
+            resource_type=AuditLogResourceType.DASHBOARD,
+            resource_id="2",
+            action=AuditLogAction.UPDATE,
+        )
+        recent_entry.timestamp = timezone.now() - timedelta(days=10)
+        recent_entry.save()
+
+        assert AuditLog.objects.count() == 2
+
+        # Run the command with default 365 days retention
+        out = StringIO()
+        call_command("purge_old_audit_logs", stdout=out)
+
+        # Old entry should be deleted, recent should remain
+        assert AuditLog.objects.count() == 1
+        assert AuditLog.objects.filter(id=recent_entry.id).exists()
+        assert not AuditLog.objects.filter(id=old_entry.id).exists()
+        assert "Deleted 1 audit log entries" in out.getvalue()
+
+    def test_purge_with_custom_days(self, org_for_audit):
+        """Test purging with custom retention days"""
+        # Create entry 50 days old
+        entry = AuditLog.objects.create(
+            org=org_for_audit,
+            resource_type=AuditLogResourceType.METRIC,
+            resource_id="1",
+            action=AuditLogAction.DELETE,
+        )
+        entry.timestamp = timezone.now() - timedelta(days=50)
+        entry.save()
+
+        assert AuditLog.objects.count() == 1
+
+        # Run with 30 days retention - entry should be deleted
+        out = StringIO()
+        call_command("purge_old_audit_logs", "--days=30", stdout=out)
+
+        assert AuditLog.objects.count() == 0
+        assert "Deleted 1 audit log entries" in out.getvalue()
+
+    def test_purge_dry_run(self, org_for_audit):
+        """Test dry run doesn't delete anything"""
+        # Create old entry
+        old_entry = AuditLog.objects.create(
+            org=org_for_audit,
+            resource_type=AuditLogResourceType.KPI,
+            resource_id="1",
+            action=AuditLogAction.CREATE,
+        )
+        old_entry.timestamp = timezone.now() - timedelta(days=400)
+        old_entry.save()
+
+        assert AuditLog.objects.count() == 1
+
+        # Run dry run
+        out = StringIO()
+        call_command("purge_old_audit_logs", "--dry-run", stdout=out)
+
+        # Entry should still exist
+        assert AuditLog.objects.count() == 1
+        assert "DRY RUN" in out.getvalue()
+        assert "Would delete 1 audit log entries" in out.getvalue()
+
+    def test_purge_no_entries_to_delete(self, org_for_audit):
+        """Test when no entries are old enough to delete"""
+        # Create recent entry
+        recent_entry = AuditLog.objects.create(
+            org=org_for_audit,
+            resource_type=AuditLogResourceType.REPORT,
+            resource_id="1",
+            action=AuditLogAction.CREATE,
+        )
+
+        out = StringIO()
+        call_command("purge_old_audit_logs", stdout=out)
+
+        assert AuditLog.objects.count() == 1
+        assert "No audit log entries older than" in out.getvalue()

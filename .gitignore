@@ -148,6 +148,10 @@ celerybeat-schedule.db
 createsources.env
 parseprefectlogs.env
 
+# trial-clone template source creds (real Airbyte source configs — never commit)
+template_source_creds*.json
+.template_source_creds*.json
+
 # yml configs
 whitelist.py
 cloudbuild.yaml
@@ -160,3 +164,10 @@ platform-notifications/
 
 .vscode/
 .claude/worktrees/
+
+# Required for trial org creation
+.template_source_creds.json
+# MANAGED-SA bridge: Dalgo-managed Google service-account key. Never commit a private key.
+.dalgo_service_json_key.json
+
+

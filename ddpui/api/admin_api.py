@@ -226,8 +226,8 @@ def put_admin_org_user_role(request, org_id: int, orguser_id: int, payload: Admi
 @admin_router.get("/orgs/{org_id}/users/{orguser_id}/removal-impact", response=RemovalImpactSchema)
 @has_permission(["can_manage_platform"])
 def get_admin_org_user_removal_impact(request, org_id: int, orguser_id: int):
-    """Count the content removing this user would orphan, so the confirm dialog can
-    warn before the action."""
+    """Count the content removing this user would move to the remover, so the confirm
+    dialog can warn before the action."""
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
     dashboards_orphaned, charts_orphaned, reports_orphaned = admin_service.removal_impact(orguser)
@@ -241,8 +241,9 @@ def get_admin_org_user_removal_impact(request, org_id: int, orguser_id: int):
 @admin_router.delete("/orgs/{org_id}/users/{orguser_id}", response=AdminSuccessSchema)
 @has_permission(["can_manage_platform"])
 def delete_admin_org_user(request, org_id: int, orguser_id: int):
-    """Remove a user from the org. Their created content is orphaned (created_by
-    SET_NULL), not deleted. Callers should show the removal-impact warning first."""
+    """Remove a user from the org. Their created content is reassigned to the admin
+    doing the removal, not deleted. Callers should show the removal-impact warning
+    first."""
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
 

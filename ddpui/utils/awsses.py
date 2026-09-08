@@ -1,4 +1,10 @@
-"""send emails using SES"""
+"""SES transport primitives + biz-dev broadcast helpers.
+
+Higher-level notification flows (alerts, mentions, report shares, user
+transactional, trial lifecycle) build on ``send_text_message`` /
+``send_html_message`` / ``send_email_with_attachment`` here but live under
+``ddpui.core.notifications.triggers``.
+"""
 
 import os
 import email.mime.multipart
@@ -6,6 +12,10 @@ import email.mime.text
 import email.mime.application
 
 from ddpui.utils.aws_client import AWSClient
+from ddpui.utils.custom_logger import CustomLogger
+
+
+logger = CustomLogger("ddpui.utils.awsses")
 
 
 def _get_ses_client():
@@ -79,57 +89,3 @@ def send_email_with_attachment(
         Destinations=[to_email],
         RawMessage={"Data": msg.as_string()},
     )
-
-
-def send_password_reset_email(to_email: str, reset_url: str) -> None:
-    """send a password reset email"""
-    message = f"""Hello,
-
-We received a request to reset your Dalgo password.
-
-Please click this link to begin: {reset_url}.
-
-If you did not request a password reset you may safely ignore this email.
-
-"""
-    send_text_message(to_email, "You've requested a password reset", message)
-
-
-def send_signup_email(to_email: str, verification_url: str) -> None:
-    """send a signup email with an email verification link"""
-    message = f"""Hello,
-
-Welcome to Dalgo! Please verify your email address by clicking the link below
-
-{verification_url}
-
-    """
-    send_text_message(to_email, "Welcome to Dalgo", message)
-
-
-def send_invite_user_email(to_email: str, invited_by_email: str, invite_url: str) -> None:
-    """send an invitation email to the user with the invite link through which they will set their password"""
-    message = f"""Hello,
-
-Welcome to Dalgo.
-
-You have been invited by {invited_by_email}
-
-Click here to accept: {invite_url}
-
-    """
-    send_text_message(to_email, "Welcome to Dalgo", message)
-
-
-def send_youve_been_added_email(to_email: str, added_by: str, org_name: str) -> None:
-    """sends an email notification informing an existing dalgo user that they have
-    been granted access to a new org
-    """
-    url = os.getenv("FRONTEND_URL")
-    message = f"""Hello,
-
-You've been added to {org_name} by {added_by}.
-
-Open your dashboard at {url}
-    """
-    send_text_message(to_email, "Added to Dalgo Org", message)

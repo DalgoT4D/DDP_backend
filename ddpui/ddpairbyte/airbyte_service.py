@@ -40,20 +40,22 @@ def abreq(endpoint, req=None, **kwargs):
     abport = os.getenv("AIRBYTE_SERVER_PORT")
     abver = os.getenv("AIRBYTE_SERVER_APIVER")
     token = os.getenv("AIRBYTE_API_TOKEN")
+    use_ssl = os.getenv("AIRBYTE_USE_SSL", "false").lower() == "true"
+    protocol = "https" if use_ssl else "http"
 
     logger.info("Making request to Airbyte server: %s", endpoint)
     try:
         res = {}
         if method == "POST":
             res = requests.post(
-                f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
+                f"{protocol}://{abhost}:{abport}/api/{abver}/{endpoint}",
                 headers={"Authorization": f"Basic {token}"},
                 json=req,
                 timeout=kwargs.get("timeout", 30),
             )
         elif method == "GET":
             res = requests.get(
-                f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
+                f"{protocol}://{abhost}:{abport}/api/{abver}/{endpoint}",
                 headers={"Authorization": f"Basic {token}"},
                 json=req,
                 timeout=kwargs.get("timeout", 30),

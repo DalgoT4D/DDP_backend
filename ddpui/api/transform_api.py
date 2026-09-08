@@ -41,6 +41,8 @@ from ddpui.core.dbtautomation_service import (
     validate_and_return_inputs_for_multi_input_op,
 )
 from ddpui.auth import has_permission
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.core.git_manager import GitManager
 from ddpui.ddpdbt import dbt_service
 
@@ -67,6 +69,17 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     org_dir.mkdir(parents=True, exist_ok=True)
 
     setup_managed_git_workspace(org, project_name="dbtrepo", default_schema=payload.default_schema)
+
+    orgdbt = org.dbt
+    if orgdbt:
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DBT,
+            resource_id=str(orgdbt.id),
+            action=AuditLogAction.CREATE,
+            resource_fields={"default_schema": payload.default_schema},
+        )
 
     return {"message": f"Project {org.slug} created successfully"}
 
@@ -131,6 +144,15 @@ def delete_dbt_project(request, project_name: str, force_delete: bool = False):
         logger.warning(f"DELETING DIRECTORY: {project_dir}")
         shutil.rmtree(project_dir)
 
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DBT,
+            resource_id=str(orgdbt.id),
+            action=AuditLogAction.DELETE,
+            resource_fields={"name": project_name},
+        )
+
     logger.warning(f"DELETION COMPLETED: org={org.slug}, project={project_name}")
     return {"message": f"Project {project_name} deleted successfully"}
 
@@ -168,6 +190,14 @@ def sync_sources(request):
     )
 
     sync_sources_for_warehouse_v2.delay(orgdbt.id, org_warehouse.id, task_id, hashkey)
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgdbt.id),
+        action=AuditLogAction.EXECUTE,
+    )
 
     return {"task_id": task_id, "hashkey": hashkey}
 
@@ -448,6 +478,15 @@ def delete_orgdbtmodel(request, model_uuid, canvas_lock_id: str = None, cascade:
     # Delete the database record
     orgdbt_model.delete()
 
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(model_uuid),
+        action=AuditLogAction.DELETE,
+        resource_fields={"name": orgdbt_model.name},
+    )
+
     return {"success": 1}
 
 
@@ -540,12 +579,13 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
     Simplifies the complex source/model creation by using unified CanvasNode.
     """
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
     if not org_warehouse:
         raise HttpError(404, "please setup your warehouse first")
 
-    orgdbt = orguser.org.dbt
+    orgdbt = org.dbt
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
@@ -598,6 +638,16 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
         )
 
         logger.info(f"source/model node created successfully: {canvas_node.uuid}")
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DBT,
+            resource_id=str(canvas_node.uuid),
+            action=AuditLogAction.CREATE,
+            resource_fields={"name": canvas_node.name},
+        )
+
         return convert_canvas_node_to_frontend_format(canvas_node)
 
     except HttpError:
@@ -621,12 +671,13 @@ def post_add_operation_node(request, payload: CreateOperationNodePayload):
     No more sequence tracking or implicit relationships - everything is explicit via edges.
     """
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
     if not org_warehouse:
         raise HttpError(404, "please setup your warehouse first")
 
-    orgdbt = orguser.org.dbt
+    orgdbt = org.dbt
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
@@ -720,6 +771,16 @@ def post_add_operation_node(request, payload: CreateOperationNodePayload):
                     )
 
             logger.info(f"operation created successfully: {canvas_node.uuid}")
+
+            create_audit_log(
+                org=org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.DBT,
+                resource_id=str(canvas_node.uuid),
+                action=AuditLogAction.CREATE,
+                resource_fields={"name": canvas_node.name},
+            )
+
             return convert_canvas_node_to_frontend_format(canvas_node)
 
     except CanvasNode.DoesNotExist:
@@ -751,12 +812,13 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
 
     """
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
     if not org_warehouse:
         raise HttpError(404, "please setup your warehouse first")
 
-    orgdbt = orguser.org.dbt
+    orgdbt = org.dbt
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
@@ -853,6 +915,15 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
                     )
 
             logger.info(f"operation updated successfully: {curr_operation_node.uuid}")
+
+            create_audit_log(
+                org=orguser.org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.DBT,
+                resource_id=str(curr_operation_node.uuid),
+                action=AuditLogAction.UPDATE,
+                resource_fields={"name": curr_operation_node.name},
+            )
             return convert_canvas_node_to_frontend_format(curr_operation_node)
 
     except HttpError:
@@ -877,12 +948,13 @@ def post_terminate_operation_node(
     Basically materialize the chain into a model.
     """
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
     if not org_warehouse:
         raise HttpError(404, "please setup your warehouse first")
 
-    orgdbt = orguser.org.dbt
+    orgdbt = org.dbt
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
@@ -955,6 +1027,15 @@ def post_terminate_operation_node(
             )
 
         logger.info(f"V2 operation node terminated successfully: {node_uuid}")
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DBT,
+            resource_id=str(model_node.uuid),
+            action=AuditLogAction.CREATE,
+            resource_fields={"name": model_node.name},
+        )
         return convert_canvas_node_to_frontend_format(model_node)
 
     except CanvasNode.DoesNotExist:
@@ -979,7 +1060,8 @@ def delete_canvas_node(request, node_uuid: str):
     This operation is atomic - if any step fails, all changes are rolled back.
     """
     orguser: OrgUser = request.orguser
-    orgdbt = orguser.org.dbt
+    org = orguser.org
+    orgdbt = org.dbt
 
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
@@ -994,9 +1076,18 @@ def delete_canvas_node(request, node_uuid: str):
             elif dbtmodel.type == OrgDbtModelType.SOURCE:
                 dbtautomation_service.delete_dbt_source_in_project(dbtmodel)
 
+        canvas_node_name = canvas_node.name
         canvas_node.delete()
 
         logger.info(f"canvas node deleted successfully: {node_uuid}")
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DBT,
+            resource_id=str(node_uuid),
+            action=AuditLogAction.DELETE,
+            resource_fields={"name": canvas_node_name},
+        )
         return {"success": 1}
     except CanvasNode.DoesNotExist:
         logger.error(f"Canvas node {node_uuid} not found")
@@ -1086,7 +1177,17 @@ def sync_remote_dbtproject_to_canvas(request):
     except OrgWarehouse.DoesNotExist:
         raise HttpError(400, "Organization does not have a warehouse configured")
 
-    return dbt_service.sync_remote_dbtproject_to_canvas(org, orgdbt, warehouse_obj)
+    result = dbt_service.sync_remote_dbtproject_to_canvas(org, orgdbt, warehouse_obj)
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgdbt.id),
+        action=AuditLogAction.UPDATE,
+    )
+
+    return result
 
 
 @transform_router.get("/v2/dbt_project/models_directories/")

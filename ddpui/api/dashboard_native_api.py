@@ -16,8 +16,11 @@ from ddpui.models.dashboard import (
     DashboardFilterType,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.auth import has_permission
-from ddpui.core.ownership import is_creator_or_admin
+from ddpui.auth import has_permission, has_access
+from ddpui.models.resource_share import AccessLevel, AccessRequest, ResourceShare, ResourceType
+from ddpui.core.access import access_control
+from ddpui.core.access.ownership import is_creator_or_admin
+from ddpui.core.access.resource_share import sync_dashboard_cascade
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -41,12 +44,11 @@ from ddpui.schemas.dashboard_schema import (
     FilterOptionResponse,
     FilterOptionsResponse,
     LockResponse,
-    DashboardShareToggle,
-    DashboardShareResponse,
-    DashboardShareStatus,
     LandingPageResponse,
     LandingPageResolveResponse,
 )
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 
 logger = CustomLogger("ddpui")
 
@@ -70,13 +72,32 @@ def list_dashboards(
         dashboard_type=dashboard_type,
         search=search,
         is_published=is_published,
+        orguser=orguser,
     )
 
-    return [DashboardResponse(**DashboardService.get_dashboard_response(d)) for d in dashboards]
+    favorited_dashboard_ids = DashboardService.get_favorited_dashboard_ids(
+        [d.id for d in dashboards], orguser
+    )
+    levels = access_control.get_user_access_map(orguser, ResourceType.DASHBOARD, dashboards)
+
+    return [
+        DashboardResponse(
+            **DashboardService.get_dashboard_response(
+                d, is_favorite=d.id in favorited_dashboard_ids
+            ),
+            access_level=levels[d.pk],
+        )
+        for d in dashboards
+    ]
 
 
 @dashboard_native_router.get("/{dashboard_id}/", response=DashboardResponse)
 @has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.VIEW,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def get_dashboard(request, dashboard_id: int):
     """Get a specific dashboard"""
     orguser: OrgUser = request.orguser
@@ -86,7 +107,13 @@ def get_dashboard(request, dashboard_id: int):
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(
+            dashboard,
+            is_favorite=DashboardService.is_dashboard_favorited(dashboard.id, orguser),
+        ),
+        access_level=request.access_level,
+    )
 
 
 @dashboard_native_router.post("/", response=DashboardResponse)
@@ -94,6 +121,7 @@ def get_dashboard(request, dashboard_id: int):
 def create_dashboard(request, payload: DashboardCreate):
     """Create a new dashboard"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     dashboard_data = DashboardData(
         title=payload.title,
@@ -103,7 +131,7 @@ def create_dashboard(request, payload: DashboardCreate):
     dashboard = DashboardService.create_dashboard(dashboard_data, orguser)
 
     # --- Custom logic for org default and landing dashboard (permission-driven) ---
-    has_org_default = Dashboard.objects.filter(org=orguser.org, is_org_default=True).exists()
+    has_org_default = Dashboard.objects.filter(org=org, is_org_default=True).exists()
 
     # If no org default dashboard exists, assign based on permission
     if not has_org_default:
@@ -116,19 +144,55 @@ def create_dashboard(request, payload: DashboardCreate):
                 orguser.landing_dashboard = dashboard
                 orguser.save(update_fields=["landing_dashboard"])
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DASHBOARD,
+        resource_id=str(dashboard.id),
+        action=AuditLogAction.CREATE,
+        resource_fields={
+            "title": payload.title,
+            "description": payload.description or "",
+            "grid_columns": payload.grid_columns,
+        },
+    )
+
+    # Materialise the owner's access as a self-share row so it survives
+    # future org-floor changes. The dashboard has no tabs yet, so no cascade
+    # children are created — sync_dashboard_cascade only writes the top-level
+    # self-share here. Subsequent tab updates add children.
+    sync_dashboard_cascade(dashboard)
+
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(dashboard), access_level=AccessLevel.EDIT
+    )
 
 
 @dashboard_native_router.put("/{dashboard_id}/", response=DashboardResponse)
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.EDIT,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     """Update dashboard with auto-save support"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # Snapshot pre-update state so the audit log can skip fields that are
+    # present in the payload but identical to what's already saved — e.g.
+    # the save-on-tab-away flow re-sending the full current state with
+    # nothing actually edited. This is a targeted exception to the rest of
+    # the platform's "no prior-state diffing" design (see plan.md), scoped
+    # only to this "should we log at all" decision — the logged content is
+    # still the curated new-state snapshot below, never an old/new pair.
+    old_dashboard = Dashboard.objects.filter(id=dashboard_id, org=org).first()
 
     try:
         dashboard = DashboardService.update_dashboard(
             dashboard_id=dashboard_id,
-            org=orguser.org,
+            org=org,
             orguser=orguser,
             data=payload,
         )
@@ -137,17 +201,70 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     except DashboardLockedError as err:
         raise HttpError(423, err.message) from err
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    if payload.tabs is not None:
+        sync_dashboard_cascade(dashboard)
+
+    # DashboardService.update_dashboard only touches a field when it's not
+    # None — a genuine partial patch (auto-save may only send one field).
+    raw_resource_fields = {
+        "title": payload.title,
+        "description": payload.description,
+        "grid_columns": payload.grid_columns,
+        "target_screen_size": payload.target_screen_size,
+        "tabs": [tab.model_dump() for tab in payload.tabs] if payload.tabs is not None else None,
+        "filter_layout": payload.filter_layout,
+        "is_published": payload.is_published,
+    }
+    touched_fields = {k: v for k, v in raw_resource_fields.items() if v is not None}
+
+    def _blank_normalized(value):
+        """Treat None and "" as equivalent. Dashboard.description defaults to
+        None in the DB, but the frontend always sends "" when a field has no
+        value — without this, that mismatch alone looks like a real change."""
+        return value if value not in (None, "") else None
+
+    resource_fields = (
+        {
+            k: v
+            for k, v in touched_fields.items()
+            if _blank_normalized(v) != _blank_normalized(getattr(old_dashboard, k))
+        }
+        if old_dashboard
+        else touched_fields
+    )
+    if resource_fields:
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DASHBOARD,
+            resource_id=str(dashboard_id),
+            action=AuditLogAction.UPDATE,
+            resource_fields={**resource_fields, "title": dashboard.title},
+        )
+
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(
+            dashboard,
+            is_favorite=DashboardService.is_dashboard_favorited(dashboard.id, orguser),
+        ),
+        access_level=request.access_level,
+    )
 
 
 @dashboard_native_router.delete("/{dashboard_id}/")
 @has_permission(["can_delete_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.EDIT,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def delete_dashboard(request, dashboard_id: int):
     """Delete a dashboard"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
-        DashboardService.delete_dashboard(dashboard_id, orguser.org, orguser)
+        dashboard_name = DashboardService.delete_dashboard(dashboard_id, org, orguser)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
     except DashboardPermissionError as err:
@@ -155,19 +272,41 @@ def delete_dashboard(request, dashboard_id: int):
     except DashboardLockedError as err:
         raise HttpError(423, "Cannot delete a locked dashboard") from err
 
+    ResourceShare.objects.filter(
+        org=org, resource_type=ResourceType.DASHBOARD, resource_id=str(dashboard_id)
+    ).delete()
+    AccessRequest.objects.filter(
+        org=org, resource_type=ResourceType.DASHBOARD, resource_id=str(dashboard_id)
+    ).delete()
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DASHBOARD,
+        resource_id=str(dashboard_id),
+        action=AuditLogAction.DELETE,
+        resource_fields={"title": dashboard_name},
+    )
+
     return {"success": True}
 
 
 @dashboard_native_router.post("/{dashboard_id}/duplicate/", response=DashboardResponse)
 @has_permission(["can_create_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.VIEW,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def duplicate_dashboard(request, dashboard_id: int):
     """Duplicate a dashboard with all its configurations and filters"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     # Get the original dashboard
     try:
         original_dashboard = Dashboard.objects.prefetch_related("filters").get(
-            id=dashboard_id, org=orguser.org
+            id=dashboard_id, org=org
         )
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
@@ -206,16 +345,30 @@ def duplicate_dashboard(request, dashboard_id: int):
         )
         new_dashboard.save()
 
-        logger.info(
-            f"Duplicated dashboard {dashboard_id} as {new_dashboard.id} for org {orguser.org.id}"
-        )
+        logger.info(f"Duplicated dashboard {dashboard_id} as {new_dashboard.id} for org {org.id}")
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(new_dashboard))
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DASHBOARD,
+        resource_id=str(new_dashboard.id),
+        action=AuditLogAction.CREATE,
+        resource_fields={"title": new_dashboard.title},
+    )
+
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(new_dashboard), access_level=AccessLevel.EDIT
+    )
 
 
 # Dashboard Lock endpoints
 @dashboard_native_router.post("/{dashboard_id}/lock/", response=LockResponse)
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.EDIT,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def lock_dashboard(request, dashboard_id: int):
     """Lock dashboard for editing"""
     orguser: OrgUser = request.orguser
@@ -235,7 +388,12 @@ def lock_dashboard(request, dashboard_id: int):
 
 
 @dashboard_native_router.put("/{dashboard_id}/lock/refresh/")
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.EDIT,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def refresh_dashboard_lock(request, dashboard_id: int):
     """Refresh dashboard lock to extend expiry"""
     orguser: OrgUser = request.orguser
@@ -261,7 +419,12 @@ def refresh_dashboard_lock(request, dashboard_id: int):
 
 
 @dashboard_native_router.delete("/{dashboard_id}/lock/")
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.EDIT,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def unlock_dashboard(request, dashboard_id: int):
     """Unlock dashboard"""
     orguser: OrgUser = request.orguser
@@ -278,7 +441,12 @@ def unlock_dashboard(request, dashboard_id: int):
 
 # Filter endpoints
 @dashboard_native_router.post("/{dashboard_id}/filters/", response=DashboardFilterResponse)
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.EDIT,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def create_filter(request, dashboard_id: int, payload: FilterCreate):
     """Add a filter to dashboard"""
     orguser: OrgUser = request.orguser
@@ -306,6 +474,11 @@ def create_filter(request, dashboard_id: int, payload: FilterCreate):
     "/{dashboard_id}/filters/{filter_id}/", response=DashboardFilterResponse
 )
 @has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.VIEW,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def get_filter(request, dashboard_id: int, filter_id: int):
     """Get a specific dashboard filter"""
     orguser: OrgUser = request.orguser
@@ -323,7 +496,12 @@ def get_filter(request, dashboard_id: int, filter_id: int):
 @dashboard_native_router.put(
     "/{dashboard_id}/filters/{filter_id}/", response=DashboardFilterResponse
 )
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.EDIT,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpdate):
     """Update a dashboard filter"""
     orguser: OrgUser = request.orguser
@@ -346,7 +524,12 @@ def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpd
 
 
 @dashboard_native_router.delete("/{dashboard_id}/filters/{filter_id}/")
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.EDIT,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def delete_filter(request, dashboard_id: int, filter_id: int):
     """Delete a dashboard filter"""
     orguser: OrgUser = request.orguser
@@ -389,105 +572,6 @@ def get_filter_options(
     return FilterOptionsResponse(options=options, total_count=len(options))
 
 
-# ===== Dashboard Sharing Endpoints =====
-
-
-@dashboard_native_router.put("/{dashboard_id}/share/")
-@has_permission(["can_share_dashboards"])
-def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShareToggle):
-    """Toggle public sharing for a dashboard"""
-    orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-    except Dashboard.DoesNotExist as err:
-        raise HttpError(404, "Dashboard not found") from err
-
-    # Only the dashboard creator or an org admin can modify sharing
-    if not is_creator_or_admin(orguser, dashboard):
-        raise HttpError(
-            403, "Only the dashboard creator or an org admin can modify sharing settings"
-        )
-
-    is_public = payload.is_public
-
-    if is_public:
-        # Generate token if making public
-        if not dashboard.public_share_token:
-            import secrets
-
-            dashboard.public_share_token = secrets.token_urlsafe(48)
-        dashboard.public_shared_at = timezone.now()
-        dashboard.public_disabled_at = None
-    else:
-        # Disable public sharing but keep token for audit
-        dashboard.public_disabled_at = timezone.now()
-
-    dashboard.is_public = is_public
-    dashboard.save()
-
-    # Build response
-    response_data = {
-        "is_public": dashboard.is_public,
-        "message": f'Dashboard {"made public" if is_public else "made private"}',
-    }
-
-    if dashboard.is_public and dashboard.public_share_token:
-        # Generate the full public URL
-        from django.conf import settings
-
-        # Use FRONTEND_URL_V2 for webapp_v2, fallback to FRONTEND_URL, then localhost
-        FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
-        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
-        response_data[
-            "public_url"
-        ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
-        response_data["public_share_token"] = dashboard.public_share_token
-
-    # Audit logging
-    action = "enabled_public_sharing" if is_public else "disabled_public_sharing"
-    logger.info(
-        f"Dashboard {dashboard_id} sharing {action} by user {orguser.user.email}, token: {dashboard.public_share_token}"
-    )
-
-    return DashboardShareResponse(**response_data)
-
-
-@dashboard_native_router.get("/{dashboard_id}/share/")
-@has_permission(["can_view_dashboards"])
-def get_dashboard_sharing_status(request, dashboard_id: int):
-    """Get dashboard sharing status"""
-    orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-    except Dashboard.DoesNotExist as err:
-        raise HttpError(404, "Dashboard not found") from err
-
-    # Only the dashboard creator or an org admin can view sharing status
-    if not is_creator_or_admin(orguser, dashboard):
-        raise HttpError(403, "Only the dashboard creator or an org admin can view sharing settings")
-
-    response_data = {
-        "is_public": dashboard.is_public,
-        "public_access_count": dashboard.public_access_count,
-        "last_public_accessed": dashboard.last_public_accessed,
-        "public_shared_at": dashboard.public_shared_at,
-    }
-
-    if dashboard.is_public and dashboard.public_share_token:
-        from django.conf import settings
-
-        # Use FRONTEND_URL_V2 for webapp_v2, fallback to FRONTEND_URL, then localhost
-        FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
-        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
-        response_data[
-            "public_url"
-        ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
-
-    return DashboardShareStatus(**response_data)
-
-
 # =============================================================================
 # Landing Page Management APIs
 # =============================================================================
@@ -497,13 +581,19 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
     "/landing-page/set-personal/{dashboard_id}", response=LandingPageResponse
 )
 @has_permission(["can_view_dashboards", "can_create_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.VIEW,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def set_personal_landing_dashboard(request, dashboard_id: int):
     """Set a dashboard as user's personal landing page"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     # Check if dashboard exists and belongs to user's org
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=org)
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
@@ -514,6 +604,19 @@ def set_personal_landing_dashboard(request, dashboard_id: int):
     logger.info(
         f"User {orguser.user.email} set dashboard {dashboard.title} as personal landing page"
     )
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DASHBOARD,
+        resource_id=str(dashboard_id),
+        action=AuditLogAction.UPDATE,
+        resource_fields={
+            "title": dashboard.title,
+            "personal_landing_page": {"old": False, "new": True},
+        },
+    )
+
     return LandingPageResponse(success=True, message="Dashboard set as personal landing page")
 
 
@@ -540,19 +643,25 @@ def remove_personal_landing_dashboard(request):
     "/landing-page/set-org-default/{dashboard_id}", response=LandingPageResponse
 )
 @has_permission(["can_manage_org_default_dashboard"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.VIEW,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def set_org_default_dashboard(request, dashboard_id: int):
     """Set a dashboard as organization's default landing page (Admin only)"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     # Check if dashboard exists and belongs to user's org
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=org)
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
     with transaction.atomic():
         # Remove previous org default
-        Dashboard.objects.filter(org=orguser.org, is_org_default=True).update(is_org_default=False)
+        Dashboard.objects.filter(org=org, is_org_default=True).update(is_org_default=False)
 
         # Set new org default
         dashboard.is_org_default = True
@@ -561,6 +670,19 @@ def set_org_default_dashboard(request, dashboard_id: int):
     logger.info(
         f"User {orguser.user.email} set dashboard {dashboard.title} as org default landing page"
     )
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DASHBOARD,
+        resource_id=str(dashboard_id),
+        action=AuditLogAction.UPDATE,
+        resource_fields={
+            "title": dashboard.title,
+            "is_org_default": {"old": False, "new": True},
+        },
+    )
+
     return LandingPageResponse(
         success=True, message="Dashboard set as organization default landing page"
     )
@@ -616,3 +738,41 @@ def resolve_user_landing_page(request):
 
     # 3. No landing page set
     return {"dashboard_id": None, "dashboard_title": None, "dashboard_type": None, "source": "none"}
+
+
+@dashboard_native_router.post("/{dashboard_id}/favorite/", response=dict)
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.VIEW,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
+def favorite_dashboard(request, dashboard_id: int):
+    """Mark a dashboard as favorited by the current user"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        DashboardService.favorite_dashboard(dashboard_id, orguser.org, orguser)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    return {"is_favorite": True}
+
+
+@dashboard_native_router.delete("/{dashboard_id}/favorite/", response=dict)
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.VIEW,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
+def unfavorite_dashboard(request, dashboard_id: int):
+    """Remove the current user's favorite on a dashboard"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        DashboardService.unfavorite_dashboard(dashboard_id, orguser.org, orguser)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    return {"is_favorite": False}

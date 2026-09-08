@@ -1,8 +1,10 @@
-"""Alert delivery — email (SES) + Slack webhook POST.
+"""Alert delivery orchestration — email (via notifications trigger) + Slack.
 
-Each function returns one or more "delivery dicts" — the same JSON shape
-that lands in AlertLog.deliveries. Failures are captured (not raised) so the
-evaluator can record per-recipient outcomes without aborting the loop.
+The email fan-out (and the new in-app + Discord write for orguser recipients)
+lives in ``core.notifications.triggers.alert``. This module keeps only the
+Slack webhook path and the top-level ``deliver_all`` orchestrator, since
+Slack isn't part of the notifications pipeline (no in-app row, no user
+preference gating).
 
 Delivery dict shape (matches AlertLog.deliveries entries):
     {
@@ -18,13 +20,12 @@ Delivery dict shape (matches AlertLog.deliveries entries):
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Iterable, Optional
+from typing import Iterable
 
 import requests
 
+from ddpui.core.notifications.triggers.alert import notify_alert_recipients
 from ddpui.models.alert import Alert
-from ddpui.models.org_user import OrgUser
-from ddpui.utils import awsses, email_templates
 from ddpui.utils.custom_logger import CustomLogger
 
 
@@ -37,53 +38,6 @@ DEFAULT_HTTP_TIMEOUT = 10
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def _resolve_recipient_email(recipient: dict, orguser_email_by_id: dict[int, str]) -> Optional[str]:
-    """Map a stored recipient entry to an email address.
-
-    OrgUser recipients that no longer exist in the org are silently skipped
-    (returns None) — the evaluator records this as a "failed" delivery.
-    """
-    if recipient.get("type") == "external":
-        return recipient.get("email")
-    if recipient.get("type") == "orguser":
-        return orguser_email_by_id.get(recipient.get("orguser_id"))
-    return None
-
-
-def deliver_email(
-    *,
-    to_email: str,
-    subject: str,
-    plain_body: str,
-    html_body: str,
-) -> dict:
-    """Send a multipart HTML+plain email via SES, returning a delivery dict.
-
-    Both bodies are prepared once by ``deliver_all`` (via ``render_alert_email``)
-    and passed in — this function is a per-recipient send loop, nothing more.
-    """
-    try:
-        awsses.send_html_message(to_email, subject, plain_body, html_body)
-        return {
-            "channel": "email",
-            "target": to_email,
-            "status": "sent",
-            "error_reason": None,
-            "http_status": None,
-            "sent_at": _now_iso(),
-        }
-    except Exception as e:  # SES exceptions are too varied to enumerate
-        logger.error(f"SES delivery to {to_email} failed: {e}")
-        return {
-            "channel": "email",
-            "target": to_email,
-            "status": "failed",
-            "error_reason": str(e),
-            "http_status": None,
-            "sent_at": _now_iso(),
-        }
 
 
 def deliver_slack(*, webhook_url: str, body: str) -> dict:
@@ -115,7 +69,7 @@ def deliver_slack(*, webhook_url: str, body: str) -> dict:
 def deliver_all(alert: Alert, *, subject: str, body: str) -> list[dict]:
     """Run the full delivery loop for a fired alert.
 
-    Looks at `alert.delivery_channels` and `alert.recipients` to decide what
+    Looks at ``alert.delivery_channels`` and ``alert.recipients`` to decide what
     to send. Returns the list of delivery dicts in the order they were
     attempted (email recipients in stored order, then Slack if enabled).
     """
@@ -123,56 +77,13 @@ def deliver_all(alert: Alert, *, subject: str, body: str) -> list[dict]:
     channels = alert.delivery_channels or []
 
     if "email" in channels:
-        # Wrap the substituted alert body in the shared Dalgo email shell once
-        # per fire — every recipient gets the same rendered pair.
-        plain_body, html_body = email_templates.render_alert_email(alert, body)
-
-        recipients = alert.recipients or []
-        orguser_ids = [r["orguser_id"] for r in recipients if r.get("type") == "orguser"]
-        orguser_email_by_id: dict[int, str] = {}
-        if orguser_ids:
-            for ou in OrgUser.objects.filter(
-                id__in=orguser_ids, org_id=alert.org_id
-            ).select_related("user"):
-                orguser_email_by_id[ou.id] = ou.user.email
-
-        for r in recipients:
-            email = _resolve_recipient_email(r, orguser_email_by_id)
-            if not email:
-                deliveries.append(
-                    {
-                        "channel": "email",
-                        "target": _describe_missing_recipient(r),
-                        "status": "failed",
-                        "error_reason": "recipient could not be resolved",
-                        "http_status": None,
-                        "sent_at": _now_iso(),
-                    }
-                )
-                continue
-            deliveries.append(
-                deliver_email(
-                    to_email=email,
-                    subject=subject,
-                    plain_body=plain_body,
-                    html_body=html_body,
-                )
-            )
+        deliveries.extend(notify_alert_recipients(alert, subject=subject, body=body))
 
     # Slack keeps the raw user body — no HTML shell on webhook posts.
     if "slack" in channels and alert.slack_webhook_url:
         deliveries.append(deliver_slack(webhook_url=alert.slack_webhook_url, body=body))
 
     return deliveries
-
-
-def _describe_missing_recipient(r: dict) -> str:
-    """Best-effort label so the log row tells the operator who couldn't be reached."""
-    if r.get("type") == "external":
-        return r.get("email") or "external:unknown"
-    if r.get("type") == "orguser":
-        return f"orguser:{r.get('orguser_id')}"
-    return "unknown"
 
 
 def summarize(deliveries: Iterable[dict]) -> str:

@@ -321,7 +321,7 @@ class TestGetDefaultQueueConfig:
         },
     )
     def test_get_default_queue_config_with_eks_env_var(self):
-        """Test that scheduled_pipeline and connection_sync use EKS pool when configured."""
+        """Test that all queues use EKS pool when PREFECT_EKS_WORKER_POOL_NAME is configured."""
         config = get_default_queue_config()
 
         expected = {
@@ -337,13 +337,13 @@ class TestGetDefaultQueueConfig:
             },
             "transform_task_queue": {
                 "name": MANUL_DBT_WORK_QUEUE,
-                "workpool": "ec2-pool",
-                "is_workpool_eks": False,
+                "workpool": "eks-pool",
+                "is_workpool_eks": True,
             },
             "edr_queue": {
                 "name": EDR_WORK_QUEUE,
-                "workpool": "ec2-pool",
-                "is_workpool_eks": False,
+                "workpool": "eks-pool",
+                "is_workpool_eks": True,
             },
         }
 

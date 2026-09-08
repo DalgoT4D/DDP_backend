@@ -32,7 +32,7 @@ def get_tasks(request):
     transform deployment."""
     tasks = [
         model_to_dict(task, exclude=["id"])
-        for task in Task.objects.filter(type__in=[TaskType.DBT, TaskType.GIT, TaskType.DBTCLOUD])
+        for task in Task.objects.filter(type__in=[TaskType.DBT, TaskType.GIT])
         .filter(slug__in=list(TRANSFORM_TASKS_SEQ.keys()))
         .exclude(slug__in=TRANSFORM_TASKS_DEPENDENCIES)
         .all()

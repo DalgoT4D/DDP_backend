@@ -2,11 +2,13 @@
 
 Tests schema-specific functionality NOT tested by API tests:
 1. LockResponse schema
-2. Share schemas (DashboardShareToggle, DashboardShareResponse, DashboardShareStatus)
-3. Landing page schemas
-4. FilterOptionResponse / FilterOptionsResponse
-5. Schema serialization (.dict())
-6. Edge cases (unicode, nested structures)
+2. Landing page schemas
+3. FilterOptionResponse / FilterOptionsResponse
+4. Schema serialization (.dict())
+5. Edge cases (unicode, nested structures)
+
+Note: Share schemas (DashboardShareToggle/Response/Status) were removed when
+public/private consolidated into PATCH /general-access. Related tests deleted.
 """
 
 import pytest
@@ -24,9 +26,6 @@ from ddpui.schemas.dashboard_schema import (
     FilterOptionResponse,
     FilterOptionsResponse,
     LockResponse,
-    DashboardShareToggle,
-    DashboardShareResponse,
-    DashboardShareStatus,
     LandingPageResponse,
     LandingPageResolveResponse,
 )
@@ -94,72 +93,10 @@ class TestLockResponseSchema:
 # ================================================================================
 
 
-class TestShareSchemas:
-    """Tests for dashboard sharing schemas"""
-
-    def test_share_toggle_true(self):
-        """Test share toggle with is_public=True"""
-        toggle = DashboardShareToggle(is_public=True)
-        assert toggle.is_public is True
-
-    def test_share_toggle_false(self):
-        """Test share toggle with is_public=False"""
-        toggle = DashboardShareToggle(is_public=False)
-        assert toggle.is_public is False
-
-    def test_share_response_public(self):
-        """Test share response when public"""
-        response = DashboardShareResponse(
-            is_public=True,
-            public_url="https://example.com/dashboard/abc123",
-            public_share_token="abc123",
-            message="Dashboard is now public",
-        )
-
-        assert response.is_public is True
-        assert response.public_url == "https://example.com/dashboard/abc123"
-        assert response.public_share_token == "abc123"
-
-    def test_share_response_private(self):
-        """Test share response when private"""
-        response = DashboardShareResponse(
-            is_public=False,
-            public_url=None,
-            public_share_token=None,
-            message="Dashboard is now private",
-        )
-
-        assert response.is_public is False
-        assert response.public_url is None
-        assert response.public_share_token is None
-
-    def test_share_status_with_all_fields(self):
-        """Test share status response with all fields"""
-        now = datetime.now()
-        status = DashboardShareStatus(
-            is_public=True,
-            public_url="https://example.com/dashboard/abc",
-            public_access_count=100,
-            last_public_accessed=now,
-            public_shared_at=now,
-        )
-
-        assert status.is_public is True
-        assert status.public_access_count == 100
-        assert status.last_public_accessed == now
-
-    def test_share_status_private(self):
-        """Test share status when private"""
-        status = DashboardShareStatus(
-            is_public=False,
-            public_url=None,
-            public_access_count=0,
-            last_public_accessed=None,
-            public_shared_at=None,
-        )
-
-        assert status.is_public is False
-        assert status.public_access_count == 0
+# TestShareSchemas removed — DashboardShareToggle/Response/Status schemas
+# were deleted when public/private consolidated into PATCH /general-access.
+# Coverage of the new schema (GeneralAccessPayload, GeneralAccessState) is
+# in test_access_api.py.
 
 
 # ================================================================================

@@ -2,7 +2,12 @@
 
 from django.db import migrations, models
 import django.db.models.deletion
-from ddpui.ddpprefect import DBTCLIPROFILE, DBTCLOUDCREDS
+
+# Block-type strings inlined (previously imported from ddpui.ddpprefect as
+# DBTCLIPROFILE / DBTCLOUDCREDS). Constants were removed as those block types
+# are deprecated; migrations must not depend on app code that can change.
+_DBTCLIPROFILE = "dbt CLI Profile"
+_DBTCLOUDCREDS = "dbt Cloud Credentials"
 
 
 def populate_block_references(apps, schema_editor):
@@ -21,14 +26,14 @@ def populate_block_references(apps, schema_editor):
         if org:
             # Find the cli profile block for this org
             cli_profile_block = OrgPrefectBlockv1.objects.filter(
-                org=org, block_type=DBTCLIPROFILE
+                org=org, block_type=_DBTCLIPROFILE
             ).first()
             if cli_profile_block:
                 orgdbt.cli_profile_block = cli_profile_block
             else:
                 # Find the dbt cloud creds block for this org
                 dbtcloud_creds_block = OrgPrefectBlockv1.objects.filter(
-                    org=org, block_type=DBTCLOUDCREDS
+                    org=org, block_type=_DBTCLOUDCREDS
                 ).first()
                 if dbtcloud_creds_block:
                     orgdbt.dbtcloud_creds_block = dbtcloud_creds_block

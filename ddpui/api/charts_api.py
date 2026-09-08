@@ -12,10 +12,12 @@ from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse
 
-from ddpui.auth import has_permission
+from ddpui.auth import has_permission, has_access
+from ddpui.core.access.access_control import get_user_access, get_user_access_map
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.dashboard import DashboardFilter
+from ddpui.models.resource_share import AccessLevel, AccessRequest, ResourceShare, ResourceType
 from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
@@ -39,12 +41,15 @@ from ddpui.schemas.chart_schemas import (
     ChartDataResponse,
     DataPreviewResponse,
     ExecuteChartQuery,
+    MapDataOverlayPayload,
     TransformDataForChart,
     GeoJSONDetailResponse,
     GeoJSONListResponse,
     GeoJSONUpload,
 )
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 
 logger = CustomLogger("ddpui")
 
@@ -289,6 +294,7 @@ def list_charts(
 
     charts, total = ChartService.list_charts(
         org=orguser.org,
+        orguser=orguser,
         page=page,
         page_size=page_size,
         search=search,
@@ -296,6 +302,11 @@ def list_charts(
     )
 
     total_pages = (total + page_size - 1) // page_size  # Ceiling division
+
+    favorited_chart_ids = ChartService.get_favorited_chart_ids(
+        [chart.id for chart in charts], orguser
+    )
+    access_map = get_user_access_map(orguser, ResourceType.CHART, charts)
 
     # Build response for each chart
     chart_responses = [
@@ -310,6 +321,9 @@ def list_charts(
             extra_config=chart.extra_config,
             created_at=chart.created_at,
             updated_at=chart.updated_at,
+            is_favorite=chart.id in favorited_chart_ids,
+            access_level=access_map.get(chart.id),
+            is_private=chart.is_private,
         )
         for chart in charts
     ]
@@ -365,23 +379,8 @@ def list_available_layers(request, layer_type: str = "country"):
         return []
 
 
-class MapDataOverlayPayload(Schema):
-    schema_name: str
-    table_name: str
-    geographic_column: str
-    value_column: str
-    metrics: List[ChartMetric]
-    filters: Dict[str, Any] = Field(default_factory=dict)  # Drill-down filters (key-value pairs)
-    dashboard_filters: Optional[dict[str, Any]] = Field(
-        default_factory=dict
-    )  # Dashboard-level filters (dictionary of filter objects)
-    extra_config: Optional[Dict[str, Any]] = Field(
-        default_factory=dict
-    )  # Additional configuration including chart-level filters, pagination, sorting, etc.
-
-
 @charts_router.post("/map-data-overlay/", response=dict)
-@has_permission(["can_view_warehouse_data"])
+@has_permission(["can_view_charts"])
 def get_map_data_overlay(request, payload: MapDataOverlayPayload):
     """Get map data overlay (separate from GeoJSON) for data visualization"""
     orguser = request.orguser
@@ -400,29 +399,22 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         schema_name = payload.schema_name
         table_name = payload.table_name
         geographic_column = payload.geographic_column
-        value_column = payload.value_column
-        # Use first metric for map overlay
-        filters = payload.filters
+        dashboard_filters = payload.dashboard_filters
 
         # Validate required fields
-        if not all([schema_name, table_name, geographic_column, value_column]):
+        if not all([schema_name, table_name, geographic_column]):
             raise HttpError(
                 400,
-                "Missing required fields: schema_name, table_name, geographic_column, value_column",
+                "Missing required fields: schema_name, table_name, geographic_column",
             )
 
         # Validate metrics exist and are non-empty
         if not payload.metrics:
             raise HttpError(400, "Missing metrics - at least one metric is required")
 
-        # Build payload for standard chart query (same as other charts)
-        # Make a deep copy to avoid mutating the original payload
-        # extra_config already contains chart-level filters in extra_config.filters
-        extra_config = copy.deepcopy(payload.extra_config or {})
-
-        # Use metrics from payload directly
-        metrics = payload.metrics
-        dashboard_filters = payload.dashboard_filters
+        # value_column is a legacy simple-metric field, not populated for calculated metrics
+        if not payload.value_column and not payload.metrics[0].column_expression:
+            raise HttpError(400, "Missing required field: value_column")
 
         # Resolve dashboard filters if provided (same logic as regular charts)
         resolved_dashboard_filters = None
@@ -436,60 +428,13 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
                 warehouse_client,
             )
 
-        chart_payload = ChartDataPayload(
-            chart_type="bar",  # We use bar chart query logic for aggregated data
-            schema_name=schema_name,
-            table_name=table_name,
-            dimension_col=geographic_column,
-            metrics=metrics,
-            dashboard_filters=resolved_dashboard_filters,
-            extra_config=extra_config,
+        result = charts_service.execute_map_data_overlay(
+            payload, org_warehouse, warehouse_client, resolved_dashboard_filters
         )
 
-        # Get warehouse client and build query using standard chart service
-        query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
+        logger.info(f"Map data overlay query returned {result['count']} rows")
 
-        # Add filters if provided with case-insensitive matching
-        if filters:
-            from sqlalchemy import column, func
-
-            for filter_column, filter_value in filters.items():
-                # Use case-insensitive matching for string filters
-                # Convert both database column and filter value to uppercase for comparison
-                query_builder.where_clause(
-                    func.upper(column(filter_column)) == str(filter_value).upper()
-                )
-
-        # Execute query using standard chart service
-        execute_payload = ExecuteChartQuery(
-            chart_type="map",
-            dimension_col=geographic_column,
-            metrics=metrics,
-        )
-
-        dict_results = charts_service.execute_chart_query(
-            warehouse_client, query_builder, execute_payload
-        )
-
-        logger.info(f"Map data overlay query returned {len(dict_results)} rows")
-
-        # Transform results for map visualization with proper case normalization
-        # The standard chart query returns data with dimension and aggregate columns
-        map_data = []
-        for row in dict_results:
-            # Get the dimension value (geographic region name)
-            region_name = row.get(geographic_column)
-            # Get the aggregated value using the metric alias
-            metric_alias = metrics[0].alias or f"{metrics[0].aggregation}_{metrics[0].column}"
-            value = row.get(metric_alias)
-
-            if region_name and value is not None:
-                # Normalize region name to proper case for frontend compatibility
-                # Convert "MAHARASHTRA" -> "Maharashtra", "gujarat" -> "Gujarat"
-                normalized_name = str(region_name).strip().title()
-                map_data.append({"name": normalized_name, "value": float(value)})
-
-        return {"success": True, "data": map_data, "count": len(map_data)}
+        return {"success": True, **result}
 
     except Exception as e:
         logger.error(f"Error generating map data overlay: {str(e)}")
@@ -996,6 +941,15 @@ def download_chart_data_csv(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{chart_type}_{table_name}_{timestamp}.csv"
 
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CHART,
+        resource_id="",
+        action=AuditLogAction.EXPORT,
+        resource_fields={"format": "csv"},
+    )
+
     # Stream response using common function
     response = StreamingHttpResponse(
         stream_chart_data_csv(org_warehouse, payload, page_size=5000),
@@ -1008,6 +962,9 @@ def download_chart_data_csv(
 
 @charts_router.get("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_view_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def get_chart(request, chart_id: int):
     """Get a specific chart"""
     orguser: OrgUser = request.orguser
@@ -1028,6 +985,9 @@ def get_chart(request, chart_id: int):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
+        access_level=request.access_level,
+        is_private=chart.is_private,
+        is_favorite=ChartService.is_chart_favorited(chart.id, orguser),
     )
 
 
@@ -1099,6 +1059,7 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
 def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     # ChartData / ChartService operate on dicts internally; ChartCreate.extra_config
     # is a typed sub-schema (validated already), so convert back here.
@@ -1128,6 +1089,22 @@ def create_chart(request, payload: ChartCreate):
 
         logger.info(f"Chart {chart.id} saved successfully (type={chart.chart_type})")
 
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.CHART,
+            resource_id=str(chart.id),
+            action=AuditLogAction.CREATE,
+            resource_fields={
+                "title": payload.title,
+                "description": payload.description or "",
+                "chart_type": payload.chart_type,
+                "schema_name": payload.schema_name,
+                "table_name": payload.table_name,
+                "extra_config": extra_config,
+            },
+        )
+
     except ChartValidationError as e:
         logger.error(f"Chart validation error: {e.message}")
         raise HttpError(400, e.message) from None
@@ -1146,14 +1123,20 @@ def create_chart(request, payload: ChartCreate):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
+        access_level=AccessLevel.EDIT,
+        is_private=chart.is_private,
     )
 
 
 @charts_router.put("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_edit_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     # ChartUpdate.extra_config is a typed sub-schema when chart_type was sent
     # alongside it; otherwise it's still a raw dict (or None). Either way the
@@ -1165,7 +1148,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
     try:
         chart = ChartService.update_chart(
             chart_id=chart_id,
-            org=orguser.org,
+            org=org,
             orguser=orguser,
             title=payload.title,
             description=payload.description,
@@ -1173,6 +1156,30 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
             schema_name=payload.schema_name,
             table_name=payload.table_name,
             extra_config=extra_config,
+        )
+
+        # ChartService.update_chart only touches a field when it's not None —
+        # a genuine partial patch. Only fields actually present in this
+        # request are logged, using that exact same criterion. "title" is the
+        # exception: always included (current value, not just when touched)
+        # so the row stays self-identifying without a separate name column.
+        raw_resource_fields = {
+            "title": payload.title,
+            "description": payload.description,
+            "chart_type": payload.chart_type,
+            "schema_name": payload.schema_name,
+            "table_name": payload.table_name,
+            "extra_config": extra_config,
+        }
+        resource_fields = {k: v for k, v in raw_resource_fields.items() if v is not None}
+        resource_fields["title"] = chart.title
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.CHART,
+            resource_id=str(chart_id),
+            action=AuditLogAction.UPDATE,
+            resource_fields=resource_fields,
         )
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
@@ -1190,21 +1197,44 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
+        access_level=request.access_level,
+        is_private=chart.is_private,
+        is_favorite=ChartService.is_chart_favorited(chart.id, orguser),
     )
 
 
 @charts_router.delete("/{chart_id}/")
 @has_permission(["can_delete_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def delete_chart(request, chart_id: int):
     """Delete a chart"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
-        ChartService.delete_chart(chart_id, orguser.org, orguser)
+        chart_name = ChartService.delete_chart(chart_id, org, orguser)
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
     except ChartPermissionError as e:
         raise HttpError(403, e.message) from None
+
+    ResourceShare.objects.filter(
+        org=org, resource_type=ResourceType.CHART, resource_id=str(chart_id)
+    ).delete()
+    AccessRequest.objects.filter(
+        org=org, resource_type=ResourceType.CHART, resource_id=str(chart_id)
+    ).delete()
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CHART,
+        resource_id=str(chart_id),
+        action=AuditLogAction.DELETE,
+        resource_fields={"title": chart_name},
+    )
 
     return {"success": True}
 
@@ -1214,12 +1244,27 @@ def delete_chart(request, chart_id: int):
 def bulk_delete_charts(request, payload: BulkDeleteRequest):
     """Delete multiple charts"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     if not payload.chart_ids:
         raise HttpError(400, "No chart IDs provided")
 
     try:
-        result = ChartService.bulk_delete_charts(payload.chart_ids, orguser.org, orguser)
+        result = ChartService.bulk_delete_charts(payload.chart_ids, org, orguser)
+        deleted_titles = result.pop("deleted_titles", [])
+
+        # Log single audit entry for bulk delete
+        deleted_count = result.get("deleted_count", 0)
+        if deleted_count > 0:
+            create_audit_log(
+                org=org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.CHART,
+                resource_id=",".join(str(cid) for cid in payload.chart_ids),
+                action=AuditLogAction.DELETE,
+                resource_fields={"titles": deleted_titles},
+            )
+
         return {
             "success": True,
             **result,
@@ -1231,6 +1276,9 @@ def bulk_delete_charts(request, payload: BulkDeleteRequest):
 
 @charts_router.get("/{chart_id}/dashboards/", response=List[dict])
 @has_permission(["can_view_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def get_chart_dashboards(request, chart_id: int):
     """Get list of dashboards that use this chart"""
     orguser: OrgUser = request.orguser
@@ -1241,3 +1289,37 @@ def get_chart_dashboards(request, chart_id: int):
         raise HttpError(404, "Chart not found") from None
 
     return dashboards
+
+
+@charts_router.post("/{chart_id}/favorite/", response=dict)
+@has_permission(["can_view_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
+def favorite_chart(request, chart_id: int):
+    """Mark a chart as favorited by the current user"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        ChartService.favorite_chart(chart_id, orguser.org, orguser)
+    except ChartNotFoundError:
+        raise HttpError(404, "Chart not found") from None
+
+    return {"is_favorite": True}
+
+
+@charts_router.delete("/{chart_id}/favorite/", response=dict)
+@has_permission(["can_view_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
+def unfavorite_chart(request, chart_id: int):
+    """Remove the current user's favorite on a chart"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        ChartService.unfavorite_chart(chart_id, orguser.org, orguser)
+    except ChartNotFoundError:
+        raise HttpError(404, "Chart not found") from None
+
+    return {"is_favorite": False}

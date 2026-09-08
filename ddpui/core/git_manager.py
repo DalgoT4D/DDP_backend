@@ -265,6 +265,55 @@ class GitManager:
         return True
 
     @staticmethod
+    def get_file_content(
+        remote_url: str,
+        file_path: str,
+        ref: str = None,
+        pat: str = None,
+    ) -> str | None:
+        """
+        Fetch the content of a file from a GitHub repo via the Contents API.
+
+        :param remote_url: The remote repository URL (e.g. https://github.com/org/repo.git)
+        :param file_path: Path within the repo (e.g. "dbt_project.yml" or "models/x.sql")
+        :param ref: Optional branch/tag/commit SHA. Defaults to the repo's default branch.
+        :param pat: Personal Access Token (required for private repos)
+        :return: File content as a UTF-8 string, or None if the file doesn't exist
+        :raises GitManagerError: For auth errors, network errors, or 5xx server errors
+        """
+        import base64
+
+        owner, repo = GitManager.parse_github_url_for_owner_and_repo(remote_url)
+        url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
+        if ref:
+            url += f"?ref={ref}"
+
+        try:
+            data = GitManager._github_api_request(url, pat=pat)
+        except requests.HTTPError as err:
+            if err.response is not None and err.response.status_code == 404:
+                return None
+            raise GitManagerError(
+                f"Failed to fetch {file_path} from {remote_url}",
+                error=str(err),
+            ) from err
+        except requests.RequestException as err:
+            raise GitManagerError(
+                f"Network error fetching {file_path} from {remote_url}",
+                error=str(err),
+            ) from err
+
+        if data.get("type") != "file":
+            return None  # directory / symlink / submodule — not a file
+        if data.get("encoding") != "base64":
+            raise GitManagerError(
+                f"Unexpected encoding for {file_path}",
+                error=f"got {data.get('encoding')!r}, expected 'base64'",
+            )
+
+        return base64.b64decode(data["content"]).decode("utf-8")
+
+    @staticmethod
     def delete_managed_repository(remote_url: str, pat: str) -> bool:
         """
         Delete a managed repository from GitHub.

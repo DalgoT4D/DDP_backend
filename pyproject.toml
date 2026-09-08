@@ -258,7 +258,7 @@ dependencies = [
     "tornado==6.3.2",
     "traitlets==5.9.0",
     "typer==0.7.0",
-    "typing-extensions==4.12.2",
+    "typing-extensions>=4.14.0",
     "tzdata==2022.7",
     "tzlocal==4.3",
     "urllib3==2.6.3",

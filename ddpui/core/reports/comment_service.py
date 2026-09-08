@@ -6,10 +6,12 @@ from django.db import connection
 from django.db.models import Q
 from django.utils import timezone
 
+from ddpui.core.access.access_control import get_user_access
 from ddpui.models.comment import Comment, CommentReadStatus, CommentTargetType
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import AccessLevel, ResourceType
 from ddpui.utils.custom_logger import CustomLogger
 
 from .exceptions import (
@@ -161,16 +163,37 @@ class CommentService:
         comment_id: int,
         org: Org,
         orguser: OrgUser,
-    ) -> None:
-        """Delete a comment. Author-only.
+    ) -> dict:
+        """Delete a comment.
+
+        Two allowed callers:
+        - The comment's author (own comment)
+        - Any user with Edit access on the parent report (moderation, per Story 15)
 
         Hard-deletes if no other user has commented in the thread (same
         snapshot + target_type + target_id). Soft-deletes otherwise.
+
+        Returns the comment's pre-deletion content/target_type/snapshot title,
+        so callers (e.g. the API layer's audit log) don't need a separate
+        fetch of their own — this also matters because a soft-delete clears
+        `content` below, so it must be captured before that happens.
         """
         comment = CommentService._get_comment(comment_id, org)
 
-        if comment.author != orguser:
+        is_author = comment.author_id == orguser.id
+        is_moderator = (
+            comment.snapshot is not None
+            and get_user_access(orguser, ResourceType.REPORT, comment.snapshot.pk)
+            == AccessLevel.EDIT
+        )
+        if not (is_author or is_moderator):
             raise CommentPermissionError("You can only delete your own comments")
+
+        deleted_info = {
+            "content": comment.content,
+            "target_type": comment.target_type,
+            "snapshot": comment.snapshot.title if comment.snapshot else "",
+        }
 
         thread_query = Q(
             snapshot=comment.snapshot,
@@ -190,6 +213,8 @@ class CommentService:
         else:
             comment.delete()
             logger.info(f"Hard-deleted comment {comment_id}")
+
+        return deleted_info
 
     # language=SQL
     _COMMENT_STATES_SQL = """
@@ -286,3 +311,9 @@ class CommentService:
             return Comment.objects.get(id=comment_id, org=org)
         except Comment.DoesNotExist:
             raise CommentNotFoundError(comment_id)
+
+    @staticmethod
+    def get_comment(comment_id: int, org: Org) -> Comment:
+        """Public accessor — e.g. for the API layer to read a comment's
+        current state (for audit logging) without querying the model directly."""
+        return CommentService._get_comment(comment_id, org)

@@ -6,6 +6,7 @@ import pytest
 from django.utils import timezone
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.notifications import Notification, NotificationRecipient
+from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.userpreferences import UserPreferences
@@ -215,9 +216,9 @@ def test_handle_recipient_success(orguser, unsent_notification):
     assert error is None
 
 
-@patch("ddpui.core.notifications.notifications_functions.send_text_message")
+@patch("ddpui.core.notifications.notifications_functions.send_html_message")
 def test_handle_recipient_send_email_false_skips_email_even_if_opted_in(
-    mock_send_text_message, orguser, unsent_notification
+    mock_send_html_message, orguser, unsent_notification
 ):
     """the admin's send_email=False narrows further -- it never overrides the
     recipient's own opt-in (plan.md §4.3)"""
@@ -230,12 +231,12 @@ def test_handle_recipient_send_email_false_skips_email_even_if_opted_in(
     error = handle_recipient(orguser.id, None, unsent_notification)
 
     assert error is None
-    mock_send_text_message.assert_not_called()
+    mock_send_html_message.assert_not_called()
 
 
-@patch("ddpui.core.notifications.notifications_functions.send_text_message")
+@patch("ddpui.core.notifications.notifications_functions.send_html_message")
 def test_handle_recipient_send_email_true_still_requires_recipient_opt_in(
-    mock_send_text_message, orguser, unsent_notification
+    mock_send_html_message, orguser, unsent_notification
 ):
     """send_email=True narrows nothing -- the recipient's own opt-out still wins"""
     UserPreferences.objects.update_or_create(
@@ -247,7 +248,94 @@ def test_handle_recipient_send_email_true_still_requires_recipient_opt_in(
     error = handle_recipient(orguser.id, None, unsent_notification)
 
     assert error is None
-    mock_send_text_message.assert_not_called()
+    mock_send_html_message.assert_not_called()
+
+
+def test_handle_recipient_email_uses_html_template(orguser):
+    """When email notifications are enabled, the email pipeline sends
+    templated HTML (not raw plaintext) and pulls a trailing URL out as a CTA.
+    """
+    from unittest.mock import patch
+
+    UserPreferences.objects.get_or_create(
+        orguser=orguser, defaults={"enable_email_notifications": True}
+    )
+    UserPreferences.objects.filter(orguser=orguser).update(enable_email_notifications=True)
+
+    notification = Notification.objects.create(
+        author="sharer@example.com",
+        message="Priya shared 'Sales' with you.\nhttps://app.dalgo.org/dashboards/7",
+        email_subject="Access request for Sales",
+        urgent=False,
+    )
+    try:
+        with patch(
+            "ddpui.core.notifications.notifications_functions.send_html_message"
+        ) as mock_send:
+            error = handle_recipient(orguser.id, None, notification)
+            assert error is None
+            assert mock_send.call_count == 1
+            _, subject, plain_body, html_body = mock_send.call_args.args
+            assert subject == "Access request for Sales"
+            assert "Priya shared" in plain_body
+            # Templated HTML — shell wrapper + CTA button for the trailing URL
+            assert "<!DOCTYPE html>" in html_body
+            assert 'href="https://app.dalgo.org/dashboards/7"' in html_body
+            assert "View\n                    </a>" in html_body
+    finally:
+        notification.delete()
+
+
+def test_handle_recipient_skip_email_writes_in_app_row_only(orguser):
+    """skip_email=True → NotificationRecipient row created, send_html_message NOT called.
+    Used by callers that send a specialized email themselves (alerts / mentions / PDF share).
+    """
+    from unittest.mock import patch
+
+    UserPreferences.objects.filter(orguser=orguser).update(enable_email_notifications=True)
+
+    notification = Notification.objects.create(
+        author="sharer@example.com",
+        message="Alert X fired",
+        email_subject="Alert X",
+        urgent=False,
+    )
+    try:
+        with patch(
+            "ddpui.core.notifications.notifications_functions.send_html_message"
+        ) as mock_send:
+            error = handle_recipient(orguser.id, None, notification, skip_email=True)
+            assert error is None
+            assert mock_send.call_count == 0
+        # In-app row still present.
+        assert NotificationRecipient.objects.filter(
+            notification=notification, recipient=orguser
+        ).exists()
+    finally:
+        notification.delete()
+
+
+def test_create_notification_skip_email_flag_flows_through(orguser):
+    """Passing skip_email=True on NotificationDataSchema suppresses the email side."""
+    from unittest.mock import patch
+
+    UserPreferences.objects.filter(orguser=orguser).update(enable_email_notifications=True)
+
+    with patch("ddpui.core.notifications.notifications_functions.send_html_message") as mock_send:
+        error, result = create_notification(
+            NotificationDataSchema(
+                author="sender@example.com",
+                message="hello",
+                email_subject="hi",
+                urgent=False,
+                scheduled_time=None,
+                recipients=[orguser.id],
+                skip_email=True,
+            )
+        )
+        assert error is None
+        assert result is not None
+        assert mock_send.call_count == 0
 
 
 def test_handle_recipient_with_scheduled_time(orguser, scheduled_notification):

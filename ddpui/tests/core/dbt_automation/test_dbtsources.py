@@ -6,6 +6,7 @@ from ddpui.core.dbt_automation.utils.dbtsources import (
     mergesource,
     mergetable,
     merge_sourcedefinitions,
+    read_sources_from_yaml,
 )
 
 
@@ -311,3 +312,40 @@ def test_merge_sourcedefinitions(dbdefs, expected_result, sources_yaml):
     filedefs = sources_yaml
 
     assert merge_sourcedefinitions(filedefs, dbdefs) == expected_result
+
+
+def test_read_sources_from_yaml_table_without_identifier(tmpdir):
+    """dbt treats `identifier` as optional (defaults to `name`) — a hand-authored or
+    template-repo sources.yml without it must not KeyError when scanned."""
+    project_dir = tmpdir
+    rel_path = "models/staging/_udise__sources.yml"
+    full_path = project_dir / rel_path
+    os.makedirs(os.path.dirname(full_path))
+    with open(full_path, "w", encoding="utf-8") as outfile:
+        yaml.safe_dump(
+            {
+                "version": 2,
+                "sources": [
+                    {
+                        "name": "udise",
+                        "schema": "staging",
+                        "tables": [
+                            {"name": "udise_schools_bihar", "description": "..."},
+                        ],
+                    }
+                ],
+            },
+            outfile,
+        )
+
+    result = read_sources_from_yaml(project_dir, rel_path)
+
+    assert result == [
+        {
+            "source_name": "udise",
+            "input_name": "udise_schools_bihar",
+            "input_type": "source",
+            "schema": "staging",
+            "sql_path": rel_path,
+        }
+    ]

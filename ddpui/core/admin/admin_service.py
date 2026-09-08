@@ -230,7 +230,7 @@ def remove_orguser(
     org: Org, requestor: OrgUser, orguser: OrgUser
 ) -> Tuple[Optional[object], Optional[str]]:
     """Remove a user from the target org as a platform admin. Their created content is
-    orphaned (created_by SET_NULL), not deleted."""
+    reassigned to the requestor, not deleted."""
     return orguserfunctions.delete_orguser_from_org(
         org,
         requestor,
@@ -280,8 +280,8 @@ def delete_invitation(invitation: Invitation) -> None:
 
 
 def removal_impact(orguser: OrgUser) -> Tuple[int, int, int]:
-    """(dashboards, charts, reports) that removing this user would orphan (created_by
-    set to NULL; content is kept, not deleted)."""
+    """(dashboards, charts, reports) that removing this user would reassign to the
+    remover (content is kept, not deleted)."""
     return (
         Dashboard.objects.filter(created_by=orguser).count(),
         Chart.objects.filter(created_by=orguser).count(),

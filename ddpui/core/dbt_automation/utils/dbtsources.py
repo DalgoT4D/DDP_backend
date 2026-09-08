@@ -134,10 +134,11 @@ def read_sources_from_yaml(project_dir, sources_yml_rel_path) -> list[dict]:
         for src in srcs_yml:
             for table in src["tables"]:
                 # keeping the schema same as input of each operations
+                # `identifier` is optional in dbt and defaults to `name` when absent
                 src_tables.append(
                     {
                         "source_name": src["name"],
-                        "input_name": table["identifier"],  # table
+                        "input_name": table.get("identifier") or table["name"],  # table
                         "input_type": "source",
                         "schema": src["schema"],
                         "sql_path": src_yml_rel_path,

@@ -1,6 +1,8 @@
 """API tests for Alert endpoints — CRUD + listing + permissions."""
 
 import os
+from unittest.mock import patch
+
 import django
 import pytest
 from ninja.errors import HttpError
@@ -16,14 +18,17 @@ from ddpui.api.alert_api import (
     delete_alert,
     get_alert,
     get_alert_logs,
+    list_alert_transfer_candidates,
     list_alerts,
     toggle_alert,
+    transfer_alert_ownership,
     update_alert,
 )
 from ddpui.api.alert_api import test_alert as run_dry_run
 from ddpui.api.alert_api import test_slack_webhook as run_slack_webhook_test
-from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.models.alert import Alert
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -32,6 +37,7 @@ from ddpui.schemas.alert_schema import (
     AlertCreate,
     AlertTestRequest,
     AlertToggle,
+    AlertTransferOwnershipPayload,
     AlertUpdate,
     RecipientIn,
     SlackTestRequest,
@@ -89,6 +95,22 @@ def analyst_orguser(org):
         user=user,
         org=org,
         new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+    user.delete()
+
+
+@pytest.fixture
+def member_orguser(org):
+    """A same-org user whose role lacks ``can_edit_alerts``."""
+    user = User.objects.create(
+        username="alertapimember", email="alertapimember@test.com", password="testpassword"
+    )
+    orguser = OrgUser.objects.create(
+        user=user,
+        org=org,
+        new_role=Role.objects.filter(slug=MEMBER_ROLE).first(),
     )
     yield orguser
     orguser.delete()
@@ -476,6 +498,53 @@ def test_delete_alert_admin_can_delete_others(seed_db, orguser, analyst_orguser,
     assert not Alert.objects.filter(id=created.id).exists()
 
 
+def test_update_alert_non_owner_analyst_gets_403(seed_db, orguser, analyst_orguser, sample_metric):
+    """An analyst who did not create the alert cannot update it."""
+    created = create_alert(
+        mock_request(orguser), _base_payload(orguser, metric_id=sample_metric.id)
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        update_alert(mock_request(analyst_orguser), created.id, AlertUpdate(name="hacked"))
+
+    assert exc_info.value.status_code == 403
+
+
+def test_update_alert_admin_can_update_others(seed_db, orguser, analyst_orguser, sample_metric):
+    """An admin can update an alert created by another user."""
+    created = create_alert(
+        mock_request(analyst_orguser), _base_payload(analyst_orguser, metric_id=sample_metric.id)
+    )
+
+    updated = update_alert(mock_request(orguser), created.id, AlertUpdate(name="Admin renamed"))
+
+    assert updated.name == "Admin renamed"
+
+
+def test_toggle_alert_non_owner_analyst_gets_403(seed_db, orguser, analyst_orguser, sample_metric):
+    """An analyst who did not create the alert cannot toggle it."""
+    created = create_alert(
+        mock_request(orguser), _base_payload(orguser, metric_id=sample_metric.id)
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        toggle_alert(mock_request(analyst_orguser), created.id, AlertToggle(is_active=False))
+
+    assert exc_info.value.status_code == 403
+    assert Alert.objects.get(id=created.id).is_active is True
+
+
+def test_toggle_alert_admin_can_toggle_others(seed_db, orguser, analyst_orguser, sample_metric):
+    """An admin can toggle an alert created by another user."""
+    created = create_alert(
+        mock_request(analyst_orguser), _base_payload(analyst_orguser, metric_id=sample_metric.id)
+    )
+
+    toggled = toggle_alert(mock_request(orguser), created.id, AlertToggle(is_active=False))
+
+    assert toggled.is_active is False
+
+
 def test_metric_delete_cascades_to_alert(seed_db, orguser, sample_metric):
     """Deleting a Metric silently deletes its Alert (on_delete=CASCADE)."""
     request = mock_request(orguser)
@@ -484,6 +553,124 @@ def test_metric_delete_cascades_to_alert(seed_db, orguser, sample_metric):
     Metric.objects.filter(id=sample_metric.id).delete()
 
     assert not Alert.objects.filter(id=created.id).exists()
+
+
+# ── Audit log ───────────────────────────────────────────────────────────────
+
+
+@patch("ddpui.api.alert_api.create_audit_log")
+def test_create_alert_creates_audit_log(mock_audit_log, seed_db, orguser, sample_metric):
+    """Creating an alert logs a curated snapshot with the metric name resolved
+    (not a bare metric_id) and never includes slack_webhook_url, even when set."""
+    request = mock_request(orguser)
+    payload = _base_payload(
+        orguser,
+        metric_id=sample_metric.id,
+        delivery_channels=["email", "slack"],
+        slack_webhook_url="https://hooks.slack.com/services/T00/B00/XXXXXXXX",
+    )
+
+    alert = create_alert(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.ALERT
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_id"] == str(alert.id)
+
+    resource_fields = call_kwargs["resource_fields"]
+    assert resource_fields["name"] == alert.name
+    assert resource_fields["source"] == "Alert API Metric"
+    assert resource_fields["schedule_cron"] == "0 9 * * *"
+    assert resource_fields["delivery_channels"] == ["email", "slack"]
+    assert resource_fields["message_template"] == payload.message_template
+    assert resource_fields["recipients"] == [orguser.user.email]
+    assert resource_fields["is_active"] is True
+    assert "slack_webhook_url" not in resource_fields
+
+
+@patch("ddpui.api.alert_api.create_audit_log")
+def test_update_alert_creates_audit_log_only_touched_fields(
+    mock_audit_log, seed_db, orguser, sample_metric
+):
+    """Updating only name + condition logs only those two fields — AlertUpdate
+    is a genuine partial patch, so untouched fields must not appear at all
+    (not even as null), and slack_webhook_url must never be logged."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+    mock_audit_log.reset_mock()
+
+    update_alert(
+        request,
+        created.id,
+        AlertUpdate(name="Renamed", condition=ThresholdCondition(operator="gt", value=100)),
+    )
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+
+    resource_fields = call_kwargs["resource_fields"]
+    assert resource_fields["name"] == "Renamed"
+    assert resource_fields["condition"] == {"operator": "gt", "value": 100.0}
+    assert "schedule_cron" not in resource_fields
+    assert "delivery_channels" not in resource_fields
+    assert "recipients" not in resource_fields
+    assert "source" not in resource_fields
+    assert "slack_webhook_url" not in resource_fields
+
+
+@patch("ddpui.api.alert_api.create_audit_log")
+def test_update_alert_untouched_name_still_logged(mock_audit_log, seed_db, orguser, sample_metric):
+    """name is always logged (the alert's current value), even when the
+    request didn't touch it, so the row stays self-identifying without a
+    separate name column."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+    mock_audit_log.reset_mock()
+
+    update_alert(
+        request,
+        created.id,
+        AlertUpdate(condition=ThresholdCondition(operator="gt", value=100)),
+    )
+
+    resource_fields = mock_audit_log.call_args[1]["resource_fields"]
+    assert resource_fields["name"] == created.name
+    assert resource_fields["condition"] == {"operator": "gt", "value": 100.0}
+
+
+@patch("ddpui.api.alert_api.create_audit_log")
+def test_toggle_alert_creates_audit_log(mock_audit_log, seed_db, orguser, sample_metric):
+    """Toggling is_active logs the alert's name alongside the new state."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+    mock_audit_log.reset_mock()
+
+    toggle_alert(request, created.id, AlertToggle(is_active=False))
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.ALERT
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_fields"] == {"name": created.name, "is_active": False}
+
+
+@patch("ddpui.api.alert_api.create_audit_log")
+def test_delete_alert_creates_audit_log(mock_audit_log, seed_db, orguser, sample_metric):
+    """Deleting an alert logs its name, captured before deletion."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+    mock_audit_log.reset_mock()
+
+    delete_alert(request, created.id)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.ALERT
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert call_kwargs["resource_id"] == str(created.id)
+    assert call_kwargs["resource_fields"] == {"name": created.name}
 
 
 # ── Logs ────────────────────────────────────────────────────────────────────
@@ -680,3 +867,128 @@ def test_dry_run_kpi_rag_uses_rag_status_for_evaluation(seed_db, orguser, sample
     out = run_dry_run(request, payload)
     assert out.would_fire is True
     assert "red" in out.message
+
+
+# ── Transfer ownership ─────────────────────────────────────────────────────
+
+
+def test_transfer_candidates_lists_edit_alert_roles_only(
+    seed_db, orguser, analyst_orguser, member_orguser, sample_metric
+):
+    """Members (no can_edit_alerts) are excluded; the owner is excluded too."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    resp = list_alert_transfer_candidates(request, created.id)
+
+    emails = {c.email for c in resp.candidates}
+    assert analyst_orguser.user.email in emails
+    assert orguser.user.email not in emails  # owner excluded
+    assert member_orguser.user.email not in emails  # role lacks can_edit_alerts
+
+
+def test_transfer_candidates_non_owner_analyst_forbidden(
+    seed_db, orguser, analyst_orguser, sample_metric
+):
+    """A non-owner non-admin cannot see the transfer list."""
+    created = create_alert(
+        mock_request(orguser), _base_payload(orguser, metric_id=sample_metric.id)
+    )
+    with pytest.raises(HttpError) as exc:
+        list_alert_transfer_candidates(mock_request(analyst_orguser), created.id)
+    assert exc.value.status_code == 403
+
+
+def test_transfer_ownership_owner_can_transfer_to_analyst(
+    seed_db, orguser, analyst_orguser, sample_metric
+):
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    updated = transfer_alert_ownership(
+        request, created.id, AlertTransferOwnershipPayload(to_orguser_id=analyst_orguser.id)
+    )
+
+    assert updated.created_by_email == analyst_orguser.user.email
+    Alert.objects.get(id=created.id).created_by_id == analyst_orguser.id
+
+
+def test_transfer_ownership_admin_can_transfer_others_alert(
+    seed_db, orguser, analyst_orguser, sample_metric
+):
+    """Admin (non-owner) can transfer an alert created by someone else."""
+    created = create_alert(
+        mock_request(analyst_orguser), _base_payload(analyst_orguser, metric_id=sample_metric.id)
+    )
+
+    updated = transfer_alert_ownership(
+        mock_request(orguser),
+        created.id,
+        AlertTransferOwnershipPayload(to_orguser_id=orguser.id),
+    )
+
+    assert updated.created_by_email == orguser.user.email
+
+
+def test_transfer_ownership_non_owner_analyst_forbidden(
+    seed_db, orguser, analyst_orguser, sample_metric
+):
+    created = create_alert(
+        mock_request(orguser), _base_payload(orguser, metric_id=sample_metric.id)
+    )
+    with pytest.raises(HttpError) as exc:
+        transfer_alert_ownership(
+            mock_request(analyst_orguser),
+            created.id,
+            AlertTransferOwnershipPayload(to_orguser_id=analyst_orguser.id),
+        )
+    assert exc.value.status_code == 403
+
+
+def test_transfer_ownership_recipient_without_edit_alerts_rejected(
+    seed_db, orguser, member_orguser, sample_metric
+):
+    """Members lack can_edit_alerts → 400."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    with pytest.raises(HttpError) as exc:
+        transfer_alert_ownership(
+            request,
+            created.id,
+            AlertTransferOwnershipPayload(to_orguser_id=member_orguser.id),
+        )
+    assert exc.value.status_code == 400
+    assert "Edit Alerts" in str(exc.value)
+
+
+def test_transfer_ownership_unknown_recipient_rejected(seed_db, orguser, sample_metric):
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    with pytest.raises(HttpError) as exc:
+        transfer_alert_ownership(
+            request, created.id, AlertTransferOwnershipPayload(to_orguser_id=999_999)
+        )
+    assert exc.value.status_code == 400
+
+
+def test_transfer_ownership_self_noop(seed_db, orguser, sample_metric):
+    """Transferring to the current owner is a no-op — no error, created_by unchanged."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    updated = transfer_alert_ownership(
+        request, created.id, AlertTransferOwnershipPayload(to_orguser_id=orguser.id)
+    )
+
+    assert updated.created_by_email == orguser.user.email
+
+
+def test_transfer_ownership_not_found(seed_db, orguser):
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as exc:
+        transfer_alert_ownership(
+            request, 99999, AlertTransferOwnershipPayload(to_orguser_id=orguser.id)
+        )
+    assert exc.value.status_code == 404

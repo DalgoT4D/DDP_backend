@@ -8,11 +8,17 @@ from datetime import datetime
 from uuid import uuid4
 
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.utils.text import slugify
 from django.utils import timezone as django_timezone
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE, user_has_platform_admin_permission
+from ddpui.models.alert import Alert
+from ddpui.models.dashboard import Dashboard
+from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org, OrgType
+from ddpui.models.report import ReportSnapshot
+from ddpui.models.visualization import Chart
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     DeleteOrgUserPayload,
@@ -31,7 +37,8 @@ from ddpui.models.org_user import (
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.models.role_based_access import Role
-from ddpui.utils import helpers, awsses, timezone
+from ddpui.core.notifications.triggers import user as user_notifications
+from ddpui.utils import helpers, timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_invitation, from_orguser
 from ddpui.utils.redis_client import RedisClient
@@ -141,7 +148,7 @@ def signup_orguser(payload: OrgUserCreate):
     FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
     try:
-        awsses.send_signup_email(payload.email, reset_url)
+        user_notifications.send_signup(payload.email, reset_url)
     except Exception:
         return None, "failed to send email"
 
@@ -170,8 +177,8 @@ def update_orguser_v1(orguser: OrgUser, payload: OrgUserUpdatev1):
         orguser.user.is_active = payload.active
     if payload.role_uuid:
         orguser.new_role = Role.objects.filter(uuid=payload.role_uuid).first()
-    if payload.has_seen_rbac_notice is not None:
-        orguser.has_seen_rbac_notice = payload.has_seen_rbac_notice
+    if payload.has_seen_resource_sharing_notice is not None:
+        orguser.has_seen_resource_sharing_notice = payload.has_seen_resource_sharing_notice
     orguser.user.save()
     orguser.save()
 
@@ -194,11 +201,10 @@ def delete_orguser_from_org(
     skipped — a platform admin acting cross-org has no role in target_org to compare
     against. See features/admin-portal/plan.md §4.4.
 
-    NOTE: deleting the OrgUser ORPHANS the content it created rather than deleting it —
-    Dashboard / Chart / ReportSnapshot.created_by are SET_NULL, so the content is kept
-    and only the creator link is cleared. Callers should still surface the
-    removal-impact count first (see the admin removal-impact endpoint, plan.md §4.6 /
-    research §5).
+    NOTE: deleting the OrgUser REASSIGNS the content it created to requestor_orguser
+    rather than deleting or orphaning it (upstream #c6b3d545). Callers should still
+    surface the removal-impact count first (see the admin removal-impact endpoint,
+    plan.md §4.6 / research §5).
     """
     orguser_to_delete = OrgUser.objects.filter(org=target_org, user__email=payload.email).first()
 
@@ -214,11 +220,20 @@ def delete_orguser_from_org(
     ):
         return None, "cannot delete user having higher role"
 
-    # remove the pending invitations for this email in the target org
-    Invitation.objects.filter(invited_in_org=target_org, invited_email=payload.email).delete()
+    # Reassign resources owned by the removed user to the admin doing the removal so
+    # nothing is left orphaned. Scoped to target_org, not requestor_orguser.org: a
+    # platform admin removing cross-org is not a member of the org being cleaned up.
+    with transaction.atomic():
+        for Model in (Dashboard, Chart, Metric, KPI, ReportSnapshot, Alert):
+            Model.objects.filter(org=target_org, created_by=orguser_to_delete).update(
+                created_by=requestor_orguser
+            )
 
-    # delete the org user; their created content is orphaned (created_by SET_NULL), not deleted
-    orguser_to_delete.delete()
+        # remove the pending invitations for this email in the target org
+        Invitation.objects.filter(invited_in_org=target_org, invited_email=payload.email).delete()
+
+        # delete the org user
+        orguser_to_delete.delete()
 
     return None, None
 
@@ -233,6 +248,7 @@ def invite_user_to_org(
     inviter_orguser: OrgUser,
     payload: NewInvitationSchema,
     is_platform_admin: bool = False,
+    group_name: str = None,
 ):
     """
     org-parameterized core of "invite a user to an org".
@@ -244,6 +260,10 @@ def invite_user_to_org(
     platform admin invites cross-org — so accept/cancel resolve the correct org
     regardless of who sent the invite. When is_platform_admin is True the inviter-level
     cap is skipped: a platform admin may invite at any role. See plan.md §4.4.
+
+    ``group_name`` — set when the invite originates from a group create / edit flow, so
+    the email copy names the group instead of the plain "invited to Dalgo" / "added to
+    org" wording.
     """
     frontend_url = os.getenv("FRONTEND_URL")
 
@@ -268,8 +288,8 @@ def invite_user_to_org(
     if existing_user:
         logger.info("user exists, creating new OrgUser")
         OrgUser.objects.create(user=existing_user, org=target_org, new_role=invited_role)
-        awsses.send_youve_been_added_email(
-            invited_email, inviter_orguser.user.email, target_org.name
+        user_notifications.send_added_to_org(
+            invited_email, inviter_orguser.user.email, target_org.name, group_name=group_name
         )
         return (
             NewInvitationSchema(
@@ -286,8 +306,12 @@ def invite_user_to_org(
         invitation.invited_on = timezone.as_utc(datetime.utcnow())
         # if the invitation is already present - trigger the email again
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-        awsses.send_invite_user_email(
-            invitation.invited_email, invitation.invited_by.user.email, invite_url
+        user_notifications.send_invite_user(
+            invitation.invited_email,
+            invitation.invited_by.user.email,
+            invite_url,
+            org_name=target_org.name,
+            group_name=group_name,
         )
         logger.info(
             f"Resent invitation to {invited_email} to join {target_org.name} "
@@ -306,8 +330,12 @@ def invite_user_to_org(
 
     # trigger an email to the user
     invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-    awsses.send_invite_user_email(
-        invitation.invited_email, invitation.invited_by.user.email, invite_url
+    user_notifications.send_invite_user(
+        invitation.invited_email,
+        invitation.invited_by.user.email,
+        invite_url,
+        org_name=target_org.name,
+        group_name=group_name,
     )
 
     logger.info(
@@ -317,9 +345,9 @@ def invite_user_to_org(
     return payload, None
 
 
-def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
+def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema, group_name: str = None):
     """invite a user to the caller's own org (single-org wrapper)"""
-    return invite_user_to_org(orguser.org, orguser, payload)
+    return invite_user_to_org(orguser.org, orguser, payload, group_name=group_name)
 
 
 def change_orguser_role_in_org(
@@ -335,8 +363,8 @@ def change_orguser_role_in_org(
     Assigns a role to a user in target_org. The target org is passed explicitly so the
     admin portal can change a role in an org the requestor does not belong to. When
     is_platform_admin is True the "can't assign a role higher than your own" cap is
-    skipped. Returns (result, error) — the caller maps error to an HTTP status.
-    See plan.md §4.4.
+    skipped. Returns (the updated OrgUser, error) — the caller maps error to an HTTP
+    status, and owns its own response shape and audit log. See plan.md §4.4.
 
     Validation order mirrors the original endpoint for the single-org path: for a
     regular requestor the missing-role check comes first, then role lookup, then the
@@ -367,7 +395,7 @@ def change_orguser_role_in_org(
     orguser_to_be_assigned.new_role = role_to_be_assigned
     orguser_to_be_assigned.save()
 
-    return {"success": 1}, None
+    return orguser_to_be_assigned, None
 
 
 def accept_invitation_v1(payload: AcceptInvitationSchema):
@@ -411,7 +439,63 @@ def accept_invitation_v1(payload: AcceptInvitationSchema):
             new_role=invitation.invited_new_role,
             work_domain=payload.work_domain,
         )
+
+    # Preserve any group memberships that were pinned to this invitation:
+    # promote each member row to point at the accepting orguser instead. If
+    # the orguser is already a direct member of that group, drop the
+    # invitation-linked row to avoid duplicates. After this, invitation.delete()
+    # nulls out any remaining invitation_id via SET_NULL.
+    from ddpui.models.org_user import OrgUserGroupMember  # local import to avoid cycles
+    from ddpui.models.resource_share import ResourceShare, ResourceSharePrincipalType, ResourceType
+
+    invitation_member_rows = OrgUserGroupMember.objects.filter(invitation=invitation)
+    existing_group_ids = set(
+        OrgUserGroupMember.objects.filter(orguser=orguser).values_list("group_id", flat=True)
+    )
+    for member_row in invitation_member_rows:
+        if member_row.group_id in existing_group_ids:
+            member_row.delete()
+        else:
+            member_row.orguser = orguser
+            member_row.save(update_fields=["orguser", "updated_at"])
+            existing_group_ids.add(member_row.group_id)
+
+    # Promote any pending resource shares in the same way: point them at the
+    # accepting orguser as a direct user grant. If the orguser already has a
+    # direct share on the same resource, drop the invitation-linked row.
+    invitation_share_rows = ResourceShare.objects.filter(invitation=invitation)
+    existing_direct_keys = set(
+        ResourceShare.objects.filter(
+            org=invitation.invited_by.org,
+            principal_type=ResourceSharePrincipalType.USER,
+            principal_id=orguser.id,
+        ).values_list("resource_type", "resource_id")
+    )
+    promoted_dashboard_ids: set[int] = set()
+    for share_row in invitation_share_rows:
+        key = (share_row.resource_type, share_row.resource_id)
+        if key in existing_direct_keys:
+            share_row.delete()
+        else:
+            share_row.principal_type = ResourceSharePrincipalType.USER
+            share_row.principal_id = orguser.id
+            share_row.save(update_fields=["principal_type", "principal_id"])
+            existing_direct_keys.add(key)
+            if share_row.resource_type == ResourceType.DASHBOARD:
+                promoted_dashboard_ids.add(int(share_row.resource_id))
+
     invitation.delete()
+
+    # Cascade the promoted dashboard shares to inner charts/KPIs now that the
+    # shares are real user grants (sync_dashboard_cascade skips invitation-backed rows).
+    if promoted_dashboard_ids:
+        from ddpui.core.access.resource_share import sync_dashboard_cascade
+
+        for dashboard_id in promoted_dashboard_ids:
+            dashboard = Dashboard.objects.filter(id=dashboard_id).first()
+            if dashboard:
+                sync_dashboard_cascade(dashboard)
+
     return from_orguser(orguser), None
 
 
@@ -463,15 +547,20 @@ def resend_invitation(invitation_id: str):
     """resend email invitation to user"""
     invitation = Invitation.objects.filter(id=invitation_id).first()
 
-    if invitation:
-        invitation.invited_on = timezone.as_utc(datetime.utcnow())
-        invitation.save()
-        # trigger an email to the user
-        frontend_url = os.getenv("FRONTEND_URL")
-        invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-        awsses.send_invite_user_email(
-            invitation.invited_email, invitation.invited_by.user.email, invite_url
-        )
+    if invitation is None:
+        return None, "invitation not found"
+
+    invitation.invited_on = timezone.as_utc(datetime.utcnow())
+    invitation.save()
+    # trigger an email to the user
+    frontend_url = os.getenv("FRONTEND_URL")
+    invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
+    user_notifications.send_invite_user(
+        invitation.invited_email,
+        invitation.invited_by.user.email,
+        invite_url,
+        org_name=invitation.invited_by.org.name,
+    )
 
     return None, None
 
@@ -500,7 +589,7 @@ def request_reset_password(email: str, is_v2: bool = False):
     reset_url = f"{FRONTEND_URL}/resetpassword?token={token.hex}"
 
     try:
-        awsses.send_password_reset_email(email, reset_url)
+        user_notifications.send_password_reset(email, reset_url)
     except Exception:
         return None, "failed to send email"
 
@@ -525,7 +614,7 @@ def confirm_reset_password(payload: ResetPasswordSchema):
     orguser.user.set_password(payload.password.get_secret_value())
     orguser.user.save()
 
-    return None, None
+    return orguser, None
 
 
 def change_password(payload: ChangePasswordSchema, orguser: OrgUser):
@@ -553,7 +642,7 @@ def resend_verification_email(orguser: OrgUser, email: str):
     FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
     try:
-        awsses.send_signup_email(email, reset_url)
+        user_notifications.send_signup(email, reset_url)
     except Exception:
         return None, "failed to send email"
 
@@ -583,7 +672,7 @@ def verify_email(payload: VerifyEmailSchema):
         email_verified=True, updated_at=django_timezone.now()
     )
 
-    return None, None
+    return orguser, None
 
 
 def ensure_orguser_for_org(orguser: OrgUser, org):

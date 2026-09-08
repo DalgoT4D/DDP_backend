@@ -35,6 +35,7 @@ def test_setup_managed_git_workspace_environment_vars_missing():
 
 
 @pytest.mark.django_db
+@patch.dict(os.environ, {"DALGO_GITHUB_ORG": "fake-org", "DALGO_ORG_ADMIN_PAT": "fake-pat"})
 def test_setup_managed_git_workspace_dbt_init_failed(tmp_path):
     """Test that dbt init failure is properly handled"""
     project_name = "dbtrepo"
@@ -62,11 +63,13 @@ def test_setup_managed_git_workspace_dbt_init_failed(tmp_path):
                 "dbt init failed",
                 "DALGO_GITHUB_ORG and DALGO_ORG_ADMIN_PAT must be set",
                 "Authentication failed",
+                "already exists",
             ]
         )
 
 
 @pytest.mark.django_db
+@patch.dict(os.environ, {"DALGO_GITHUB_ORG": "fake-org", "DALGO_ORG_ADMIN_PAT": "fake-pat"})
 def test_setup_managed_git_workspace_success(tmp_path):
     """Test that setup_managed_git_workspace handles expected error conditions appropriately"""
     project_name = "dbtrepo"
@@ -137,6 +140,7 @@ def test_setup_managed_git_workspace_project_already_exists(tmp_path):
 
 
 @pytest.mark.django_db
+@patch.dict(os.environ, {"DALGO_GITHUB_ORG": "fake-org", "DALGO_ORG_ADMIN_PAT": "fake-pat"})
 def test_setup_managed_git_workspace_warehouse_credentials_failure():
     """Test that setup fails when warehouse credentials cannot be retrieved"""
     project_name = "dbtrepo"
@@ -170,6 +174,7 @@ def test_setup_managed_git_workspace_warehouse_credentials_failure():
 
 
 @pytest.mark.django_db
+@patch.dict(os.environ, {"DALGO_GITHUB_ORG": "fake-org", "DALGO_ORG_ADMIN_PAT": "fake-pat"})
 def test_setup_managed_git_workspace_cli_profile_creation_failure():
     """Test that setup fails when CLI profile block creation fails"""
     project_name = "dbtrepo"
@@ -179,7 +184,9 @@ def test_setup_managed_git_workspace_cli_profile_creation_failure():
     warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres")
 
     # Mock to fail at CLI profile creation step
-    with patch("ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block") as mock_create_cli_block:
+    with patch(
+        "ddpui.ddpdbt.dbt_service.create_or_update_dbt_profile_secret_blk"
+    ) as mock_create_cli_block:
         # Mock CLI block creation failure
         mock_create_cli_block.return_value = (None, "Failed to create CLI profile")
 
@@ -201,6 +208,7 @@ def test_setup_managed_git_workspace_cli_profile_creation_failure():
 
 
 @pytest.mark.django_db
+@patch.dict(os.environ, {"DALGO_GITHUB_ORG": "fake-org", "DALGO_ORG_ADMIN_PAT": "fake-pat"})
 def test_setup_managed_git_workspace_git_clone_failure():
     """Test that setup fails when git clone operation fails"""
     project_name = "dbtrepo"

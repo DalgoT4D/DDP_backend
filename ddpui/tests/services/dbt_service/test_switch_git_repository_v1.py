@@ -66,7 +66,7 @@ def test_switch_git_repository_v1_managed_to_external_empty_success(setup_data):
     ), patch(
         "ddpui.ddpdbt.dbt_service.CanvasNode.objects.filter"
     ) as mock_canvas_filter, patch(
-        "ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block",
+        "ddpui.ddpdbt.dbt_service.create_or_update_dbt_profile_secret_blk",
         return_value=({"success": True}, None),
     ), patch(
         "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
@@ -139,7 +139,7 @@ def test_switch_git_repository_v1_managed_to_external_nonempty_success(setup_dat
     ), patch(
         "ddpui.ddpdbt.dbt_service.CanvasNode.objects.filter"
     ) as mock_canvas_filter, patch(
-        "ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block",
+        "ddpui.ddpdbt.dbt_service.create_or_update_dbt_profile_secret_blk",
         return_value=({"success": True}, None),
     ), patch(
         "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",

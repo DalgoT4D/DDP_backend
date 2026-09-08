@@ -161,11 +161,12 @@ class AdminChangeRoleSchema(Schema):
 
 class RemovalImpactSchema(Schema):
     """
-    what removing a user would orphan. Drives the confirm dialog's warning.
-    Dashboard/Chart/ReportSnapshot created_by are all SET_NULL — the content is KEPT,
-    only the creator link is cleared (its created_by becomes NULL). Nothing is deleted.
-    (Access Control v2 / PR #1428 switched Dashboard & Chart from CASCADE to SET_NULL;
-    ReportSnapshot was already SET_NULL.) See research §5.
+    how much content removing a user would move. Drives the confirm dialog's warning.
+    Nothing is deleted: delete_orguser_from_org reassigns their Dashboards/Charts/
+    ReportSnapshots to the admin doing the removal (upstream #c6b3d545).
+
+    The `*_orphaned` field names predate that reassignment and are kept because the
+    frontend RemoveUserDialog reads them; renaming them needs a coordinated change.
     """
 
     dashboards_orphaned: int

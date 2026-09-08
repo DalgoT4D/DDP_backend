@@ -206,7 +206,7 @@ def list_columns(request, schema_name: str, table_name: str):
 
 
 @filter_router.get("/preview/", response=FilterPreviewResponse)
-@has_permission(["can_view_warehouse_data"])
+@has_permission(["can_view_dashboards"])
 def get_filter_preview(
     request,
     schema_name: str,

@@ -211,6 +211,9 @@ uv run celery -A ddpui worker -Q default -n ddpui -l info
 # Start Canvas DBT Celery worker (in another terminal)
 uv run celery -A ddpui worker -Q canvas_dbt -n canvas_dbt --concurrency=2 -l info
 
+# Start Trial Clone Celery worker (in another terminal)
+uv run celery -A ddpui worker -Q trial_clone -n trial_clone --autoscale=4,1 -l info
+
 # Start Celery beat scheduler (in another terminal)
 uv run celery -A ddpui beat -l info
 ```

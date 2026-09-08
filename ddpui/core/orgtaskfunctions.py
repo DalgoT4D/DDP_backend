@@ -10,7 +10,6 @@ import yaml
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskLock, TaskLockStatus, TaskType
 from ddpui.models.org import (
     Org,
-    OrgPrefectBlockv1,
     OrgDataFlowv1,
     OrgDbt,
 )
@@ -24,14 +23,12 @@ from ddpui.ddpprefect import (
     FLOW_RUN_SCHEDULED_STATE_TYPE,
     FLOW_RUN_TERMINAL_STATE_TYPES,
 )
-from ddpui.ddpdbt.schema import DbtCloudJobParams, DbtProjectParams
+from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema3,
 )
 from ddpui.ddpprefect import prefect_service
 from ddpui.core.pipelinefunctions import (
-    setup_dbt_core_task_config,
-    setup_dbt_cloud_task_config,
     pipeline_with_orgtasks,
 )
 from ddpui.core.orchestrate.pipeline_service import PipelineService
@@ -63,21 +60,21 @@ def get_transform_task_queue(org: Org):
     return transform_queue
 
 
-def create_default_transform_tasks(
-    org: Org, cli_profile_block: OrgPrefectBlockv1, dbt_project_params: DbtProjectParams
-):
+def create_default_transform_tasks(org: Org, dbt_project_params: DbtProjectParams):
     """Create all the transform (git, dbt) tasks"""
     if org.dbt is None:
         raise ValueError("dbt is not configured for this org")
 
     for task in Task.objects.filter(type__in=[TaskType.DBT, TaskType.GIT], is_system=True).all():
-        org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4(), dbt=org.dbt)
+        # Use get_or_create: LONG_RUNNING_TASKS run create_prefect_deployment_for_dbtcore_task,
+        # which calls get_or_create_git_clone/pull_orgtask. Since git-clone (PK 13) has a higher
+        # PK than the dbt tasks, it gets pre-created there before the loop reaches it — causing
+        # a duplicate if we use plain create() here.
+        org_task, _ = OrgTask.objects.get_or_create(org=org, task=task, dbt=org.dbt)
 
         if task.slug in LONG_RUNNING_TASKS:
             # create deployment (auto-prepends git + dbt-clean + dbt-deps for dbt tasks)
-            create_prefect_deployment_for_dbtcore_task(
-                org_task, cli_profile_block, dbt_project_params
-            )
+            create_prefect_deployment_for_dbtcore_task(org_task, dbt_project_params)
 
     return None, None
 
@@ -142,17 +139,16 @@ def get_edr_send_report_task(org: Org, **kwargs) -> OrgTask | None:
 
 def create_prefect_deployment_for_dbtcore_task(
     org_task: OrgTask,
-    credentials_profile_block: OrgPrefectBlockv1,
-    dbt_project_params: Union[DbtProjectParams, DbtCloudJobParams],
+    dbt_project_params: DbtProjectParams,
 ):
     """
-    - create a prefect deployment for a single dbt command or dbt cloud job
+    - create a prefect deployment for a single long-running dbt command
     - save the deployment id to an OrgDataFlowv1 object
-    - for dbt core operation; the credentials_profile_block is cli profile block
-    - for dbt cloud job; the credentials_profile_block is dbt cloud credentials block
-    - only long-running tasks (dbt-run, dbt-test, dbt-seed, dbt-cloud-job) get a
-      deployment; auto-managed prep tasks (git-pull, dbt-clean, dbt-deps) are
-      chained inside long-running deployments and do not get one of their own
+    - credentials come from the org's dbt-profile Secret block (read by the runner
+      via env["dbt-profile-secret-block"] at flow-run time)
+    - only long-running tasks (dbt-run, dbt-test, dbt-seed) get a deployment;
+      auto-managed prep tasks (git-pull, dbt-clean, dbt-deps) are chained inside
+      long-running deployments and do not get one of their own
     """
     if org_task.task.slug not in LONG_RUNNING_TASKS:
         raise ValueError(
@@ -167,8 +163,7 @@ def create_prefect_deployment_for_dbtcore_task(
 
     tasks = []
     # orgtasks that will be mapped to the deployment via DataflowOrgTask; kept in
-    # execution order. For DBT this is the full chain; for DBTCLOUD it's just the
-    # primary task.
+    # execution order. Full chain: git + dbt-clean + dbt-deps + primary dbt task.
     mapped_orgtasks = [org_task]
 
     if org_task.task.type == TaskType.DBT:
@@ -190,7 +185,6 @@ def create_prefect_deployment_for_dbtcore_task(
         task_configs, err = pipeline_with_orgtasks(
             org,
             chain_orgtasks,
-            cli_block=credentials_profile_block,
             dbt_project_params=dbt_project_params,
             gitrepo_url=org.dbt.gitrepo_url if org.dbt else None,
         )
@@ -198,13 +192,6 @@ def create_prefect_deployment_for_dbtcore_task(
             raise ValueError(err)
         tasks = task_configs
         mapped_orgtasks = chain_orgtasks
-
-    elif org_task.task.type == TaskType.DBTCLOUD:
-        tasks = [
-            setup_dbt_cloud_task_config(
-                org_task, credentials_profile_block, dbt_project_params
-            ).to_json()
-        ]
 
     dataflow = prefect_service.create_dataflow_v1(
         PrefectDataFlowCreateSchema3(

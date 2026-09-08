@@ -55,18 +55,18 @@ All imports at the top of the file.
 # ✗ BAD
 def send_reset_link(email: str) -> None:
     from django.conf import settings
-    from ddpui.utils import awsses
-    awsses.send_signup_email(email, settings.FRONTEND_URL + "/reset")
+    from ddpui.core.notifications.triggers import user as user_notifications
+    user_notifications.send_password_reset(email, settings.FRONTEND_URL + "/reset")
 ```
 
 ```python
 # ✓ GOOD
 from django.conf import settings
-from ddpui.utils import awsses
+from ddpui.core.notifications.triggers import user as user_notifications
 
 
 def send_reset_link(email: str) -> None:
-    awsses.send_signup_email(email, settings.FRONTEND_URL + "/reset")
+    user_notifications.send_password_reset(email, settings.FRONTEND_URL + "/reset")
 ```
 
 Only break this rule for a genuine circular import or an optional/slow dependency you don't want at module load — and comment why.

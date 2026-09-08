@@ -281,7 +281,7 @@ def test_admin_list_orgs(platform_admin_request):
 # ---------------------------------------------------------------------------- #
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 @patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
 @patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
 def test_admin_create_org_happy_path(mock_setup_airbyte, mock_connectors, platform_admin_request):
@@ -299,7 +299,7 @@ def test_admin_create_org_happy_path(mock_setup_airbyte, mock_connectors, platfo
     mock_setup_airbyte.assert_called_once()
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 @patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
 @patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
 def test_admin_create_org_invites_the_admin(
@@ -317,7 +317,7 @@ def test_admin_create_org_invites_the_admin(
     assert invitation.invited_new_role.slug == ADMIN_ROLE
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 @patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
 @patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
 def test_admin_create_org_always_invites_at_admin_role(
@@ -339,7 +339,7 @@ def test_admin_create_org_always_invites_at_admin_role(
     assert invitation.invited_new_role.level == _role(ADMIN_ROLE).level
 
 
-@patch("ddpui.utils.awsses.send_youve_been_added_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_added_to_org", Mock())
 @patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
 @patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
 def test_admin_create_org_adds_an_existing_dalgo_user_directly(
@@ -380,7 +380,7 @@ def test_admin_create_org_rejects_a_blank_admin_email(mock_setup_airbyte, platfo
     mock_setup_airbyte.assert_not_called()
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 @patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
 def test_admin_create_org_rolls_back_on_airbyte_failure(mock_setup_airbyte, platform_admin_request):
     """a failed Airbyte call leaves ZERO trace — no orphaned Org or OrgPlans row"""
@@ -461,7 +461,7 @@ def test_admin_create_org_rolls_back_when_the_invite_is_rejected(
 
 
 @patch("ddpui.core.admin.admin_service.airbyte_service.delete_workspace")
-@patch("ddpui.utils.awsses.send_invite_user_email")
+@patch("ddpui.core.notifications.triggers.user.send_invite_user")
 @patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
 @patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
 def test_admin_create_org_rolls_back_when_the_invite_email_fails(
@@ -674,7 +674,7 @@ def test_admin_users_routes_forbidden_for_non_platform_admin(orguser, akshara):
 # ---- invite (cross-org) + invite-cap-skip -------------------------------------
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 def test_admin_invite_into_org_records_target_org(platform_admin_request, akshara):
     """
     inviting a NEW email into Akshara creates an Invitation whose invited_in_org is
@@ -694,7 +694,7 @@ def test_admin_invite_into_org_records_target_org(platform_admin_request, akshar
     assert inv.invited_new_role.slug == GUEST_ROLE
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 def test_admin_invite_cap_skipped_for_platform_admin(platform_admin_request, akshara):
     """
     INVITE-CAP-SKIP (plan §8 #1): the single-org invite path caps the invited role at the
@@ -822,12 +822,14 @@ def test_admin_removal_impact_counts_are_accurate(platform_admin_request, akshar
     assert impact.reports_orphaned == 2
 
 
-def test_admin_remove_user_orphans_content(platform_admin_request, akshara):
+def test_admin_remove_user_reassigns_content(platform_admin_request, akshara):
     """
-    removing the user hard-deletes the OrgUser but KEEPS their Dashboards/Charts/Reports
-    — all three created_by FKs are SET_NULL (Access Control v2 / PR #1428 switched
-    Dashboard & Chart from CASCADE to SET_NULL; ReportSnapshot already was). The content
-    survives with created_by=None; the removal-impact count is the orphan count.
+    removing the user hard-deletes the OrgUser but KEEPS their Dashboards/Charts/Reports,
+    reassigned to the admin who did the removal (upstream #c6b3d545), not orphaned.
+
+    Note the requestor here is a platform admin who is NOT a member of akshara, so this
+    also pins that the reassignment is scoped by the target org rather than by
+    requestor_orguser.org -- the content moves even across orgs.
     """
     priya = _make_member(akshara, "priya2@akshara.org", GUEST_ROLE)
     dash = Dashboard.objects.create(title="d", org=akshara, created_by=priya)
@@ -845,19 +847,20 @@ def test_admin_remove_user_orphans_content(platform_admin_request, akshara):
     delete_admin_org_user(platform_admin_request, akshara.id, priya.id)
 
     assert not OrgUser.objects.filter(id=priya_id).exists()
-    # content is KEPT (not cascade-deleted); only the creator link is cleared
+    # content is KEPT (not cascade-deleted) and now belongs to the removing admin
+    admin_orguser = platform_admin_request.orguser
     dash.refresh_from_db()
     chart.refresh_from_db()
     report.refresh_from_db()
-    assert dash.created_by is None  # orphaned, not deleted
-    assert chart.created_by is None  # orphaned, not deleted
-    assert report.created_by is None  # orphaned, not deleted
+    assert dash.created_by_id == admin_orguser.id
+    assert chart.created_by_id == admin_orguser.id
+    assert report.created_by_id == admin_orguser.id
 
 
 # ---- org-scoped cancel invite -------------------------------------------------
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 def test_admin_cancel_invite_is_org_scoped(platform_admin_request, akshara, bhumi):
     """
     ORG-SCOPED CANCEL (plan §8 / research §8): a Bhumi invitation cannot be cancelled
@@ -887,7 +890,7 @@ def test_admin_cancel_invite_is_org_scoped(platform_admin_request, akshara, bhum
 # ---- users list ---------------------------------------------------------------
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 def test_admin_org_users_lists_members_and_pending(platform_admin_request, akshara):
     """the Users tab payload lists members and pending invites"""
     member = _make_member(akshara, "member@akshara.org", GUEST_ROLE)
@@ -917,7 +920,7 @@ def test_admin_org_users_lists_members_and_pending(platform_admin_request, aksha
 # mocked: Airbyte (org create), Redis (unavailable in tests), and SES (email sending).
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 @patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
 @patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
 def test_week1_full_admin_lifecycle_flow(
@@ -1037,7 +1040,7 @@ def test_week1_full_admin_lifecycle_flow(
     ]
     report = ReportSnapshot.objects.create(title="r", org=org1, created_by=priya_ou)
 
-    # the orphan-impact count is available BEFORE the remove
+    # the removal-impact count is available BEFORE the remove
     impact = get_admin_org_user_removal_impact(admin_request, org1.id, priya_ou.id)
     assert impact.dashboards_orphaned == 2
     assert impact.charts_orphaned == 3
@@ -1047,15 +1050,16 @@ def test_week1_full_admin_lifecycle_flow(
     delete_admin_org_user(admin_request, org1.id, priya_ou.id)
 
     assert not OrgUser.objects.filter(id=priya_ou_id).exists()  # removed from org1
-    # content is KEPT, orphaned (created_by SET_NULL) — not cascade-deleted
+    # content is KEPT and transferred to the removing admin -- not cascade-deleted
+    remover_id = admin_request.orguser.id
     for dash in dashboards:
         dash.refresh_from_db()
-        assert dash.created_by is None  # orphaned, not deleted
+        assert dash.created_by_id == remover_id
     for chart in charts:
         chart.refresh_from_db()
-        assert chart.created_by is None  # orphaned, not deleted
+        assert chart.created_by_id == remover_id
     report.refresh_from_db()
-    assert report.created_by is None  # orphaned (SET_NULL), not deleted
+    assert report.created_by_id == remover_id
     # the remove is org-scoped: Priya's Bhumi membership is untouched
     assert OrgUser.objects.filter(id=priya_ou2.id).exists()
 

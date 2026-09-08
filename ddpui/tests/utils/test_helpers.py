@@ -8,6 +8,7 @@ from ddpui.utils.helpers import (
     cleaned_name_for_prefectblock,
     map_airbyte_keys_to_postgres_keys,
     update_dict_but_not_stars,
+    resolve_stars,
     nice_bytes,
     find_key_in_dictionary,
     get_integer_env_var,
@@ -186,6 +187,50 @@ def test_update_dict_but_not_stars():
             "k8": [{"k10": "v10", "k11": 11}, {"k13": "v13", "k14": 14}, 200, "v8"],
         },
     }
+
+
+def test_resolve_stars_replaces_top_level_stars():
+    curr = {"password": "real-password", "host": "real-host"}
+    payload = {"host": "new-host", "password": "*****"}
+    result = resolve_stars(payload, curr)
+    assert result == {"host": "new-host", "password": "real-password"}
+
+
+def test_resolve_stars_replaces_nested_stars():
+    curr = {"ssl_mode": {"mode": "verify-ca", "ca_certificate": "real-cert"}}
+    payload = {"ssl_mode": {"mode": "verify-ca", "ca_certificate": "*****"}}
+    result = resolve_stars(payload, curr)
+    assert result == {"ssl_mode": {"mode": "verify-ca", "ca_certificate": "real-cert"}}
+
+
+def test_resolve_stars_does_not_carry_over_missing_keys():
+    """Keys in curr_credentials absent from payload must not appear in result."""
+    curr = {
+        "password": "real-password",
+        "ssl_mode": {"mode": "verify-ca", "ca_certificate": "real-cert"},
+        "sslrootcert": "/home/ddp/global-bundle.pem",
+    }
+    payload = {"host": "new-host", "password": "*****"}
+    result = resolve_stars(payload, curr)
+    assert result == {"host": "new-host", "password": "real-password"}
+    assert "ssl_mode" not in result
+    assert "sslrootcert" not in result
+
+
+def test_resolve_stars_handles_boolean_false():
+    curr = {"password": "real-password"}
+    payload = {"host": "new-host", "ssl": False, "password": "*****"}
+    result = resolve_stars(payload, curr)
+    assert result == {"host": "new-host", "ssl": False, "password": "real-password"}
+
+
+def test_resolve_stars_drops_key_when_star_unresolvable():
+    """Starred values with no match in curr_credentials are dropped."""
+    curr = {}
+    payload = {"host": "new-host", "password": "*****"}
+    result = resolve_stars(payload, curr)
+    assert result["host"] == "new-host"
+    assert "password" not in result
 
 
 def test_nice_bytes():

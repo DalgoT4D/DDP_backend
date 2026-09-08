@@ -60,7 +60,7 @@ class Command(BaseCommand):
                 )
 
                 task_config = setup_edr_send_report_task_config(
-                    org_task, dbt_project_params.project_dir, dbt_project_params.venv_binary
+                    org_task, dbt_project_params.project_dir
                 )
 
                 prefect_service.update_dataflow_v1(

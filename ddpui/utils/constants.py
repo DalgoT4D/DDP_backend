@@ -7,7 +7,6 @@ TASK_DBTCLEAN = "dbt-clean"
 TASK_DBTDEPS = "dbt-deps"
 TASK_GITPULL = "git-pull"
 TASK_GITCLONE = "git-clone"
-TASK_DBTCLOUD_JOB = "dbt-cloud-job"  # this is task slug so it should match the seed data.
 TASK_DOCSGENERATE = "dbt-docs-generate"
 TASK_AIRBYTESYNC = "airbyte-sync"
 TASK_AIRBYTERESET = "airbyte-reset"
@@ -24,19 +23,18 @@ TRANSFORM_TASKS_SEQ = {
     TASK_DBTSEED: 4,
     TASK_DBTRUN: 5,
     TASK_DBTTEST: 6,
-    TASK_DBTCLOUD_JOB: 20,
+    TASK_GENERATE_EDR: 25,
 }
 # when a new pipeline is created; these are the transform tasks being pushed by default
 DEFAULT_TRANSFORM_TASKS_IN_PIPELINE = [
     TASK_DBTRUN,
     TASK_DBTTEST,
-    TASK_DBTCLOUD_JOB,
 ]
 
 # These are tasks to be run via deployment
 # Adding a new task here will work for any new orgtask created
 # But for the current ones a script would need to be run to set them with a deployment
-LONG_RUNNING_TASKS = [TASK_DBTRUN, TASK_DBTSEED, TASK_DBTTEST, TASK_DBTCLOUD_JOB]
+LONG_RUNNING_TASKS = [TASK_DBTRUN, TASK_DBTSEED, TASK_DBTTEST]
 
 # Auto-managed transform tasks: hidden from the Transform tab UI and the
 # CreateTask dropdown. Auto-prepended before every long-running transform deployment.
