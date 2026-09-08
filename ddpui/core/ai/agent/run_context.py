@@ -33,6 +33,9 @@ class RunContext:
     # Org-specific PII detector rules (ChatWithDataOrgConfig.pii_rules) — the
     # transport passes these into build_agent's PII middleware
     pii_rules: list[dict] = field(default_factory=list)
+    # Admin-curated org facts (ChatWithDataOrgMemory.text) — rendered into both
+    # system prompts by org_memory_section(); "" means no memory, no section
+    org_memory: str = ""
     # Set per turn by the runner (router output) — reflection gate + tool context
     question: str = ""
     complexity: str = "simple"

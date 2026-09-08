@@ -16,6 +16,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from ddpui.core.ai.agent.base import build_model_by_id, resolve_model_name
 from ddpui.core.ai.agent.hitl import build_hitl_middleware
+from ddpui.core.ai.agent.org_memory import org_memory_section
 from ddpui.core.ai.agent.middleware import (
     MAX_SQL_ATTEMPTS,
     clear_old_tool_results,
@@ -119,7 +120,7 @@ program managers, not engineers — they know their programs deeply but do not k
 lowercase and fail with "column does not exist".
 - Access is strictly read-only. Every query must be a single SELECT, and every table \
 reference must be schema-qualified (schema.table).
-
+{org_memory_section(ctx)}
 ## How to work
 1. Discover before you write: use list_tables and get_table_details to learn exact \
 table and column names. Never guess a column name.

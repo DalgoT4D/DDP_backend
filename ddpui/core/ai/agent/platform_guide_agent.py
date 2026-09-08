@@ -20,6 +20,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from ddpui.core.ai.agent.hitl import build_hitl_middleware
 from ddpui.core.ai.agent.middleware import clear_old_tool_results, trim_history
+from ddpui.core.ai.agent.org_memory import org_memory_section
 from ddpui.core.ai.agent.pii import build_pii_middleware
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import get_tools
@@ -72,7 +73,7 @@ thresholds. A KPI ALWAYS needs a metric first.
 - A **dashboard** is a collection of charts arranged on a page.
 - A **report** is a frozen snapshot of a dashboard for a date range — it needs \
 an existing dashboard.
-
+{org_memory_section(ctx)}
 ## How to work
 1. ALWAYS check what already exists before creating: list_metrics before a \
 metric or KPI, list_charts and list_dashboards before dashboard work, \

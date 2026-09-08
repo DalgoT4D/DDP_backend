@@ -8,7 +8,7 @@ tools never touch the database or trust an LLM-supplied org identifier.
 
 from ddpui.auth import granted_permission_slugs
 from ddpui.core.ai.agent.run_context import RunContext
-from ddpui.models.chat_with_data import ChatWithDataOrgConfig
+from ddpui.models.chat_with_data import ChatWithDataOrgConfig, ChatWithDataOrgMemory
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
@@ -57,6 +57,8 @@ def build_run_context(orguser: OrgUser) -> RunContext:
 
     # per-org knobs; every org works with no config row (all defaults)
     config = ChatWithDataOrgConfig.objects.filter(org=org).first()
+    # admin-curated org facts; no row (or empty text) means no prompt section
+    memory = ChatWithDataOrgMemory.objects.filter(org=org).only("text").first()
 
     if config and config.allowed_schemas:
         allowed_schemas = config.allowed_schemas
@@ -91,4 +93,5 @@ def build_run_context(orguser: OrgUser) -> RunContext:
         can_create_metrics="can_create_metrics" in granted,
         can_create_kpis="can_create_kpis" in granted,
         pii_rules=(config.pii_rules if config else []) or [],
+        org_memory=memory.text if memory else "",
     )

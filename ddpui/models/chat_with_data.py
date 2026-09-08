@@ -6,9 +6,11 @@ single source of truth for conversation content, keyed by thread_id.
 
 import uuid
 
+from django.core.validators import MaxLengthValidator
 from django.db import models
 from django.utils import timezone
 
+from ddpui.core.ai.agent.org_memory import MAX_ORG_MEMORY_CHARS
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 
@@ -55,6 +57,24 @@ class ChatWithDataTurnAudit(models.Model):
     # post-execution validator output: {verdict, assumptions, caveat}
     validation = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ChatWithDataOrgMemory(models.Model):
+    """Admin-curated facts about the org ("'SHG' means self-help group",
+    "fiscal year runs April-March"), injected verbatim into both Copilot
+    system prompts. Human-written only in v1.1 — agents never write here.
+    Edited via PUT /api/chat-with-data/settings by org admins."""
+
+    org = models.OneToOneField(
+        Org, on_delete=models.CASCADE, related_name="chat_with_data_memory"
+    )
+    text = models.TextField(
+        blank=True, default="", validators=[MaxLengthValidator(MAX_ORG_MEMORY_CHARS)]
+    )
+    updated_by = models.ForeignKey(
+        OrgUser, null=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class ChatWithDataOrgConfig(models.Model):
