@@ -2,11 +2,27 @@
 
 from django.utils.text import slugify
 
+from ddpui.auth import PLATFORM_ADMIN_PERMISSION
 from ddpui.models.org_user import Invitation, InvitationSchema
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.models.org import OrgWarehouse, OrgType
 from ddpui.models.orgtnc import OrgTnC
-from ddpui.models.role_based_access import RolePermission
+from ddpui.models.role_based_access import Role
+
+
+def permissions_for_role(role: Role) -> list[dict]:
+    """the {slug, name} permission list for a Role, as OrgUserResponse carries it"""
+    # `.all()` and not `.filter()`/`.select_related()`: callers that prefetched
+    # rolepermissions (currentuserv2, get_organization_users) must hit the cache
+    return [
+        {"slug": rolep.permission.slug, "name": rolep.permission.name}
+        for rolep in role.rolepermissions.all()
+    ]
+
+
+def holds_platform_admin(permissions: list[dict]) -> bool:
+    """True when a permissions_for_role list grants the Admin Portal"""
+    return any(perm["slug"] == PLATFORM_ADMIN_PERMISSION for perm in permissions)
 
 
 def from_orguser(orguser: OrgUser) -> OrgUserResponse:
@@ -17,10 +33,7 @@ def from_orguser(orguser: OrgUser) -> OrgUserResponse:
     if orguser_new_role is None:
         raise ValueError("OrgUser does not have a new_role set")
 
-    role_permissions = list(RolePermission.objects.filter(role=orguser.new_role).all())
-    permissions = [
-        {"slug": item.permission.slug, "name": item.permission.name} for item in role_permissions
-    ]
+    permissions = permissions_for_role(orguser.new_role)
 
     plan_start, plan_end = orguser.org.plan_window() if orguser.org else (None, None)
 
@@ -38,6 +51,7 @@ def from_orguser(orguser: OrgUser) -> OrgUserResponse:
         plan_end_date=plan_end,
         work_domain=orguser.work_domain,
         has_seen_resource_sharing_notice=orguser.has_seen_resource_sharing_notice,
+        is_platform_admin=holds_platform_admin(permissions),
     )
     if orguser.org:
         response.org.tnc_accepted = OrgTnC.objects.filter(org=orguser.org).exists()

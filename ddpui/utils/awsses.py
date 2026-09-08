@@ -24,9 +24,7 @@ def _get_ses_client():
 
 
 def send_text_message(to_email, subject, message):
-    """
-    send a plain-text email using ses
-    """
+    """Send a plain-text email using SES."""
     ses = _get_ses_client()
     response = ses.send_email(
         Destination={"ToAddresses": [to_email]},

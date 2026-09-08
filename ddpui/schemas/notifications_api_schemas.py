@@ -59,3 +59,8 @@ class NotificationDataSchema(Schema):
     # Overrides the default "View" label on the CTA button when the message
     # ends on a URL. e.g. "Share", "Accept Invitation".
     cta_label: Optional[str] = None
+    # additive, for the admin broadcast path -- defaults preserve today's behavior
+    # for every existing caller (management command, the broken HTTP route)
+    target_org_ids: Optional[List[int]] = None
+    send_in_app: Optional[bool] = True
+    send_email: Optional[bool] = True

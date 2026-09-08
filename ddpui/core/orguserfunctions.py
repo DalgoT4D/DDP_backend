@@ -12,7 +12,7 @@ from django.db import transaction
 from django.utils.text import slugify
 from django.utils import timezone as django_timezone
 
-from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE, user_has_platform_admin_permission
 from ddpui.models.alert import Alert
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.metric import KPI, Metric
@@ -38,7 +38,7 @@ from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.models.role_based_access import Role
 from ddpui.core.notifications.triggers import user as user_notifications
-from ddpui.utils import helpers, awsses, timezone
+from ddpui.utils import helpers, timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_invitation, from_orguser
 from ddpui.utils.redis_client import RedisClient
@@ -76,7 +76,8 @@ def lookup_user(email: str):
         "active": user.is_active,
         "can_create_orgs": userattributes.can_create_orgs,
         "is_consultant": userattributes.is_consultant,
-        "is_platform_admin": userattributes.is_platform_admin,
+        # from the user's roles, not UserAttributes: no org context here, so "in some org"
+        "is_platform_admin": user_has_platform_admin_permission(user),
     }
 
 
@@ -185,11 +186,27 @@ def update_orguser_v1(orguser: OrgUser, payload: OrgUserUpdatev1):
     return from_orguser(orguser)
 
 
-def delete_orguser_v1(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload):
-    """delete another orguser"""
-    orguser_to_delete = OrgUser.objects.filter(
-        org=requestor_orguser.org, user__email=payload.email
-    ).first()
+def delete_orguser_from_org(
+    target_org: Org,
+    requestor_orguser: OrgUser,
+    payload: DeleteOrgUserPayload,
+    is_platform_admin: bool = False,
+):
+    """
+    org-parameterized core of "remove a user from an org".
+
+    The target org is passed explicitly instead of being read from
+    requestor_orguser.org, so the admin portal can remove a user from an org the
+    requestor does not belong to. When is_platform_admin is True the role-level cap is
+    skipped — a platform admin acting cross-org has no role in target_org to compare
+    against. See features/admin-portal/plan.md §4.4.
+
+    NOTE: deleting the OrgUser REASSIGNS the content it created to requestor_orguser
+    rather than deleting or orphaning it (upstream #c6b3d545). Callers should still
+    surface the removal-impact count first (see the admin removal-impact endpoint,
+    plan.md §4.6 / research §5).
+    """
+    orguser_to_delete = OrgUser.objects.filter(org=target_org, user__email=payload.email).first()
 
     if requestor_orguser == orguser_to_delete:
         return None, "user cannot delete themselves"
@@ -197,21 +214,23 @@ def delete_orguser_v1(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload)
     if orguser_to_delete is None:
         return None, "user does not belong to the org"
 
-    if orguser_to_delete.new_role.level > requestor_orguser.new_role.level:
+    if (
+        not is_platform_admin
+        and orguser_to_delete.new_role.level > requestor_orguser.new_role.level
+    ):
         return None, "cannot delete user having higher role"
 
-    # Reassign resources owned by the removed user to the admin doing the
-    # removal so nothing is left orphaned.
-    org = requestor_orguser.org
-
+    # Reassign resources owned by the removed user to the admin doing the removal so
+    # nothing is left orphaned. Scoped to target_org, not requestor_orguser.org: a
+    # platform admin removing cross-org is not a member of the org being cleaned up.
     with transaction.atomic():
         for Model in (Dashboard, Chart, Metric, KPI, ReportSnapshot, Alert):
-            Model.objects.filter(org=org, created_by=orguser_to_delete).update(
+            Model.objects.filter(org=target_org, created_by=orguser_to_delete).update(
                 created_by=requestor_orguser
             )
 
-        # remove the invitations associated with the org user
-        Invitation.objects.filter(invited_by__org=org, invited_email=payload.email).delete()
+        # remove the pending invitations for this email in the target org
+        Invitation.objects.filter(invited_in_org=target_org, invited_email=payload.email).delete()
 
         # delete the org user
         orguser_to_delete.delete()
@@ -219,36 +238,58 @@ def delete_orguser_v1(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload)
     return None, None
 
 
-def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema, group_name: str = None):
-    """Invite a user to an org.
+def delete_orguser_v1(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload):
+    """delete another orguser in the requestor's own org (single-org wrapper)"""
+    return delete_orguser_from_org(requestor_orguser.org, requestor_orguser, payload)
 
-    ``group_name`` — set when the invite originates from a group create / edit
-    flow, so the email copy names the group instead of the plain "invited to
-    Dalgo" / "added to org" wording."""
+
+def invite_user_to_org(
+    target_org: Org,
+    inviter_orguser: OrgUser,
+    payload: NewInvitationSchema,
+    is_platform_admin: bool = False,
+    group_name: str = None,
+):
+    """
+    org-parameterized core of "invite a user to an org".
+
+    The target org is passed explicitly instead of being read from
+    inviter_orguser.org, so the admin portal can invite into an org the inviter does
+    not belong to (including an org with zero members). The new Invitation records
+    invited_in_org=target_org, which may differ from inviter_orguser.org when a
+    platform admin invites cross-org — so accept/cancel resolve the correct org
+    regardless of who sent the invite. When is_platform_admin is True the inviter-level
+    cap is skipped: a platform admin may invite at any role. See plan.md §4.4.
+
+    ``group_name`` — set when the invite originates from a group create / edit flow, so
+    the email copy names the group instead of the plain "invited to Dalgo" / "added to
+    org" wording.
+    """
     frontend_url = os.getenv("FRONTEND_URL")
 
-    if orguser.org is None:
+    if target_org is None:
         return None, "create an organization first"
 
     invited_email = payload.invited_email.lower().strip()
-    if OrgUser.objects.filter(org=orguser.org, user__email__iexact=invited_email).exists():
+    if OrgUser.objects.filter(org=target_org, user__email__iexact=invited_email).exists():
         return None, "user already has an account"
 
     invited_role = Role.objects.filter(uuid=payload.invited_role_uuid).first()
     if not invited_role:
         return None, "Invalid role"
 
-    # user can only invite a role equal or lower to their role
-    if invited_role.level > orguser.new_role.level:
+    # a regular inviter can only invite at their own level or lower; a platform admin
+    # acting cross-org has no role in target_org, so the cap is skipped for them.
+    if not is_platform_admin and invited_role.level > inviter_orguser.new_role.level:
         return None, "Insufficient permissions for this operation"
 
     existing_user = User.objects.filter(email__iexact=invited_email).first()
 
     if existing_user:
         logger.info("user exists, creating new OrgUser")
-        OrgUser.objects.create(user=existing_user, org=orguser.org, new_role=invited_role)
+        OrgUser.objects.create(user=existing_user, org=target_org, new_role=invited_role)
         user_notifications.send_added_to_org(
-            invited_email, orguser.user.email, orguser.org.name, group_name=group_name
+            invited_email, inviter_orguser.user.email, target_org.name, group_name=group_name
         )
         return (
             NewInvitationSchema(
@@ -259,7 +300,7 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema, group_name: s
         )
 
     invitation = Invitation.objects.filter(
-        invited_email__iexact=invited_email, invited_by__org=orguser.org
+        invited_email__iexact=invited_email, invited_in_org=target_org
     ).first()
     if invitation:
         invitation.invited_on = timezone.as_utc(datetime.utcnow())
@@ -269,22 +310,19 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema, group_name: s
             invitation.invited_email,
             invitation.invited_by.user.email,
             invite_url,
-            org_name=orguser.org.name,
+            org_name=target_org.name,
             group_name=group_name,
         )
         logger.info(
-            f"Resent invitation to {invited_email} to join {orguser.org.name} "
+            f"Resent invitation to {invited_email} to join {target_org.name} "
             f"with invite code {invitation.invite_code}",
         )
         return from_invitation(invitation), None
 
-    # payload.invited_by = from_orguser(orguser)
-    # payload.invited_on = timezone.as_utc(datetime.utcnow())
-    # payload.invite_code = str(uuid4())
-
     invitation = Invitation.objects.create(
         invited_email=invited_email,
-        invited_by=orguser,
+        invited_by=inviter_orguser,
+        invited_in_org=target_org,
         invited_on=datetime.now(timezone.UTC),
         invite_code=str(uuid4()),
         invited_new_role=invited_role,
@@ -296,15 +334,68 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema, group_name: s
         invitation.invited_email,
         invitation.invited_by.user.email,
         invite_url,
-        org_name=orguser.org.name,
+        org_name=target_org.name,
         group_name=group_name,
     )
 
     logger.info(
-        f"Invited {invited_email} to join {orguser.org.name} "
+        f"Invited {invited_email} to join {target_org.name} "
         f"with invite code {invitation.invite_code}",
     )
     return payload, None
+
+
+def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema, group_name: str = None):
+    """invite a user to the caller's own org (single-org wrapper)"""
+    return invite_user_to_org(orguser.org, orguser, payload, group_name=group_name)
+
+
+def change_orguser_role_in_org(
+    target_org: Org,
+    requestor_orguser: OrgUser,
+    toupdate_email: str,
+    role_uuid,
+    is_platform_admin: bool = False,
+):
+    """
+    org-parameterized core of the role-change logic in post_modify_orguser_role.
+
+    Assigns a role to a user in target_org. The target org is passed explicitly so the
+    admin portal can change a role in an org the requestor does not belong to. When
+    is_platform_admin is True the "can't assign a role higher than your own" cap is
+    skipped. Returns (the updated OrgUser, error) — the caller maps error to an HTTP
+    status, and owns its own response shape and audit log. See plan.md §4.4.
+
+    Validation order mirrors the original endpoint for the single-org path: for a
+    regular requestor the missing-role check comes first, then role lookup, then the
+    level cap.
+    """
+    if not is_platform_admin:
+        if not requestor_orguser.new_role:
+            return None, "Insufficient permissions"
+
+    role_to_be_assigned = Role.objects.filter(uuid=role_uuid).first()
+    if not role_to_be_assigned:
+        return None, "Invalid role"
+
+    if not is_platform_admin and role_to_be_assigned.level > requestor_orguser.new_role.level:
+        return None, "Insufficient permissions"
+
+    request_email = toupdate_email.lower().strip()
+    query = OrgUser.objects.filter(user__email__iexact=request_email, org=target_org)
+    # a requestor who is a member of target_org may not change their own role; a
+    # platform admin acting cross-org is not a member, so nothing to exclude.
+    if requestor_orguser is not None and requestor_orguser.org_id == target_org.id:
+        query = query.exclude(user__email__iexact=requestor_orguser.user.email)
+    orguser_to_be_assigned = query.first()
+
+    if not orguser_to_be_assigned:
+        return None, "User does not exist"
+
+    orguser_to_be_assigned.new_role = role_to_be_assigned
+    orguser_to_be_assigned.save()
+
+    return orguser_to_be_assigned, None
 
 
 def accept_invitation_v1(payload: AcceptInvitationSchema):
@@ -313,10 +404,18 @@ def accept_invitation_v1(payload: AcceptInvitationSchema):
     if invitation is None:
         return None, "invalid invite code"
 
+    # the org this invite grants membership of. Prefer the explicit invited_in_org
+    # (set on every new invite, and backfilled onto every pre-migration row); fall
+    # back to invited_by.org when it is null, so an existing pending invitation still
+    # resolves to exactly the same org it did before invited_in_org existed. For a
+    # cross-org admin invite invited_in_org is the target org, NOT invited_by.org
+    # (the platform admin's own org). See plan.md §4.4.
+    target_org = invitation.invited_in_org or invitation.invited_by.org
+
     # we can have one auth user mapped to multiple orguser and hence multiple orgs
     # but there can only be one orguser per one org
     orguser = OrgUser.objects.filter(
-        user__email__iexact=invitation.invited_email, org=invitation.invited_by.org
+        user__email__iexact=invitation.invited_email, org=target_org
     ).first()
 
     if not orguser:
@@ -327,10 +426,7 @@ def accept_invitation_v1(payload: AcceptInvitationSchema):
         if user is None:
             if payload.password is None:
                 return None, "password is required"
-            logger.info(
-                f"creating invited user {invitation.invited_email} "
-                f"for {invitation.invited_by.org.name}"
-            )
+            logger.info(f"creating invited user {invitation.invited_email} for {target_org.name}")
             user = User.objects.create_user(
                 username=invitation.invited_email.lower().strip(),
                 email=invitation.invited_email.lower().strip(),
@@ -339,7 +435,7 @@ def accept_invitation_v1(payload: AcceptInvitationSchema):
             UserAttributes.objects.create(user=user, email_verified=True)
         orguser = OrgUser.objects.create(
             user=user,
-            org=invitation.invited_by.org,
+            org=target_org,
             new_role=invitation.invited_new_role,
             work_domain=payload.work_domain,
         )

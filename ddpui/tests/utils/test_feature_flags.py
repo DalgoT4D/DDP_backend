@@ -7,6 +7,7 @@ from ddpui.utils.feature_flags import (
     disable_feature_flag,
     is_feature_flag_enabled,
     get_all_feature_flags_for_org,
+    clear_org_flag,
 )
 
 pytestmark = pytest.mark.django_db
@@ -124,3 +125,22 @@ class TestFeatureFlags(TestCase):
 
         # Clean up
         org2.delete()
+
+    def test_clear_org_flag_removes_the_override(self):
+        """clear_org_flag deletes the org's row entirely, leaving no override at all"""
+        enable_feature_flag("DATA_QUALITY", org=self.org)
+        self.assertTrue(
+            OrgFeatureFlag.objects.filter(org=self.org, flag_name="DATA_QUALITY").exists()
+        )
+
+        result = clear_org_flag("DATA_QUALITY", org=self.org)
+
+        self.assertTrue(result)
+        self.assertFalse(
+            OrgFeatureFlag.objects.filter(org=self.org, flag_name="DATA_QUALITY").exists()
+        )
+
+    def test_clear_org_flag_invalid_name_returns_none(self):
+        """an unknown flag_name is rejected, same as enable/disable, and touches no rows"""
+        result = clear_org_flag("NOT_A_REAL_FLAG", org=self.org)
+        self.assertIsNone(result)
