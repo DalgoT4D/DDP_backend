@@ -499,6 +499,9 @@ def delete_dbt_source_in_project(orgdbt_model: OrgDbtModel):
     # check if the sources yml file exists in the project
     dbt_project_dir = DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt)
     sources_yml_rel_path = orgdbt_model.sql_path
+    if sources_yml_rel_path is None:
+        logger.warning("sql_path is None for source model %s. Nothing to delete on disk.", orgdbt_model.name)
+        return False
     if not (Path(dbt_project_dir) / sources_yml_rel_path).exists():
         logger.warning(
             f"Source yml file at {sources_yml_rel_path} does not exist in dbt project. Nothing to delete."

@@ -345,6 +345,20 @@ def test_delete_dbt_source_integration_file_not_exists(orgdbt_source, tmp_path):
         assert result is False
 
 
+@patch("ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir")
+def test_delete_dbt_source_in_project_sql_path_none(mock_get_dir):
+    """Test that delete_dbt_source_in_project handles sql_path=None without raising TypeError"""
+    mock_get_dir.return_value = "/fake/dbt/project"
+
+    orgdbt_model = Mock()
+    orgdbt_model.sql_path = None
+    orgdbt_model.name = "test-source"
+
+    result = delete_dbt_source_in_project(orgdbt_model)
+
+    assert result is False
+
+
 def test_delete_dbt_source_integration_source_not_in_yaml(orgdbt_source, tmp_path):
     """Test behavior when the source to delete is not found in the YAML file"""
 
