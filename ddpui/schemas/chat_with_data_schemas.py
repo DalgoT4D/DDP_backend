@@ -25,6 +25,24 @@ class StatusResponse(Schema):
     default_model: str | None = None
 
 
+class CopilotSettingsOut(Schema):
+    """Copilot settings for the org: the enable flag + the org memory text."""
+
+    enabled: bool
+    text: str
+    updated_at: Optional[str] = None
+    updated_by_email: Optional[str] = None
+    # the memory char cap — the frontend drives its counter from this
+    max_chars: int
+
+
+class CopilotSettingsUpdate(Schema):
+    """Partial update: omitted fields stay unchanged."""
+
+    enabled: Optional[bool] = None
+    text: Optional[str] = None
+
+
 class SessionOut(Schema):
     id: int
     title: str

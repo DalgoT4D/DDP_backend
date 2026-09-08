@@ -10,9 +10,16 @@ from ninja.errors import HttpError
 from ddpui.auth import has_permission
 from ddpui.core.ai.chat import sessions as service
 from ddpui.core.ai.chat import history
+from ddpui.core.ai.chat import org_memory as settings_service
+from ddpui.core.ai.chat.org_memory import MemoryTooLong
 from ddpui.core.ai.chat.sessions import SessionNotFound
 from ddpui.models.org_user import OrgUser
-from ddpui.schemas.chat_with_data_schemas import SessionOut, SessionRename
+from ddpui.schemas.chat_with_data_schemas import (
+    CopilotSettingsOut,
+    CopilotSettingsUpdate,
+    SessionOut,
+    SessionRename,
+)
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
 
@@ -27,6 +34,28 @@ def get_status(request):
     """Whether chat is available for this org, and the blocking reason if not."""
     orguser: OrgUser = request.orguser
     return api_response(success=True, data=service.get_status(orguser))
+
+
+@chat_with_data_router.get("/settings")
+@has_permission(["can_manage_chat_with_data_settings"])
+def get_settings(request):
+    """Copilot settings: the org's enable flag + its org memory. Admin-only —
+    the memory may describe the org's data layout."""
+    orguser: OrgUser = request.orguser
+    data = CopilotSettingsOut(**settings_service.get_settings(orguser))
+    return api_response(success=True, data=data.model_dump())
+
+
+@chat_with_data_router.put("/settings")
+@has_permission(["can_manage_chat_with_data_settings"])
+def update_settings(request, payload: CopilotSettingsUpdate):
+    """Partial update of Copilot settings; omitted fields stay unchanged."""
+    orguser: OrgUser = request.orguser
+    try:
+        data = settings_service.update_settings(orguser, payload.enabled, payload.text)
+    except MemoryTooLong as err:
+        raise HttpError(400, str(err)) from err
+    return api_response(success=True, data=CopilotSettingsOut(**data).model_dump())
 
 
 @chat_with_data_router.post("/sessions/")
