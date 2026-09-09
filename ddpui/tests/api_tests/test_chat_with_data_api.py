@@ -26,7 +26,6 @@ from ddpui.models.chat_with_data import ChatWithDataOrgMemory, ChatWithDataSessi
 from ddpui.schemas.chat_with_data_schemas import CopilotSettingsUpdate, SessionRename
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.models.org import Org, OrgWarehouse
-from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
@@ -77,12 +76,11 @@ def test_status_disabled_when_feature_flag_off(orguser, seed_db):
     assert response["data"]["reason"] == "feature_disabled"
 
 
-def test_status_requires_llm_consent_then_warehouse_then_ok(orguser, org, seed_db):
+def test_status_requires_warehouse_then_ok(orguser, org, seed_db):
+    """No llm_optin gate: the admin's Copilot toggle IS the org's AI consent —
+    the flag and a warehouse are the only prerequisites."""
     feature_flags.enable_feature_flag("CHAT_WITH_DATA", org)
 
-    assert get_status(mock_request(orguser))["data"]["reason"] == "llm_consent_required"
-
-    OrgPreferences.objects.create(org=org, llm_optin=True)
     assert get_status(mock_request(orguser))["data"]["reason"] == "no_warehouse"
 
     OrgWarehouse.objects.create(org=org, wtype="postgres")

@@ -17,7 +17,7 @@ class StatusResponse(Schema):
     """Whether the chat surface is usable for this org, and why not if not."""
 
     enabled: bool
-    # feature_disabled | llm_consent_required | no_warehouse | ok
+    # feature_disabled | no_warehouse | ok
     reason: str
     # models the user may choose from (empty when disabled); the default is
     # what runs when they never touch the selector

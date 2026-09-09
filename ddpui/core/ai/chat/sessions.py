@@ -2,7 +2,6 @@
 
 from ddpui.core.ai.agent.chat_data_agent import available_models, default_model_id
 from ddpui.models.chat_with_data import ChatWithDataSession
-from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chat_with_data_schemas import StatusResponse
@@ -17,14 +16,16 @@ class SessionNotFound(Exception):
 
 def get_status(orguser: OrgUser) -> StatusResponse:
     """Is the chat usable for this org? Reports the first blocking reason —
-    feature flag, then AI consent (llm_optin), then warehouse presence."""
+    feature flag, then warehouse presence.
+
+    Deliberately NOT gated on OrgPreferences.llm_optin: the admin flipping the
+    Copilot toggle on the settings page IS the org's consent (the page says
+    data is sent to an AI provider). llm_optin keeps gating the OTHER AI
+    features (log summarization, AI data analysis), which have no toggle of
+    their own — and webapp_v2 has no screen to set it."""
     org = orguser.org
     if not is_feature_flag_enabled(CHAT_WITH_DATA_FLAG, org):
         return StatusResponse(enabled=False, reason="feature_disabled")
-
-    preferences = OrgPreferences.objects.filter(org=org).first()
-    if preferences is None or not preferences.llm_optin:
-        return StatusResponse(enabled=False, reason="llm_consent_required")
 
     if not OrgWarehouse.objects.filter(org=org).exists():
         return StatusResponse(enabled=False, reason="no_warehouse")
