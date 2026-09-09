@@ -1,6 +1,7 @@
 """Chart service module for handling chart business logic"""
 
 import copy
+import re
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, date, timedelta
 from decimal import Decimal
@@ -330,6 +331,86 @@ def convert_value(value: Any, preserve_none: bool = False) -> Any:
     return value
 
 
+def _safe_division_expression(expression: str) -> str:
+    """Wrap each divisor in NULLIF(..., 0) to prevent division-by-zero errors.
+
+    Parses the expression character-by-character to find `/` operators and
+    wraps the immediately following term (function call, parenthesised group,
+    or bare identifier/number) so the database returns NULL instead of raising
+    a DivisionByZero error.
+    """
+    result: list[str] = []
+    i = 0
+    n = len(expression)
+
+    while i < n:
+        if expression[i] != "/":
+            result.append(expression[i])
+            i += 1
+            continue
+
+        result.append("/")
+        i += 1
+
+        # skip whitespace between `/` and the divisor
+        while i < n and expression[i] in (" ", "\t", "\n"):
+            result.append(expression[i])
+            i += 1
+
+        if i >= n:
+            break
+
+        # ---- extract the divisor term ----
+        divisor_start = i
+
+        if expression[i] == "(":
+            # parenthesised sub-expression — find matching close paren
+            depth = 1
+            i += 1
+            while i < n and depth > 0:
+                if expression[i] == "(":
+                    depth += 1
+                elif expression[i] == ")":
+                    depth -= 1
+                i += 1
+
+        elif expression[i].isalpha() or expression[i] == "_":
+            # identifier — maybe a function call like SUM(...)
+            while i < n and (expression[i].isalnum() or expression[i] == "_"):
+                i += 1
+            # skip optional whitespace before a possible `(`
+            j = i
+            while j < n and expression[j] in (" ", "\t"):
+                j += 1
+            if j < n and expression[j] == "(":
+                # it's a function call — consume balanced parens
+                depth = 1
+                j += 1
+                while j < n and depth > 0:
+                    if expression[j] == "(":
+                        depth += 1
+                    elif expression[j] == ")":
+                        depth -= 1
+                    j += 1
+                i = j
+
+        elif expression[i].isdigit():
+            # numeric literal (integer or decimal)
+            while i < n and (expression[i].isdigit() or expression[i] == "."):
+                i += 1
+
+        else:
+            # unknown token — leave untouched
+            result.append(expression[i])
+            i += 1
+            continue
+
+        divisor = expression[divisor_start:i]
+        result.append(f"NULLIF({divisor}, 0)")
+
+    return "".join(result)
+
+
 def build_multi_metric_query(
     payload: ChartDataPayload,
     query_builder: AggQueryBuilder,
@@ -380,7 +461,8 @@ def build_multi_metric_query(
             # Expression path: inline raw SQL expression
             if metric.column_expression:
                 alias = metric.alias or "expression_metric"
-                query_builder.add_column(literal_column(metric.column_expression).label(alias))
+                safe_expr = _safe_division_expression(metric.column_expression)
+                query_builder.add_column(literal_column(safe_expr).label(alias))
                 continue
 
             # Simple path: column + aggregation
@@ -469,7 +551,8 @@ def build_pivot_table_query(
     for metric in payload.metrics:
         alias = metric_sql_alias(metric)
         if metric.column_expression:
-            query_builder.add_column(literal_column(metric.column_expression).label(alias))
+            safe_expr = _safe_division_expression(metric.column_expression)
+            query_builder.add_column(literal_column(safe_expr).label(alias))
         else:
             query_builder.add_aggregate_column(metric.column, metric.aggregation, alias)
 
@@ -593,7 +676,8 @@ def build_chart_query(
             # Expression metric: inline raw SQL (e.g. "SUM(a)/SUM(b)") — no aggregation/column.
             if metric.column_expression:
                 alias = metric.alias or "expression_metric"
-                query_builder.add_column(literal_column(metric.column_expression).label(alias))
+                safe_expr = _safe_division_expression(metric.column_expression)
+                query_builder.add_column(literal_column(safe_expr).label(alias))
             else:
                 # Handle count with None column case
                 if (
@@ -641,7 +725,8 @@ def build_chart_query(
             # Expression metric: inline raw SQL (e.g. "SUM(a)/SUM(b)") — no aggregation/column.
             if metric.column_expression:
                 alias = metric.alias or "expression_metric"
-                query_builder.add_column(literal_column(metric.column_expression).label(alias))
+                safe_expr = _safe_division_expression(metric.column_expression)
+                query_builder.add_column(literal_column(safe_expr).label(alias))
             else:
                 # Handle count with None column case
                 if (
