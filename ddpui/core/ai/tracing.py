@@ -169,9 +169,13 @@ class LangfuseTurnHandler(BaseCallbackHandler):
 
     raise_error = False  # never let tracing errors propagate into the turn
 
-    def __init__(self, trace, model_name: str):
+    def __init__(self, trace, model_name: str, base_tags: list[str] | None = None):
         self._trace = trace
         self._model_name = model_name
+        # creation-time tags, re-sent on finish so adding the agent tag doesn't
+        # wipe them (Langfuse tag updates REPLACE the list). None on resumed
+        # turns — there we never touch tags, to preserve the original run's.
+        self._base_tags = base_tags
         self._observations: dict[str, Any] = {}  # run_id -> generation/span
         self._parents: dict[str, str] = {}  # run_id -> parent run_id
         # currently-open stage spans, innermost last — the nesting fallback for
@@ -344,9 +348,27 @@ class LangfuseTurnHandler(BaseCallbackHandler):
         except Exception:  # pylint: disable=broad-except
             logger.exception("langfuse score failed")
 
-    def finish(self, output: str, status: str):
+    def finish(
+        self,
+        output: str,
+        status: str,
+        agent: str | None = None,
+        handed_off: bool = False,
+    ):
+        """Close the trace. `agent` is the lane that answered (sql / guide /
+        casual-reply / clarify) — stamped as an `agent:*` tag (visible in the
+        trace list) and a metadata field. The trace NAME stays stable:
+        dashboards, filters, and evaluators key on it."""
         try:
-            self._trace.update(output=_clip(output), metadata={"status": status})
+            updates: dict[str, Any] = {"output": _clip(output), "metadata": {"status": status}}
+            if agent:
+                updates["metadata"]["agent"] = agent
+                if self._base_tags is not None:
+                    tags = [*self._base_tags, f"agent:{agent}"]
+                    if handed_off:
+                        tags.append("handoff")
+                    updates["tags"] = tags
+            self._trace.update(**updates)
         except Exception:  # pylint: disable=broad-except
             logger.exception("langfuse trace finish failed")
 
@@ -380,7 +402,14 @@ def start_turn_trace(
             # attach to the original question's trace; set no fields that
             # would overwrite the original name/input/tags
             trace = client.trace(id=trace_id)
+            return LangfuseTurnHandler(trace, model_name=model_name, base_tags=None)
         else:
+            base_tags = [
+                context.org_slug,
+                context.dialect,
+                f"env:{os.getenv('LANGFUSE_ENVIRONMENT', 'dev')}",
+                f"model:{model_name}",
+            ]
             trace = client.trace(
                 # deterministic id: the feedback endpoint and the eval runner
                 # address the trace by request_uuid without storing a second id
@@ -390,12 +419,7 @@ def start_turn_trace(
                 name="answer-data-question",
                 session_id=f"{context.org_slug}/s{session.id}",
                 user_id=f"{context.org_slug}/{orguser.id}",
-                tags=[
-                    context.org_slug,
-                    context.dialect,
-                    f"env:{os.getenv('LANGFUSE_ENVIRONMENT', 'dev')}",
-                    f"model:{model_name}",
-                ],
+                tags=base_tags,
                 input=_clip(question),
                 metadata={
                     "request_uuid": str(request_uuid),
@@ -403,7 +427,7 @@ def start_turn_trace(
                     "session_title": session.title,
                 },
             )
-        return LangfuseTurnHandler(trace, model_name=model_name)
+        return LangfuseTurnHandler(trace, model_name=model_name, base_tags=base_tags)
     except Exception:  # pylint: disable=broad-except
         logger.exception("langfuse trace start failed")
         return None

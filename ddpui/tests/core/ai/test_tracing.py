@@ -425,3 +425,32 @@ def test_resume_attaches_to_original_trace_without_overwriting(monkeypatch):
 
     assert handler is not None
     assert calls == [{"id": "original-trace-id"}]
+
+
+# ── agent stamp on finish ────────────────────────────────────────────────────
+
+
+def test_finish_stamps_agent_tag_and_metadata_preserving_base_tags():
+    trace = StubTrace()
+    base = ["admin-dev", "postgres", "env:dev", "model:claude-sonnet-5"]
+    handler = LangfuseTurnHandler(trace, model_name="m", base_tags=base)
+
+    handler.finish(output="Created the KPI.", status="completed", agent="guide", handed_off=True)
+
+    updated = trace.updated_with
+    assert updated["metadata"] == {"status": "completed", "agent": "guide"}
+    # tag updates REPLACE the list — base tags must ride along, agent appended
+    assert updated["tags"] == [*base, "agent:guide", "handoff"]
+
+
+def test_finish_on_resumed_turn_never_touches_tags():
+    """Resumed turns attach to the original trace without base tags — sending
+    a tags update there would wipe the original run's tags."""
+    trace = StubTrace()
+    handler = LangfuseTurnHandler(trace, model_name="m", base_tags=None)
+
+    handler.finish(output="1,284 surveys.", status="completed", agent="sql")
+
+    updated = trace.updated_with
+    assert "tags" not in updated
+    assert updated["metadata"]["agent"] == "sql"  # metadata merges, so still stamped

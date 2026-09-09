@@ -158,6 +158,7 @@ async def run_turn(
     sql_queries: list[dict] = []
     tools_called: list[str] = []
     handed_off = False  # sql_agent yielded the turn to the guide agent
+    responding_agent = None  # which lane answered — stamped on the trace at finish
     last_result_table: dict | None = None
     # created charts AND dashboards — "charts" is the wire-protocol key
     created_artifacts: list[dict] = []
@@ -278,6 +279,7 @@ async def run_turn(
                 if node == "route_node":
                     route_dict = (update or {}).get("route")
                 elif node in _SHORT_CIRCUIT_NODES:
+                    responding_agent = "casual-reply" if node == "casual_reply_node" else "clarify"
                     reply_messages = (update or {}).get("messages", [])
                     if reply_messages:
                         final_message = extract_text(reply_messages[-1].content)
@@ -287,6 +289,7 @@ async def run_turn(
                     # message_complete comes when THAT subgraph finishes
                     continue
                 elif node in ("sql_agent", "guide_agent"):
+                    responding_agent = "guide" if node == "guide_agent" else "sql"
                     # an agent subgraph finished — the answer is complete; the
                     # SQL agent's validation (which never blocks the answer)
                     # streams as its own event; the guide path has none
@@ -314,7 +317,12 @@ async def run_turn(
     finally:
         latency_ms = int((time.monotonic() - started) * 1000)
         if trace_handler is not None:
-            trace_handler.finish(output=final_message, status=status)
+            trace_handler.finish(
+                output=final_message,
+                status=status,
+                agent=responding_agent,
+                handed_off=handed_off,
+            )
         if trace_ctx_token is not None:
             reset_current_turn_handler(trace_ctx_token)
         try:
