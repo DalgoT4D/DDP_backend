@@ -50,6 +50,34 @@ def turn_handed_off(messages: list[AnyMessage]) -> bool:
     )
 
 
+_GUIDE_RESPONDER_LINE = (
+    "(The last answer above was written by the PLATFORM GUIDE assistant — it "
+    "creates charts, dashboards, KPIs, metrics, and reports.)"
+)
+_DATA_RESPONDER_LINE = (
+    "(The last answer above was written by the DATA ASSISTANT — it answers "
+    "questions by querying the warehouse.)"
+)
+
+
+def last_responder_line(state: "TurnState") -> str | None:
+    """Which agent produced the previous turn's answer, as an annotation line
+    appended to the router's history. Short follow-ups ("yes", "make it
+    monthly") route far better when the router knows who the user is replying
+    to. None on the first turn or after casual/clarify turns (no signal)."""
+    prior = state["messages"][:-1]  # everything before the current user message
+    if not turn_segment(prior):
+        return None
+    if turn_handed_off(prior):
+        return _GUIDE_RESPONDER_LINE
+    intent = (state.get("route") or {}).get("intent")
+    if intent == "platform_help":
+        return _GUIDE_RESPONDER_LINE
+    if intent == "data_question":
+        return _DATA_RESPONDER_LINE
+    return None
+
+
 class TurnState(TypedDict):
     """Parent-graph state. `messages` is shared with the agent subgraph by
     channel name; the other keys are per-stage outputs kept in the checkpoint."""
@@ -80,6 +108,11 @@ def build_turn_graph(
     async def route_node(state: TurnState, runtime: Runtime[RunContext]) -> dict:
         question = state["question"]
         history = history_lines(state["messages"])
+        # tell the router who wrote the last answer — rides inside `history`
+        # so injected route_fns (and their test fakes) keep their signature
+        responder = last_responder_line(state)
+        if history and responder:
+            history = [*history, responder]
         route = await route_fn(question, history=history)
         # reflection gate + tool context read these off the runtime context
         if runtime.context is not None:

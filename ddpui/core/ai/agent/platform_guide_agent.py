@@ -19,7 +19,11 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from ddpui.core.ai.agent.hitl import build_hitl_middleware
-from ddpui.core.ai.agent.middleware import clear_old_tool_results, trim_history
+from ddpui.core.ai.agent.middleware import (
+    clear_old_tool_results,
+    repair_foreign_tool_errors,
+    trim_history,
+)
 from ddpui.core.ai.agent.org_memory import org_memory_section
 from ddpui.core.ai.agent.pii import build_pii_middleware
 from ddpui.core.ai.agent.run_context import RunContext
@@ -98,6 +102,11 @@ them (look for a "(Handing off to the platform guide: ...)" note in the \
 conversation). Read what was discussed and proceed straight to creating it — \
 do not re-ask what they want; confirm details only where genuinely missing \
 (e.g. which dashboard a report should snapshot).
+9. The data assistant shares this conversation. If earlier messages contain \
+an error saying create_metric, create_kpi, create_chart, create_dashboard, \
+or create_report "is not a valid tool", that error happened to the data \
+assistant, not to you. YOU have all of these tools — never tell the user you \
+lack access or cannot create things.
 
 ## How to answer
 - Lead with what you did or the direct answer, in one or two sentences.
@@ -130,6 +139,7 @@ def build_guide_agent(
 
     middleware = [
         *build_pii_middleware(pii_rules),
+        repair_foreign_tool_errors(GUIDE_AGENT_TOOLS),  # un-poison cross-agent tool errors
         guide_system_prompt,
         trim_history,
         clear_old_tool_results(),

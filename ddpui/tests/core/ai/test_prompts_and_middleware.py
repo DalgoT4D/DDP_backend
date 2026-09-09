@@ -2,7 +2,10 @@
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ddpui.core.ai.agent.middleware import count_failed_sql_attempts
+from ddpui.core.ai.agent.middleware import (
+    count_failed_sql_attempts,
+    repair_invalid_tool_messages,
+)
 from ddpui.core.ai.agent.chat_data_agent import build_system_prompt
 from ddpui.core.ai.agent.org_memory import MAX_ORG_MEMORY_CHARS
 from ddpui.core.ai.agent.platform_guide_agent import build_guide_system_prompt
@@ -62,6 +65,52 @@ def test_system_prompt_allows_exactly_the_markdown_subset_the_ui_renders():
     for allowed in ["**bold**", '"- " bullets', '"1." numbered lists', '"### "', '"> "']:
         assert allowed in prompt
     assert "no code blocks, no links, no markdown tables" in prompt
+
+
+# ── Cross-agent tool-error repair ────────────────────────────────────────────
+
+
+def invalid_tool_msg(tool: str, msg_id: str = "m1") -> ToolMessage:
+    return ToolMessage(
+        content=f"Error: {tool} is not a valid tool, try one of [list_tables].",
+        name=tool,
+        tool_call_id="c1",
+        id=msg_id,
+    )
+
+
+def test_repair_rewrites_only_errors_naming_tools_this_agent_owns():
+    """The poisoning bug: the SQL agent hallucinated create_metric, and the
+    guide agent read the resulting error as proof ITS create_metric is broken.
+    The repair rewrites exactly that message — and must NOT touch the error
+    about execute_sql (true for the guide) or healthy tool results."""
+    guide_owned = frozenset({"create_metric", "create_chart"})
+    poison = invalid_tool_msg("create_metric", "m1")
+    true_error = invalid_tool_msg("execute_sql", "m2")  # guide really lacks it
+    healthy = ToolMessage(content="Query returned 3 rows.", name="x", tool_call_id="c9", id="m3")
+
+    replacements = repair_invalid_tool_messages([poison, true_error, healthy], guide_owned)
+
+    assert [r.id for r in replacements] == ["m1"]  # same id → add_messages swaps it
+    assert "create_metric IS available to you" in replacements[0].content
+    assert "not a valid tool" not in replacements[0].content
+
+
+def test_repair_returns_nothing_for_clean_history():
+    messages = [
+        HumanMessage("how many students?"),
+        ToolMessage(content="Query returned 5 rows.", name="execute_sql", tool_call_id="c1"),
+    ]
+    assert repair_invalid_tool_messages(messages, frozenset({"execute_sql"})) == []
+
+
+def test_both_prompts_inoculate_against_cross_agent_tool_errors():
+    ctx = make_ctx()
+    sql_prompt = build_system_prompt(ctx)
+    guide_prompt = build_guide_system_prompt(ctx)
+    # each agent is told the other's tool errors are not about ITS tools
+    assert "that error happened to the platform guide" in sql_prompt
+    assert "that error happened to the data assistant" in guide_prompt
 
 
 # ── Org memory section ───────────────────────────────────────────────────────

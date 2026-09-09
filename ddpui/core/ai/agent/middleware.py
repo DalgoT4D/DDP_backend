@@ -1,9 +1,12 @@
-"""Shared agent middleware: history trimming, tool-result clearing, SQL-retry limiter.
+"""Shared agent middleware: history trimming, tool-result clearing, SQL-retry
+limiter, cross-agent tool-error repair.
 
 These are the sanctioned customization points of the prebuilt agent loop — the
 graph topology itself is never modified. Feature-specific middleware (like the
 chat agent's dynamic system prompt) lives in that feature's agent module.
 """
+
+import re
 
 from langchain.agents.middleware import (
     ClearToolUsesEdit,
@@ -90,6 +93,62 @@ def trim_history(state, runtime):  # pylint: disable=unused-argument
     if len(trimmed) == len(messages):
         return None
     return {"llm_input_messages": trimmed}
+
+
+# LangChain's error when a model hallucinates a tool it doesn't have:
+# "Error: create_metric is not a valid tool, try one of [...]."
+_INVALID_TOOL_RE = re.compile(r"Error:\s*(\w+) is not a valid tool")
+
+
+def repair_invalid_tool_messages(
+    messages: list[BaseMessage], own_tools: frozenset[str]
+) -> list[ToolMessage]:
+    """Replacements for invalid-tool errors that LIE to the current agent.
+
+    The two agents share one message history. When the SQL agent hallucinates
+    create_metric, the "not a valid tool" error it earns stays in the thread —
+    and the guide agent (which really has create_metric) reads it as proof its
+    own tool is broken ("I don't have write access"). Rewrite exactly those
+    errors: ones naming a tool the CURRENT agent owns. Errors about tools this
+    agent does NOT own are left intact — they are true here, and they are the
+    corrective signal that makes the erring agent hand off instead of retrying.
+    """
+    replacements = []
+    for message in messages:
+        if not (isinstance(message, ToolMessage) and isinstance(message.content, str)):
+            continue
+        match = _INVALID_TOOL_RE.search(message.content)
+        if match and match.group(1) in own_tools:
+            tool = match.group(1)
+            replacements.append(
+                message.model_copy(
+                    update={
+                        "content": (
+                            f"(An earlier attempt to call {tool} was made by a "
+                            f"different assistant that does not have that tool. "
+                            f"{tool} IS available to you — use it normally.)"
+                        )
+                    }
+                )
+            )
+    return replacements
+
+
+def repair_foreign_tool_errors(own_tools: tuple[str, ...] | frozenset[str]):
+    """Middleware: durably rewrite cross-agent invalid-tool errors before the
+    model sees them. Replacements carry the original message ids, so
+    add_messages swaps them in the checkpoint — a one-time repair, not a
+    per-call rewrite."""
+    own = frozenset(own_tools)
+
+    @before_model
+    def repair_tool_errors(state, runtime):  # pylint: disable=unused-argument
+        replacements = repair_invalid_tool_messages(state["messages"], own)
+        if not replacements:
+            return None
+        return {"messages": replacements}
+
+    return repair_tool_errors
 
 
 def clear_old_tool_results() -> ContextEditingMiddleware:

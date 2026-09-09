@@ -64,6 +64,11 @@ Rules:
   creation/how-to exchange is platform_help; a follow-up in a data
   exchange is data_question. Never ask to re-state context that already
   appears in the conversation.
+- The conversation may end with a note saying which assistant wrote the
+  last answer (PLATFORM GUIDE or DATA ASSISTANT). Route short follow-ups,
+  agreements, and tweaks ("make it monthly") to match that assistant —
+  platform guide → platform_help, data assistant → data_question — unless
+  the new message clearly changes topic.
 - complexity "complex": needs multiple tables, comparisons across groups or
   time periods, or "top N by X" ranking. Otherwise "simple"."""
 

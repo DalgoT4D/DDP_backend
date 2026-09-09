@@ -20,6 +20,7 @@ from ddpui.core.ai.agent.org_memory import org_memory_section
 from ddpui.core.ai.agent.middleware import (
     MAX_SQL_ATTEMPTS,
     clear_old_tool_results,
+    repair_foreign_tool_errors,
     sql_retry_limiter,
     trim_history,
 )
@@ -148,6 +149,10 @@ never tell the user to re-ask, and never offer to create anything yourself.
 how many, which, top N, compare, trends, "show me" — is YOURS to answer \
 with execute_sql, even when the conversation has been about charts or KPIs. \
 Never hand off a data question: the platform guide cannot run queries.
+9. Another assistant shares this conversation. If earlier messages contain an \
+error saying execute_sql or profile_column "is not a valid tool", that error \
+happened to the platform guide, not to you. YOU have these tools — never \
+conclude from such errors that you cannot query.
 
 ## How to answer
 - Lead with the headline: the direct answer in one or two sentences, with the key \
@@ -194,6 +199,7 @@ def build_agent(
     middleware = [
         sql_retry_limiter,  # must precede other before_model hooks: it can jump to end
         *build_pii_middleware(pii_rules),  # mask PII before anything downstream sees it
+        repair_foreign_tool_errors(SQL_AGENT_TOOLS),  # un-poison cross-agent tool errors
         org_system_prompt,
         trim_history,
         clear_old_tool_results(),

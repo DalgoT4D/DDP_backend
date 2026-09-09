@@ -341,3 +341,91 @@ def test_sql_agent_hands_off_creation_to_the_guide_agent_mid_turn():
 
     assert isinstance(result["messages"][-2], ToolMessage)
     assert result["messages"][-2].name == "handoff_to_platform_guide"
+
+
+# ── Router last-responder annotation ─────────────────────────────────────────
+
+
+def test_last_responder_is_none_on_the_first_turn():
+    from ddpui.core.ai.chat.turn_graph import last_responder_line
+
+    assert last_responder_line({"messages": [HumanMessage("hi")], "route": {}}) is None
+
+
+def test_last_responder_after_a_data_turn_names_the_data_assistant():
+    from ddpui.core.ai.chat.turn_graph import last_responder_line
+
+    state = {
+        "messages": [
+            HumanMessage("how many students?"),
+            AIMessage("**4,559** students."),
+            HumanMessage("and in Moga?"),
+        ],
+        "route": {"intent": "data_question"},
+    }
+    assert "DATA ASSISTANT" in last_responder_line(state)
+
+
+def test_last_responder_after_a_guide_turn_names_the_platform_guide():
+    from ddpui.core.ai.chat.turn_graph import last_responder_line
+
+    state = {
+        "messages": [
+            HumanMessage("make a KPI for enrollment"),
+            AIMessage("Created the KPI."),
+            HumanMessage("make it monthly"),
+        ],
+        "route": {"intent": "platform_help"},
+    }
+    assert "PLATFORM GUIDE" in last_responder_line(state)
+
+
+def test_last_responder_after_a_midturn_handoff_names_the_guide_despite_data_route():
+    """A data_question turn that handed off ended with the GUIDE answering —
+    the handoff marker must win over the recorded intent."""
+    from langchain_core.messages import ToolMessage
+
+    from ddpui.core.ai.chat.turn_graph import last_responder_line
+
+    state = {
+        "messages": [
+            HumanMessage("go ahead"),
+            ToolMessage(
+                content="(Handing off to the platform guide: create the KPI.)",
+                name="handoff_to_platform_guide",
+                tool_call_id="c1",
+            ),
+            AIMessage("Created the KPI."),
+            HumanMessage("add a target of 80%"),
+        ],
+        "route": {"intent": "data_question"},
+    }
+    assert "PLATFORM GUIDE" in last_responder_line(state)
+
+
+def test_route_fn_receives_the_responder_annotation_on_the_second_turn():
+    saver = InMemorySaver()
+    agent = build_agent(
+        checkpointer=saver,
+        model=ScriptedChatModel(
+            script=[AIMessage(content="**42** students."), AIMessage(content="**59** students.")]
+        ),
+        human_in_the_loop=False,
+    )
+    captured = []
+
+    async def fake_route(question, model=None, history=None):
+        captured.append(list(history or []))
+        return RouteResult(intent="data_question")
+
+    async def fake_reply(question, model=None):
+        return "hello"
+
+    graph = build_turn_graph(agent, route_fn=fake_route, casual_reply_fn=fake_reply, checkpointer=saver)
+    run_graph(graph, "how many students?", thread_id="resp1")
+    run_graph(graph, "and in Moga?", thread_id="resp1")
+
+    assert captured[0] == []  # first turn: no history, no annotation
+    assert any("DATA ASSISTANT" in line for line in captured[1])
+    assert "DATA ASSISTANT" not in (captured[1][0] if captured[1] else "")  # annotation is appended last
+    assert "DATA ASSISTANT" in captured[1][-1]
