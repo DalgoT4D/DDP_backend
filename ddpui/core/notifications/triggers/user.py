@@ -47,6 +47,7 @@ def send_invite_user(
     to_email: str,
     invited_by_email: str,
     invite_url: str,
+    org_name: Optional[str] = None,
     group_name: Optional[str] = None,
 ) -> None:
     """Invitation email to a not-yet-registered user.
@@ -58,7 +59,8 @@ def send_invite_user(
         headline = f"You have been added to the {group_name} group by {invited_by_email}"
         subtext = "Accept the invite and set your password to explore your workspace."
     else:
-        headline = f"You have been invited to Dalgo by {invited_by_email}"
+        dest = org_name or "Dalgo"
+        headline = f"You have been invited to {dest} by {invited_by_email}"
         subtext = "Accept the invite and set your password to get started."
 
     message = f"{subtext}\n{invite_url}"

@@ -14,7 +14,11 @@ from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
 from ddpui.core.access import resource_share, shareable_types
-from ddpui.core.access.access_control import get_access_map_for_resource, get_user_access
+from ddpui.core.access.access_control import (
+    caller_has_direct_edit,
+    get_access_map_for_resource,
+    get_user_access,
+)
 from ddpui.core.access.ownership import is_creator_or_admin, transfer_ownership, OwnershipError
 from ddpui.core.audit_log_service import create_audit_log
 from ddpui.core.notifications.triggers.access import (
@@ -29,6 +33,7 @@ from ddpui.core.notifications.triggers.share import (
     snapshot_direct_levels,
 )
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
+from ddpui.models.dashboard import Dashboard
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import (
@@ -37,6 +42,7 @@ from ddpui.models.resource_share import (
     AccessRequestStatus,
     LEVEL_RANK,
     ResourceShare,
+    ResourceType,
 )
 from ddpui.schemas.access.resource_share_schema import (
     AccessRequestSchema,
@@ -46,6 +52,7 @@ from ddpui.schemas.access.resource_share_schema import (
     GeneralAccessState,
     GrantsListResponse,
     OwnerInfo,
+    ParentBlockSchema,
     RequestAccessPayload,
     RespondToRequestPayload,
     ShareRowSchema,
@@ -58,6 +65,50 @@ from ddpui.utils.custom_logger import CustomLogger
 
 access_router = Router()
 logger = CustomLogger("ddpui")
+
+_VISIBILITY_RANK: dict[str, int] = {"private": 0, "internal": 1, "public": 2}
+
+
+def _get_parent_dashboards(org, rtype: str, resource_id) -> list[ParentBlockSchema]:
+    """For chart/KPI resources: return all parent dashboards that contain this
+    resource (by scanning dashboard tabs). Used to enforce the parent-visibility
+    downgrade rule — callers filter by rank as needed."""
+    if rtype not in (ResourceType.CHART, ResourceType.KPI):
+        return []
+
+    comp_type = "chart" if rtype == ResourceType.CHART else "kpi"
+    id_key = "chartId" if rtype == ResourceType.CHART else "kpiId"
+    resource_id_int = int(resource_id)
+
+    parents: list[ParentBlockSchema] = []
+    seen: set[int] = set()
+    for dashboard in Dashboard.objects.filter(org=org):
+        if dashboard.id in seen:
+            continue
+        for tab in dashboard.tabs or []:
+            raw_components = tab.get("components", [])
+            # components may be a list or a dict (keyed by component id)
+            components = (
+                raw_components.values() if isinstance(raw_components, dict) else raw_components
+            )
+            if any(
+                comp.get("type") == comp_type
+                and int((comp.get("config") or {}).get(id_key) or 0) == resource_id_int
+                for comp in components
+            ):
+                seen.add(dashboard.id)
+                is_private = bool(dashboard.is_private)
+                is_public = bool(getattr(dashboard, "is_public", False))
+                parent_mode = "private" if is_private else ("public" if is_public else "internal")
+                parents.append(
+                    ParentBlockSchema(
+                        dashboard_id=dashboard.id,
+                        dashboard_title=dashboard.title,
+                        mode=parent_mode,
+                    )
+                )
+                break
+    return parents
 
 
 def _fetch_resource_or_404(request, rtype: str, resource_id):
@@ -102,6 +153,10 @@ def _general_access_state(orguser: OrgUser, rtype: str, resource) -> GeneralAcce
         public_url = _public_share_url(rtype, token)
 
     last_public_accessed = getattr(resource, "last_public_accessed", None)
+    # Rule 1: flag floor-only callers so the frontend hides the GA section.
+    access_via_floor = not caller_has_direct_edit(orguser, rtype, resource)
+    # Rule 2: surface parent dashboards so the frontend can disable restricted modes.
+    parent_blocks = _get_parent_dashboards(orguser.org, rtype, resource.pk)
     return GeneralAccessState(
         mode=mode,
         supports_public=supports_public,
@@ -109,6 +164,8 @@ def _general_access_state(orguser: OrgUser, rtype: str, resource) -> GeneralAcce
         public_url=public_url,
         public_access_count=int(getattr(resource, "public_access_count", 0) or 0),
         last_public_accessed=last_public_accessed.isoformat() if last_public_accessed else None,
+        caller_access_via_floor=access_via_floor,
+        parent_blocks=parent_blocks,
     )
 
 
@@ -246,6 +303,29 @@ def update_general_access(request, rtype: str, resource_id: str, payload: Genera
     """
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
     _require_edit_or_admin(orguser, rtype, resource, "change access")
+
+    # Rule 1: floor-only editors cannot change visibility in either direction.
+    if not caller_has_direct_edit(orguser, rtype, resource):
+        raise HttpError(
+            403,
+            "visibility can only be changed by the owner, an admin, or a user with a direct share",
+        )
+
+    # Rule 2: downgrade of a nested resource is blocked when a parent dashboard
+    # has higher visibility (public > internal > private).
+    parent_dashboards = _get_parent_dashboards(orguser.org, rtype, resource_id)
+    blocking = [
+        p
+        for p in parent_dashboards
+        if _VISIBILITY_RANK.get(p.mode, 1) > _VISIBILITY_RANK.get(payload.mode, 0)
+    ]
+    if blocking:
+        names = ", ".join(f'"{b.dashboard_title}"' for b in blocking)
+        raise HttpError(
+            400,
+            f"Cannot downgrade visibility: this resource belongs to {names} which has higher visibility. "
+            "Change the parent dashboard's visibility first.",
+        )
 
     is_private = payload.mode == "private"
     is_public = payload.mode == "public"

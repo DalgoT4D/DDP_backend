@@ -58,12 +58,27 @@ class OwnerInfo(Schema):
     role_name: Optional[str] = None
 
 
+class ParentBlockSchema(Schema):
+    """A parent dashboard that would block a visibility downgrade on a nested resource."""
+
+    dashboard_id: int
+    dashboard_title: str
+    mode: GeneralAccessMode
+
+
 class GeneralAccessState(Schema):
     """Current org-wide access state, embedded in the grants response so the
     share modal can render its "General access" section from a single GET.
 
     ``supports_public`` is False for rtypes that have no ``is_public`` field
     (charts, KPIs) — the frontend hides the Public option accordingly.
+
+    ``caller_access_via_floor`` is True when the caller's Edit access comes
+    solely from the org floor (not a direct share, owner, or admin). The
+    frontend hides the General Access section for these users.
+
+    ``parent_blocks`` lists parent dashboards whose visibility outranks the
+    current resource, constraining which modes the dropdown can show.
     """
 
     mode: GeneralAccessMode  # "internal" | "private" | "public"
@@ -72,6 +87,8 @@ class GeneralAccessState(Schema):
     public_url: Optional[str] = None
     public_access_count: int = 0
     last_public_accessed: Optional[str] = None
+    caller_access_via_floor: bool = False
+    parent_blocks: list[ParentBlockSchema] = []
 
 
 class GrantsListResponse(Schema):
