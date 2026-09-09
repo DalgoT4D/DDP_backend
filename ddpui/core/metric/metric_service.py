@@ -21,6 +21,7 @@ from ddpui.schemas.metric_schema import MetricPayload
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.sql_utils import safe_division_expression
 
 logger = CustomLogger("ddpui.metric_service")
 
@@ -148,7 +149,8 @@ class MetricService:
             qb.fetch_from(payload.table_name, payload.schema_name)
 
             if payload.column_expression:
-                qb.add_column(literal_column(payload.column_expression).label("metric_value"))
+                safe_expr = safe_division_expression(payload.column_expression)
+                qb.add_column(literal_column(safe_expr).label("metric_value"))
             else:
                 qb.add_aggregate_column(payload.column, payload.aggregation, alias="metric_value")
 
@@ -337,7 +339,8 @@ class MetricService:
         qb.fetch_from(metric.table_name, metric.schema_name)
 
         if metric.column_expression:
-            qb.add_column(literal_column(metric.column_expression).label("metric_value"))
+            safe_expr = safe_division_expression(metric.column_expression)
+            qb.add_column(literal_column(safe_expr).label("metric_value"))
         else:
             qb.add_aggregate_column(metric.column, metric.aggregation, alias="metric_value")
 

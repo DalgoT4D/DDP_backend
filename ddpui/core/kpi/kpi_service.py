@@ -31,6 +31,7 @@ from ddpui.schemas.kpi_schema import (
 from ddpui.schemas.metric_schema import MetricResponse
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.sql_utils import safe_division_expression
 
 logger = CustomLogger("ddpui.kpi_service")
 
@@ -443,7 +444,8 @@ class KPIService:
         qb.group_cols_by(time_col_labeled)
 
         if metric.column_expression:
-            qb.add_column(literal_column(metric.column_expression).label("value"))
+            safe_expr = safe_division_expression(metric.column_expression)
+            qb.add_column(literal_column(safe_expr).label("value"))
         else:
             qb.add_aggregate_column(metric.column, metric.aggregation, alias="value")
 
@@ -529,7 +531,8 @@ class KPIService:
         qb.add_column(time_expr)
         qb.group_cols_by(time_expr)
         if metric.column_expression:
-            qb.add_column(literal_column(metric.column_expression).label("value"))
+            safe_expr = safe_division_expression(metric.column_expression)
+            qb.add_column(literal_column(safe_expr).label("value"))
         else:
             qb.add_aggregate_column(metric.column, metric.aggregation, alias="value")
         qb.order_cols_by([("period", "desc")])

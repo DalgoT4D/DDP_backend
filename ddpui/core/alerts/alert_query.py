@@ -33,6 +33,7 @@ from ddpui.models.alert import Alert, AlertType
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import OrgWarehouse
 from ddpui.schemas.alert_schema import StandaloneConfig
+from ddpui.utils.sql_utils import safe_division_expression
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 
 
@@ -60,7 +61,8 @@ def _execute_standalone(
     qb = AggQueryBuilder()
     qb.fetch_from(standalone_config.table_name, standalone_config.schema_name)
     if standalone_config.column_expression:
-        qb.add_column(literal_column(standalone_config.column_expression).label("value"))
+        safe_expr = safe_division_expression(standalone_config.column_expression)
+        qb.add_column(literal_column(safe_expr).label("value"))
     else:
         # `column` may be empty for COUNT(*) — AggQueryBuilder handles None.
         col_arg = standalone_config.column or None

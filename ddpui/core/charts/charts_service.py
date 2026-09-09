@@ -9,6 +9,7 @@ from collections import defaultdict
 from sqlalchemy import column, func, and_, or_, text, literal_column
 
 from ddpui.models.org import OrgWarehouse
+from ddpui.utils.sql_utils import safe_division_expression
 from ddpui.models.metric import Metric
 from ddpui.models.visualization import Chart
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
@@ -380,7 +381,8 @@ def build_multi_metric_query(
             # Expression path: inline raw SQL expression
             if metric.column_expression:
                 alias = metric.alias or "expression_metric"
-                query_builder.add_column(literal_column(metric.column_expression).label(alias))
+                safe_expr = safe_division_expression(metric.column_expression)
+                query_builder.add_column(literal_column(safe_expr).label(alias))
                 continue
 
             # Simple path: column + aggregation
@@ -469,7 +471,8 @@ def build_pivot_table_query(
     for metric in payload.metrics:
         alias = metric_sql_alias(metric)
         if metric.column_expression:
-            query_builder.add_column(literal_column(metric.column_expression).label(alias))
+            safe_expr = safe_division_expression(metric.column_expression)
+            query_builder.add_column(literal_column(safe_expr).label(alias))
         else:
             query_builder.add_aggregate_column(metric.column, metric.aggregation, alias)
 
@@ -593,7 +596,8 @@ def build_chart_query(
             # Expression metric: inline raw SQL (e.g. "SUM(a)/SUM(b)") — no aggregation/column.
             if metric.column_expression:
                 alias = metric.alias or "expression_metric"
-                query_builder.add_column(literal_column(metric.column_expression).label(alias))
+                safe_expr = safe_division_expression(metric.column_expression)
+                query_builder.add_column(literal_column(safe_expr).label(alias))
             else:
                 # Handle count with None column case
                 if (
@@ -641,7 +645,8 @@ def build_chart_query(
             # Expression metric: inline raw SQL (e.g. "SUM(a)/SUM(b)") — no aggregation/column.
             if metric.column_expression:
                 alias = metric.alias or "expression_metric"
-                query_builder.add_column(literal_column(metric.column_expression).label(alias))
+                safe_expr = safe_division_expression(metric.column_expression)
+                query_builder.add_column(literal_column(safe_expr).label(alias))
             else:
                 # Handle count with None column case
                 if (
