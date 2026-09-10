@@ -16,6 +16,7 @@ import django
 from unittest.mock import patch
 import pytest
 from ninja.errors import HttpError
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -43,6 +44,8 @@ from ddpui.api.dashboard_native_api import (
     unfavorite_dashboard,
     set_personal_landing_dashboard,
     set_org_default_dashboard,
+    upload_dashboard_widget_image,
+    delete_dashboard_widget_image,
 )
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
@@ -50,6 +53,11 @@ from ddpui.schemas.dashboard_schema import (
     DashboardTabSchema,
     FilterCreate,
     FilterUpdate,
+    WidgetImageDeleteRequest,
+)
+from ddpui.services.dashboard_service import (
+    WidgetImageValidationError,
+    WidgetImagePermissionError,
 )
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
@@ -833,6 +841,48 @@ class TestDuplicateDashboardTabs:
         # Cleanup
         original_filter.delete()
 
+    def test_duplicate_dashboard_gives_widget_image_its_own_s3_copy(
+        self, orguser, sample_dashboard, seed_db, monkeypatch
+    ):
+        """Test that a text widget's S3-hosted image is copied to a NEW key on
+        duplicate, not left pointing at the original — otherwise removing/replacing
+        the image on either dashboard would delete it out from under the other."""
+        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
+        original_image_key = f"orgs/{orguser.org.pk}/dashboards/images/old.png"
+        sample_dashboard.tabs = [
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": "text-1", "x": 0, "y": 0, "w": 4, "h": 3}],
+                "components": {
+                    "text-1": {
+                        "type": "text",
+                        "config": {
+                            "imageUrl": f"https://test-bucket.s3.amazonaws.com/{original_image_key}",
+                            "imageKey": original_image_key,
+                        },
+                    }
+                },
+            }
+        ]
+        sample_dashboard.save()
+
+        request = mock_request(orguser)
+        with patch(
+            "ddpui.services.dashboard_service.copy_file",
+            return_value="https://test-bucket.s3.amazonaws.com/orgs/dash-api-test-org/dashboards/images/new.png",
+        ) as mock_copy:
+            response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        new_config = response.tabs[0].components["text-1"]["config"]
+        assert new_config["imageKey"] != original_image_key
+        assert new_config["imageKey"].startswith(f"orgs/{orguser.org.pk}/dashboards/images/")
+        assert (
+            new_config["imageUrl"]
+            == "https://test-bucket.s3.amazonaws.com/orgs/dash-api-test-org/dashboards/images/new.png"
+        )
+        mock_copy.assert_called_once()
+
 
 # ================================================================================
 # Test sharing permission gates (creator-or-admin, incl. orphaned dashboards)
@@ -1125,3 +1175,82 @@ def test_set_org_default_dashboard_creates_audit_log(
         "title": sample_dashboard.title,
         "is_org_default": {"old": False, "new": True},
     }
+
+
+# ================================================================================
+# Test upload_dashboard_widget_image / delete_dashboard_widget_image endpoints
+# ================================================================================
+
+
+class TestUploadDashboardWidgetImage:
+    """Tests for upload_dashboard_widget_image endpoint"""
+
+    def test_upload_widget_image_success(self, orguser, seed_db):
+        """Test a successful upload returns the service's url/key and forwards the org"""
+        request = mock_request(orguser)
+        file = SimpleUploadedFile("test.png", b"fake-image-bytes", content_type="image/png")
+
+        with patch(
+            "ddpui.api.dashboard_native_api.upload_widget_image",
+            return_value=(
+                "https://bucket.s3.amazonaws.com/key.png",
+                "orgs/dash-api-test-org/dashboards/images/key.png",
+            ),
+        ) as mock_upload:
+            response = upload_dashboard_widget_image(request, file=file)
+
+        assert response.image_url == "https://bucket.s3.amazonaws.com/key.png"
+        assert response.image_key == "orgs/dash-api-test-org/dashboards/images/key.png"
+
+        mock_upload.assert_called_once()
+        call_kwargs = mock_upload.call_args[1]
+        assert call_kwargs["file_bytes"] == b"fake-image-bytes"
+        assert call_kwargs["content_type"] == "image/png"
+        assert call_kwargs["org"] == orguser.org
+
+    def test_upload_widget_image_validation_error_returns_400(self, orguser, seed_db):
+        """Test that a validation error from the service surfaces as HTTP 400"""
+        request = mock_request(orguser)
+        file = SimpleUploadedFile("test.pdf", b"not-an-image", content_type="application/pdf")
+
+        with patch(
+            "ddpui.api.dashboard_native_api.upload_widget_image",
+            side_effect=WidgetImageValidationError("Invalid file type: application/pdf"),
+        ):
+            with pytest.raises(HttpError) as excinfo:
+                upload_dashboard_widget_image(request, file=file)
+
+        assert excinfo.value.status_code == 400
+
+
+class TestDeleteDashboardWidgetImage:
+    """Tests for delete_dashboard_widget_image endpoint"""
+
+    def test_delete_widget_image_success(self, orguser, seed_db):
+        """Test a successful delete forwards the image key and org to the service"""
+        request = mock_request(orguser)
+        payload = WidgetImageDeleteRequest(
+            image_key=f"orgs/{orguser.org.pk}/dashboards/images/file.png"
+        )
+
+        with patch("ddpui.api.dashboard_native_api.delete_widget_image") as mock_delete:
+            response = delete_dashboard_widget_image(request, payload=payload)
+
+        assert response == {"success": True}
+        mock_delete.assert_called_once_with(payload.image_key, orguser.org)
+
+    def test_delete_widget_image_permission_error_returns_403(self, orguser, seed_db):
+        """Test that a cross-org key rejection from the service surfaces as HTTP 403"""
+        request = mock_request(orguser)
+        payload = WidgetImageDeleteRequest(
+            image_key="orgs/some-other-org/dashboards/images/file.png"
+        )
+
+        with patch(
+            "ddpui.api.dashboard_native_api.delete_widget_image",
+            side_effect=WidgetImagePermissionError(),
+        ):
+            with pytest.raises(HttpError) as excinfo:
+                delete_dashboard_widget_image(request, payload=payload)
+
+        assert excinfo.value.status_code == 403

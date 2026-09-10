@@ -36,6 +36,28 @@ def upload_file(bucket: str, key: str, file_bytes: bytes, content_type: str) -> 
     return url
 
 
+def copy_file(bucket: str, source_key: str, dest_key: str) -> str:
+    """Server-side copy an S3 object to a new key within the same bucket and
+    return the copy's public URL. Used when a resource referencing an S3 file
+    (e.g. a dashboard) is duplicated/cloned, so the copy gets its own
+    independent file instead of sharing the original's key.
+
+    Args:
+        bucket: S3 bucket name
+        source_key: Existing S3 object key to copy from
+        dest_key: New S3 object key to copy to
+
+    Returns:
+        Public URL of the copied file
+    """
+    region = _get_s3_region()
+    s3 = AWSClient.get_instance("s3")
+    s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": source_key}, Key=dest_key)
+    url = _build_s3_url(bucket, region, dest_key)
+    logger.info(f"Copied file from s3://{bucket}/{source_key} to s3://{bucket}/{dest_key}")
+    return url
+
+
 def delete_file(bucket: str, key: str) -> None:
     """Delete any file from S3 by its key.
 
