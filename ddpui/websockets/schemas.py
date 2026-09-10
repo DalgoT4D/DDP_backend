@@ -8,6 +8,7 @@ class WebsocketCloseCodes:
 
     NO_TOKEN = 4001
     INVALID_TOKEN = 4003
+    FORBIDDEN = 4004  # authenticated but not allowed (permission/flag/consent/ownership)
 
 
 class WebsocketResponseStatus(str, Enum):

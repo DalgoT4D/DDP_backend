@@ -1,0 +1,166 @@
+"""Tests for context building: schema derivation (pure) and scope wiring (DB)."""
+
+import os
+
+import django
+import pytest
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
+django.setup()
+
+from django.contrib.auth.models import User
+
+from django.core.exceptions import ValidationError
+
+from ddpui.core.ai.agent import context_builder as context_module
+from ddpui.core.ai.agent.context_builder import (
+    build_run_context,
+    derive_allowed_schemas,
+    priority_sorted_schemas,
+)
+from ddpui.core.ai.agent.org_memory import MAX_ORG_MEMORY_CHARS
+from ddpui.models.chat_with_data import (
+    ChatWithDataOrgConfig,
+    ChatWithDataOrgMemory,
+    ChatWithDataSession,
+)
+from ddpui.models.dashboard import Dashboard
+from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org_user import OrgUser
+from ddpui.models.visualization import Chart
+
+
+class SchemaWarehouse:
+    def __init__(self, schemas):
+        self.schemas = schemas
+
+    def execute(self, sql):
+        return [{"schema_name": s} for s in self.schemas]
+
+
+def test_all_non_system_schemas_are_offered_curated_first():
+    # dbt-schema-only restriction removed 2026-09-10: real questions often
+    # live in staging/intermediate tables the dbt output schema misses
+    warehouse = SchemaWarehouse(["raw_kobo", "staging", "prod", "intermediate"])
+    assert derive_allowed_schemas(warehouse, "postgres") == [
+        "prod",
+        "intermediate",
+        "staging",
+        "raw_kobo",
+    ]
+
+
+def test_system_schemas_are_never_offered():
+    warehouse = SchemaWarehouse(
+        [
+            "information_schema",
+            "pg_catalog",
+            "pg_temp_12",  # per-connection temp schemas come and go
+            "pg_toast_temp_3",
+            "airbyte_internal",
+            "_airbyte_staging",  # must not leak in via the "staging" priority match
+            "raw_x",
+        ]
+    )
+    assert derive_allowed_schemas(warehouse, "postgres") == ["raw_x"]
+
+
+def test_priority_sort_matches_substrings_and_keeps_rest_alphabetical():
+    schemas = ["zebra", "analytics_staging", "production", "apple", "intermediate_v2"]
+    assert priority_sorted_schemas(schemas) == [
+        "production",  # "prod" matched as substring
+        "intermediate_v2",
+        "analytics_staging",
+        "apple",
+        "zebra",
+    ]
+
+
+# ── Context building (DB) ───────────────────────────────────────────────────
+
+
+@pytest.fixture
+def org_setup(monkeypatch):
+    """Org + warehouse + one orguser, with a fake two-schema warehouse."""
+    org = Org.objects.create(name="Ctx Test Org", slug="ctx-test")
+    OrgWarehouse.objects.create(org=org, wtype="postgres")
+    user = User.objects.create(username="ctxuser", email="ctxuser@test.com", password="x")
+    orguser = OrgUser.objects.create(user=user, org=org)
+    monkeypatch.setattr(
+        context_module.WarehouseFactory,
+        "get_warehouse_client",
+        staticmethod(lambda org_warehouse: SchemaWarehouse(["prod", "raw_kobo"])),
+    )
+    yield orguser
+    orguser.delete()
+    user.delete()
+    org.delete()
+
+
+@pytest.mark.django_db
+def test_context_carries_all_non_system_schemas(org_setup):
+    orguser = org_setup
+    ctx = build_run_context(orguser)
+    assert ctx.allowed_schemas == ["prod", "raw_kobo"]
+    assert ctx.org_slug == "ctx-test"
+
+
+@pytest.mark.django_db
+def test_context_uses_defaults_when_org_has_no_config_row(org_setup):
+    ctx = build_run_context(org_setup)
+    assert ctx.max_result_rows == 100
+    assert ctx.query_timeout_s == 30
+    assert ctx.pii_rules == []
+
+
+@pytest.mark.django_db
+def test_org_config_row_overrides_schemas_limits_and_pii_rules(org_setup):
+    orguser = org_setup
+    rule = {"pii_type": "case_id", "detector": r"CASE-\d{6}", "strategy": "redact"}
+    ChatWithDataOrgConfig.objects.create(
+        org=orguser.org,
+        allowed_schemas=["prod"],
+        max_result_rows=50,
+        query_timeout_s=10,
+        pii_rules=[rule],
+    )
+
+    ctx = build_run_context(orguser)
+
+    assert ctx.allowed_schemas == ["prod"]  # admin's list wins over derivation
+    assert ctx.max_result_rows == 50
+    assert ctx.query_timeout_s == 10
+    assert ctx.pii_rules == [rule]
+
+
+@pytest.mark.django_db
+def test_memory_row_reaches_the_context(org_setup):
+    orguser = org_setup
+    ChatWithDataOrgMemory.objects.create(
+        org=orguser.org, text="'SHG' means self-help group.", updated_by=orguser
+    )
+    ctx = build_run_context(orguser)
+    assert ctx.org_memory == "'SHG' means self-help group."
+
+
+@pytest.mark.django_db
+def test_no_memory_row_means_empty_org_memory(org_setup):
+    ctx = build_run_context(org_setup)
+    assert ctx.org_memory == ""
+
+
+@pytest.mark.django_db
+def test_memory_over_cap_is_rejected_at_save_time(org_setup):
+    memory = ChatWithDataOrgMemory(org=org_setup.org, text="x" * (MAX_ORG_MEMORY_CHARS + 1))
+    with pytest.raises(ValidationError):
+        memory.full_clean()
+
+
+@pytest.mark.django_db
+def test_org_config_rejects_invalid_pii_rules_at_save_time(org_setup):
+    config = ChatWithDataOrgConfig(
+        org=org_setup.org,
+        pii_rules=[{"pii_type": "email", "detector": "x"}],  # collides with a default
+    )
+    with pytest.raises(ValidationError, match="built-in"):
+        config.full_clean()

@@ -1,0 +1,57 @@
+"""ask_user + handoff tools — the agent's ways to yield control mid-run.
+
+ask_user: in production this tool never executes — the HITL middleware
+(agent/hitl.py) intercepts every call with a respond-only interrupt, the
+question is shown in the chat, and the user's typed reply is returned to the
+model as the tool result. The body below is a fallback for contexts that run
+without the middleware (evals, REPL), where no human is available to answer.
+
+handoff_to_platform_guide: the SQL agent's escape hatch when a creation
+request lands on it anyway (the router sends most to the guide agent, but
+short confirmations like "go ahead" can slip through). The TurnGraph watches
+for this tool call after the sql_agent node and continues the SAME turn in
+the guide agent — the user never has to re-ask.
+"""
+
+from langchain.tools import tool
+
+from ddpui.core.ai.tools.registry import register_tool
+
+HANDOFF_TOOL = "handoff_to_platform_guide"
+
+
+@register_tool
+@tool
+def ask_user(question: str) -> str:
+    """Ask the user ONE short clarifying question and wait for their answer.
+    Use this when you cannot find data matching their request, or when the
+    question could mean two different things in a way that changes the SQL
+    (which table, which time period, which program). Ask only what you need
+    to proceed, in plain non-technical language — never SQL or column names
+    alone, and never more than one question at a time."""
+    return (
+        f"(No user is available to answer: {question!r}. Proceed with your "
+        "most reasonable assumption and state that assumption clearly in "
+        "your answer.)"
+    )
+
+
+# return_direct: the agent loop exits right after this tool runs, so the
+# conversation ends on the tool result (a user-role message for the model
+# API) — a trailing assistant message here would be rejected as "prefill"
+# by Anthropic when the guide agent makes its first call on the same thread.
+@register_tool
+@tool(return_direct=True)
+def handoff_to_platform_guide(request_summary: str) -> str:
+    """Hand the conversation to the platform guide, which creates charts,
+    dashboards, KPIs, metrics, and reports. Call this ONLY when the user's
+    current message asks to create one of those (or accepts an offer to) —
+    do NOT describe what you can't do, do NOT ask them to re-send their
+    request. NEVER call this for questions about the data itself (counts,
+    trends, comparisons, top N): the guide cannot run queries — answer
+    those yourself. Summarize what they want created in request_summary.
+    The guide continues the conversation immediately."""
+    return (
+        f"(Handing off to the platform guide: {request_summary}. "
+        "It will continue this conversation and create what was asked.)"
+    )

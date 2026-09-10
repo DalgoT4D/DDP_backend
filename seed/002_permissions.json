@@ -734,5 +734,21 @@
             "name": "Can Share Charts",
             "slug": "can_share_charts"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 93,
+        "fields": {
+            "name": "Can Use Chat With Data",
+            "slug": "can_use_chat_with_data"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 94,
+        "fields": {
+            "name": "Can Manage Chat With Data Settings",
+            "slug": "can_manage_chat_with_data_settings"
+        }
     }
 ]
