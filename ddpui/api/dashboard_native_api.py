@@ -33,6 +33,7 @@ from ddpui.services.dashboard_service import (
     DashboardServiceError,
     FilterNotFoundError,
     FilterValidationError,
+    MAX_WIDGET_IMAGE_SIZE_BYTES,
     WidgetImagePermissionError,
     WidgetImageStorageError,
     WidgetImageValidationError,
@@ -122,6 +123,11 @@ def upload_dashboard_widget_image(request, file: UploadedFile = File(...)):
     orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "no associated org")
+
+    # Checked from file.size (multipart metadata) before reading, so an oversized
+    # upload is rejected without first loading its whole content into memory.
+    if file.size is not None and file.size > MAX_WIDGET_IMAGE_SIZE_BYTES:
+        raise HttpError(400, "File size exceeds the 5MB limit")
 
     try:
         image_url, image_key = upload_widget_image(

@@ -1279,11 +1279,12 @@ def remap_widget_images(tabs: list, source_org: Org, dest_org: Org) -> list:
     """Deep-copy `tabs` and give every text/image widget's S3-hosted image its own
     independent copy, scoped to dest_org, rewriting imageUrl/imageKey in place.
 
-    If a single image fails to copy (e.g. a transient S3 error), that one widget is
-    left pointing at the original image rather than failing the whole duplicate/clone —
-    the pre-existing shared-key behavior, not a new failure mode. An image_key that
-    doesn't belong to source_org is a different case: it's a forged/foreign reference,
-    not something safe to retain, so it's stripped instead.
+    If a single image fails to copy (e.g. a transient S3 error) within the SAME org
+    (a plain dashboard duplicate), that widget is left pointing at the original image
+    rather than failing the whole duplicate — the pre-existing shared-key behavior,
+    not a new failure mode. Across orgs (e.g. trial cloning), leaving that reference
+    would mean dest_org's dashboard depends on an image it doesn't own, so it's
+    cleared instead — same treatment as an out-of-org image_key below.
     """
     import copy as _copy
 
@@ -1302,7 +1303,15 @@ def remap_widget_images(tabs: list, source_org: Org, dest_org: Org) -> list:
                 cfg["imageKey"] = None
                 continue
             except WidgetImageStorageError as err:
-                logger.warning(f"Skipping widget image copy for {image_key}: {err.message}")
+                if source_org.pk != dest_org.pk:
+                    logger.warning(
+                        f"Clearing widget image reference after failed cross-org copy "
+                        f"for {image_key}: {err.message}"
+                    )
+                    cfg["imageUrl"] = None
+                    cfg["imageKey"] = None
+                else:
+                    logger.warning(f"Skipping widget image copy for {image_key}: {err.message}")
                 continue
             cfg["imageUrl"] = new_url
             cfg["imageKey"] = new_key
