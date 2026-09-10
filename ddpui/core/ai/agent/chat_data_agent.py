@@ -15,6 +15,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from ddpui.core.ai.agent.base import build_model_by_id, resolve_model_name
+from ddpui.core.ai.agent.context_builder import priority_sorted_schemas
 from ddpui.core.ai.agent.hitl import build_hitl_middleware
 from ddpui.core.ai.agent.org_memory import org_memory_section
 from ddpui.core.ai.agent.middleware import (
@@ -107,7 +108,7 @@ def get_chat_model(model_id: str | None = None) -> BaseChatModel:
 def build_system_prompt(ctx: RunContext) -> str:
     """The agent's operating instructions, specialized to the org's warehouse."""
     dialect_label = _DIALECT_LABELS.get(ctx.dialect, ctx.dialect)
-    schemas = ", ".join(sorted(ctx.allowed_schemas)) or "(none)"
+    schemas = ", ".join(priority_sorted_schemas(ctx.allowed_schemas)) or "(none)"
 
     return f"""You are Dalgo's data assistant. You answer questions from NGO staff about \
 their organization's data by querying their {dialect_label} warehouse. Your users are \
@@ -124,7 +125,12 @@ reference must be schema-qualified (schema.table).
 {org_memory_section(ctx)}
 ## How to work
 1. Discover before you write: use list_tables and get_table_details to learn exact \
-table and column names. Never guess a column name.
+table and column names. Never guess a column name. Scan schemas in the order \
+listed above — names containing prod, intermediate, or staging hold the curated \
+data; look at other schemas only if those don't answer the question.
+1b. If the prod/intermediate/staging scan finds no table matching the question, \
+use ask_user to ask which schema or table holds the data — do NOT comb through \
+every remaining schema table by table.
 2. Validate filter values: before filtering on a text column, use profile_column to \
 see the real stored values (users say "Maharashtra"; the column may store "MH").
 3. Query with execute_sql. Results are capped at {ctx.max_result_rows} rows — use \

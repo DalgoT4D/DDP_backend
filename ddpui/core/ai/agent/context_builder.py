@@ -9,18 +9,23 @@ tools never touch the database or trust an LLM-supplied org identifier.
 from ddpui.auth import granted_permission_slugs
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.models.chat_with_data import ChatWithDataOrgConfig, ChatWithDataOrgMemory
-from ddpui.models.org import OrgDbt, OrgWarehouse
+from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 
 # Never offered to the agent, regardless of what the warehouse contains
 SYSTEM_SCHEMAS = {
     "information_schema",
-    "pg_catalog",
-    "pg_toast",
     "airbyte_internal",
-    "_airbyte_internal",
 }
+# ...and whole families by prefix: pg_* covers pg_catalog/pg_toast/pg_temp_N
+# (session temp schemas appear and vanish per connection), _airbyte* covers
+# Airbyte's internal and staging scratch schemas.
+SYSTEM_SCHEMA_PREFIXES = ("pg_", "_airbyte")
+
+# Discovery scans these first: dbt-convention schemas hold the curated data.
+# Matched as substrings of the schema name ("prod" also catches "production").
+PRIORITY_SCHEMA_NAMES = ("prod", "intermediate", "staging")
 
 DEFAULT_MAX_RESULT_ROWS = 100
 DEFAULT_QUERY_TIMEOUT_S = 30
@@ -30,18 +35,40 @@ class ChatWithDataNotReady(Exception):
     """Raised when the org has no warehouse to chat with."""
 
 
-def derive_allowed_schemas(warehouse, dialect: str, dbt_default_schema: str | None) -> list[str]:
-    """Default schema allowlist: the org's dbt output schema if it exists in the
-    warehouse, else every non-system schema (raw fallback — decision 2)."""
+def priority_sorted_schemas(schemas: list[str]) -> list[str]:
+    """Curated-first ordering: prod-ish, then intermediate, then staging, then
+    the rest alphabetically. The prompt and list_schemas present schemas in
+    this order so the agent scans the curated layers before raw ones."""
+
+    def rank(schema: str):
+        low = schema.lower()
+        for position, name in enumerate(PRIORITY_SCHEMA_NAMES):
+            if name in low:
+                return (0, position, low)
+        return (1, 0, low)
+
+    return sorted(schemas, key=rank)
+
+
+def derive_allowed_schemas(warehouse, dialect: str) -> list[str]:
+    """Default schema allowlist: every non-system schema in the warehouse.
+
+    Deliberately NOT restricted to the org's dbt output schema (removed
+    2026-09-10): real questions often live in staging/intermediate tables the
+    dbt schema misses. The agent's prompt steers it to scan prod/intermediate/
+    staging first and to ask the user rather than comb everything else; an
+    admin can still pin the list via ChatWithDataOrgConfig.allowed_schemas."""
     if dialect == "bigquery":
         sql = "SELECT schema_name FROM INFORMATION_SCHEMA.SCHEMATA"
     else:
         sql = "SELECT schema_name FROM information_schema.schemata"
-    existing = {row["schema_name"] for row in warehouse.execute(sql)} - SYSTEM_SCHEMAS
-
-    if dbt_default_schema and dbt_default_schema in existing:
-        return [dbt_default_schema]
-    return sorted(existing)
+    existing = {
+        name
+        for row in warehouse.execute(sql)
+        if (name := row["schema_name"]) not in SYSTEM_SCHEMAS
+        and not name.startswith(SYSTEM_SCHEMA_PREFIXES)
+    }
+    return priority_sorted_schemas(list(existing))
 
 
 def build_run_context(orguser: OrgUser) -> RunContext:
@@ -63,9 +90,7 @@ def build_run_context(orguser: OrgUser) -> RunContext:
     if config and config.allowed_schemas:
         allowed_schemas = config.allowed_schemas
     else:
-        org_dbt: OrgDbt | None = org.dbt
-        dbt_schema = org_dbt.default_schema if org_dbt else None
-        allowed_schemas = derive_allowed_schemas(warehouse, dialect, dbt_schema)
+        allowed_schemas = derive_allowed_schemas(warehouse, dialect)
 
     granted = granted_permission_slugs(
         orguser,

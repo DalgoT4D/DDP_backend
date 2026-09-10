@@ -13,7 +13,11 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 
 from ddpui.core.ai.agent import context_builder as context_module
-from ddpui.core.ai.agent.context_builder import build_run_context, derive_allowed_schemas
+from ddpui.core.ai.agent.context_builder import (
+    build_run_context,
+    derive_allowed_schemas,
+    priority_sorted_schemas,
+)
 from ddpui.core.ai.agent.org_memory import MAX_ORG_MEMORY_CHARS
 from ddpui.models.chat_with_data import (
     ChatWithDataOrgConfig,
@@ -34,29 +38,42 @@ class SchemaWarehouse:
         return [{"schema_name": s} for s in self.schemas]
 
 
-def test_dbt_default_schema_wins_when_it_exists_in_warehouse():
-    warehouse = SchemaWarehouse(["prod", "staging", "raw_kobo"])
-    assert derive_allowed_schemas(warehouse, "postgres", dbt_default_schema="prod") == ["prod"]
-
-
-def test_falls_back_to_raw_schemas_when_org_has_no_dbt():
-    # decision 2 (research §4): raw-only orgs still get answers
-    warehouse = SchemaWarehouse(["raw_kobo", "raw_sheets"])
-    assert derive_allowed_schemas(warehouse, "postgres", dbt_default_schema=None) == [
+def test_all_non_system_schemas_are_offered_curated_first():
+    # dbt-schema-only restriction removed 2026-09-10: real questions often
+    # live in staging/intermediate tables the dbt output schema misses
+    warehouse = SchemaWarehouse(["raw_kobo", "staging", "prod", "intermediate"])
+    assert derive_allowed_schemas(warehouse, "postgres") == [
+        "prod",
+        "intermediate",
+        "staging",
         "raw_kobo",
-        "raw_sheets",
     ]
 
 
 def test_system_schemas_are_never_offered():
-    warehouse = SchemaWarehouse(["information_schema", "pg_catalog", "airbyte_internal", "raw_x"])
-    assert derive_allowed_schemas(warehouse, "postgres", dbt_default_schema=None) == ["raw_x"]
+    warehouse = SchemaWarehouse(
+        [
+            "information_schema",
+            "pg_catalog",
+            "pg_temp_12",  # per-connection temp schemas come and go
+            "pg_toast_temp_3",
+            "airbyte_internal",
+            "_airbyte_staging",  # must not leak in via the "staging" priority match
+            "raw_x",
+        ]
+    )
+    assert derive_allowed_schemas(warehouse, "postgres") == ["raw_x"]
 
 
-def test_stale_dbt_schema_falls_back_to_raw():
-    # dbt configured but its schema is gone from the warehouse — don't offer a ghost
-    warehouse = SchemaWarehouse(["raw_kobo"])
-    assert derive_allowed_schemas(warehouse, "postgres", dbt_default_schema="prod") == ["raw_kobo"]
+def test_priority_sort_matches_substrings_and_keeps_rest_alphabetical():
+    schemas = ["zebra", "analytics_staging", "production", "apple", "intermediate_v2"]
+    assert priority_sorted_schemas(schemas) == [
+        "production",  # "prod" matched as substring
+        "intermediate_v2",
+        "analytics_staging",
+        "apple",
+        "zebra",
+    ]
 
 
 # ── Context building (DB) ───────────────────────────────────────────────────

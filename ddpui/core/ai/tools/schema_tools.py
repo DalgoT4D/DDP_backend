@@ -6,9 +6,15 @@ and execute_sql, so PII controls only have those two surfaces to cover."""
 
 from langchain.tools import ToolRuntime, tool
 
+from ddpui.core.ai.agent.context_builder import priority_sorted_schemas
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools import catalog
 from ddpui.core.ai.tools.registry import register_tool
+
+# Quick-scan window: enough to spot the real tables in a curated schema, small
+# enough that a 140-table scratch schema doesn't flood the context. Largest
+# tables first — real data dwarfs leftover scratch/test tables.
+MAX_TABLES_LISTED = 20
 
 
 @register_tool
@@ -19,13 +25,17 @@ def list_schemas(runtime: ToolRuntime[RunContext]) -> str:
     ctx = runtime.context
     if not ctx.allowed_schemas:
         return "No schemas are available for this organization."
-    return "Available schemas:\n" + "\n".join(sorted(ctx.allowed_schemas))
+    return "Available schemas (scan them in this order):\n" + "\n".join(
+        priority_sorted_schemas(ctx.allowed_schemas)
+    )
 
 
 @register_tool
 @tool
 def list_tables(schema_name: str, runtime: ToolRuntime[RunContext]) -> str:
-    """List tables (with approximate row counts) in one schema."""
+    """List a schema's tables (largest first, with approximate row counts).
+    Shows at most 20 — if none of them match what the user asked for, ask the
+    user for the exact table name rather than hunting through more schemas."""
     ctx = runtime.context
     try:
         tables = catalog.list_table_names(ctx, schema_name)
@@ -33,10 +43,22 @@ def list_tables(schema_name: str, runtime: ToolRuntime[RunContext]) -> str:
         return str(err)
     if not tables:
         return f"Schema '{schema_name}' has no tables."
-    lines = [f"Tables in {schema_name}:"]
-    for name, approx in sorted(tables.items()):
+
+    def size(approx) -> int:
+        return int(approx) if approx is not None and approx >= 0 else -1
+
+    entries = sorted(tables.items(), key=lambda kv: (-size(kv[1]), kv[0]))
+    lines = [f"Tables in {schema_name} (largest first):"]
+    for name, approx in entries[:MAX_TABLES_LISTED]:
         suffix = f" (~{int(approx)} rows)" if approx is not None and approx >= 0 else ""
         lines.append(f"{name}{suffix}")
+    hidden = len(entries) - MAX_TABLES_LISTED
+    if hidden > 0:
+        lines.append(
+            f"...and {hidden} more tables not shown. If none of the above match "
+            "the question, ask the user for the exact table name instead of "
+            "searching further."
+        )
     return "\n".join(lines)
 
 

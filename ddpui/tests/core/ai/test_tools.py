@@ -106,6 +106,21 @@ def test_list_tables_shows_names_and_row_estimates():
     assert "surveys" in result and "~1284 rows" in result
 
 
+def test_list_tables_caps_at_twenty_largest_and_says_to_ask_the_user():
+    warehouse = FakeWarehouse()
+    # 30 tables: scratch_00..29 with rising row counts, plus one big real table
+    warehouse.catalog_rows = [
+        {"table_name": f"scratch_{i:02d}", "approx_rows": i} for i in range(30)
+    ] + [{"table_name": "surveys", "approx_rows": 99999}]
+    result = list_tables.func(schema_name="prod", runtime=make_runtime(warehouse))
+
+    lines = result.splitlines()
+    assert lines[1].startswith("surveys")  # largest first
+    assert "scratch_00" not in result  # smallest fell outside the window
+    assert "11 more tables not shown" in result
+    assert "ask the user for the exact table name" in result
+
+
 def test_list_tables_rejects_unknown_schema_with_guidance():
     result = list_tables.func(schema_name="secret", runtime=make_runtime())
     assert "not available" in result and "prod" in result
