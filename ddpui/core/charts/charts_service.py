@@ -163,7 +163,7 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
         # For other charts, include both dimension_col and extra_dimension if present
         if payload.dimension_col:
             final_dims.append(payload.dimension_col)
-        if payload.extra_dimension:
+        if payload.extra_dimension and payload.extra_dimension not in final_dims:
             final_dims.append(payload.extra_dimension)
 
     if not final_dims:

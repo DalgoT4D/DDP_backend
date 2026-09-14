@@ -91,6 +91,18 @@ class TestNormalizeDimensions:
         dims = normalize_dimensions(payload)
         assert dims == []
 
+    def test_normalize_dimensions_deduplicates_dimension_col_and_extra_dimension(self):
+        """Test that duplicate dimension_col and extra_dimension are deduplicated"""
+        payload = ChartDataPayload(
+            chart_type="bar",
+            schema_name="test_schema",
+            table_name="test_table",
+            dimension_col="category",
+            extra_dimension="category",
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == ["category"]
+
 
 class TestSQLAlchemyHandlesColumnNames:
     """
