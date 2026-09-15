@@ -8,9 +8,10 @@ from ddpui.core.trial.clone_service import clone_template_org
 from ddpui.core.trial.activation import release_clone_lock
 from ddpui.models.org_plans import OrgPlans
 from ddpui.schemas.trial_schema import TrialCloneRequest
-from ddpui.utils import awsses
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.email_templates import build_new_org_signup_email
+from ddpui.core.notifications.templates import build_new_org_signup_email
+from ddpui.core.notifications.triggers import biz_dev as biz_dev_notifications
+from ddpui.core.notifications.triggers import trial as trial_notifications
 
 logger = CustomLogger("ddpui.core.trial.tasks")
 
@@ -74,7 +75,7 @@ def clone_trial_org_task(
     # welcome email so the user gets in even if they closed the progress tab mid-clone
     try:
         login_url = settings.FRONTEND_URL_V2 or ""
-        awsses.send_trial_welcome_email(email, login_url)
+        trial_notifications.send_welcome(email, login_url)
     except Exception as err:  # skipcq PYL-W0703 — email failure must not fail the (done) clone
         logger.error(f"failed to send trial welcome email to {email}: {err}")
 
@@ -86,6 +87,6 @@ def clone_trial_org_task(
         subject, body = build_new_org_signup_email(
             run.trial_org, run.trial_orguser, org_plan, run.trial_org.created_at
         )
-        awsses.send_biz_dev_notification(subject, body)
+        biz_dev_notifications.send_notification(subject, body)
     except Exception as err:  # skipcq PYL-W0703
         logger.error(f"failed to send new-org notification for {email}: {err}")

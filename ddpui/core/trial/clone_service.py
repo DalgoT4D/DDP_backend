@@ -51,7 +51,8 @@ from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
 from ddpui.core.orgtaskfunctions import create_default_transform_tasks
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
-from ddpui.utils import awsses, feature_flags
+from ddpui.core.notifications.triggers import trial as trial_notifications
+from ddpui.utils import feature_flags
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.clone_service")
@@ -630,9 +631,9 @@ def _expire_plan_for_retry(org: Org) -> None:
 
 def _alert_teardown_leak(run: CloneRun) -> None:
     """Email engineering when teardown gave up. Deliberately terse — what leaked and why is in
-    the logs; this only has to get a human to go look. Never raises (see send_trial_ops_alert)."""
+    the logs; this only has to get a human to go look. Never raises (see send_ops_alert)."""
     org_slug = run.trial_org.slug if run.trial_org else "(no org)"
-    awsses.send_trial_ops_alert(
+    trial_notifications.send_ops_alert(
         f"teardown failed for {run.trial_email}",
         f"org: {org_slug}\n"
         f"email: {run.trial_email}\n\n"

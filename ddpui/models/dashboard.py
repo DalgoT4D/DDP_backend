@@ -82,6 +82,8 @@ class Dashboard(models.Model):
     is_published = models.BooleanField(default=False)
     published_at = models.DateTimeField(null=True, blank=True)
 
+    is_private = models.BooleanField(default=False)
+
     # Public sharing configuration
     is_public = models.BooleanField(
         default=False, help_text="If True, dashboard is accessible via public URL"
@@ -125,6 +127,20 @@ class Dashboard(models.Model):
     def __str__(self):
         return f"{self.title} ({self.dashboard_type})"
 
+    def component_ids(self, comp_type: str) -> list[int]:
+        """IDs of one component type across all tabs, deduplicated — the single
+        tabs[].components walk shared by reports, KPIs, and chat scope.
+        Components carry their id under "<type>Id" ("chart" -> "chartId")."""
+        id_key = f"{comp_type}Id"
+        ids = []
+        for tab in self.tabs or []:
+            for component in (tab.get("components") or {}).values():
+                if component.get("type") == comp_type:
+                    ref = component.get("config", {}).get(id_key)
+                    if ref:
+                        ids.append(ref)
+        return list(dict.fromkeys(ids))
+
     def to_json(self):
         """Return JSON representation"""
         return {
@@ -144,6 +160,7 @@ class Dashboard(models.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "is_org_default": self.is_org_default,
+            "is_private": self.is_private,
         }
 
     class Meta:

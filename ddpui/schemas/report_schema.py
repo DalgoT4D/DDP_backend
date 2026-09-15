@@ -4,9 +4,6 @@ from typing import Optional, Dict, Any, List
 from datetime import date, datetime
 from ninja import Schema, Field
 
-# Sharing schemas are shared with dashboards — import from dashboard_schema
-from ddpui.schemas.dashboard_schema import ShareToggle, ShareResponse, ShareStatus  # noqa: F401
-
 
 # Shared schemas
 
@@ -102,6 +99,13 @@ class SnapshotUpdate(Schema):
     summary: Optional[str] = Field(None, max_length=10000)
 
 
+class ExportPdfRequest(Schema):
+    """Currently-applied dashboard filter values, so the exported PDF reflects
+    what the viewer is looking at rather than always the configured defaults."""
+
+    dashboard_filters: Optional[Dict[str, Any]] = None
+
+
 # Response schemas
 
 
@@ -118,9 +122,11 @@ class SnapshotResponse(Schema):
     created_by: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    access_level: Optional[str] = None  # "view" | "edit"
+    is_private: bool = False
 
     @classmethod
-    def from_model(cls, snapshot) -> "SnapshotResponse":
+    def from_model(cls, snapshot, access_level: Optional[str] = None) -> "SnapshotResponse":
         """Create response from ReportSnapshot model instance"""
         return cls(
             id=snapshot.id,
@@ -135,6 +141,8 @@ class SnapshotResponse(Schema):
             created_by=snapshot.created_by.user.email if snapshot.created_by else None,
             created_at=snapshot.created_at,
             updated_at=snapshot.updated_at,
+            access_level=access_level,
+            is_private=snapshot.is_private,
         )
 
 
@@ -144,11 +152,14 @@ class SnapshotViewResponse(Schema):
     dashboard_data: Dict[str, Any]
     report_metadata: Dict[str, Any]
     frozen_chart_configs: Dict[str, Any]
+    access_level: Optional[str] = None  # "view" | "edit"
 
     @classmethod
-    def from_view_data(cls, view_data: dict) -> "SnapshotViewResponse":
+    def from_view_data(
+        cls, view_data: dict, access_level: Optional[str] = None
+    ) -> "SnapshotViewResponse":
         """Create response from view data dict"""
-        return cls(**view_data)
+        return cls(**view_data, access_level=access_level)
 
 
 class DatetimeColumnResponse(Schema):

@@ -134,7 +134,7 @@ def comment(snapshot, author_orguser, org):
 class TestProcessMentions:
     """Tests for MentionService.process_mentions orchestration"""
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_stores_and_notifies(self, mock_send, comment, org, author_orguser, mentioned_orguser):
         result = MentionService.process_mentions(
             comment, org, author_orguser, [mentioned_orguser.user.email]
@@ -146,13 +146,13 @@ class TestProcessMentions:
         assert mentioned_orguser.user.email in comment.mentioned_emails
         assert Notification.objects.count() == 1
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_empty_emails_noop(self, mock_send, comment, org, author_orguser):
         result = MentionService.process_mentions(comment, org, author_orguser, [])
         assert result == []
         assert Notification.objects.count() == 0
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_invalid_emails_ignored(self, mock_send, comment, org, author_orguser):
         result = MentionService.process_mentions(
             comment, org, author_orguser, ["nonexistent@test.com"]
@@ -160,7 +160,7 @@ class TestProcessMentions:
         assert result == []
         assert Notification.objects.count() == 0
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_filters_valid_only(self, mock_send, comment, org, author_orguser, mentioned_orguser):
         result = MentionService.process_mentions(
             comment,
@@ -203,7 +203,7 @@ class TestStoreMentionedEmails:
 class TestNotifyMentionedUsers:
     """Tests for MentionService.notify_mentioned_users"""
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_creates_in_app_notification(
         self, mock_send, comment, org, author_orguser, mentioned_orguser
     ):
@@ -218,7 +218,7 @@ class TestNotifyMentionedUsers:
         recipient = NotificationRecipient.objects.first()
         assert recipient.recipient == mentioned_orguser
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_sends_email_when_enabled(
         self, mock_send, comment, org, author_orguser, mentioned_orguser
     ):
@@ -234,7 +234,7 @@ class TestNotifyMentionedUsers:
         )
         mock_send.assert_called_once()
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_skips_email_when_disabled(
         self, mock_send, comment, org, author_orguser, mentioned_orguser
     ):
@@ -253,7 +253,7 @@ class TestNotifyMentionedUsers:
         assert Notification.objects.count() == 1
 
     @patch(
-        "ddpui.core.reports.mention_service.send_html_message",
+        "ddpui.core.notifications.triggers.mention.send_html_message",
         side_effect=Exception("SES error"),
     )
     def test_email_failure_no_raise(

@@ -18,11 +18,12 @@ from ddpui.core.alerts.exceptions import (
     AlertPermissionError,
     AlertValidationError,
 )
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org, OrgWarehouse
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, OrgUserGroup
+from ddpui.models.role_based_access import RolePermission
 from ddpui.schemas.alert_schema import (
     AlertCreate,
     AlertTestRequest,
@@ -36,7 +37,7 @@ logger = CustomLogger("ddpui.alert_service")
 
 
 VALID_CHANNELS = {"email", "slack"}
-VALID_RECIPIENT_TYPES = {"orguser", "external"}
+VALID_RECIPIENT_TYPES = {"orguser", "external", "user_group"}
 
 
 # ── Validation helpers ─────────────────────────────────────────────────────
@@ -51,7 +52,9 @@ def _validate_recipients(recipients: list, org: Org) -> None:
         email = r.get("email") if isinstance(r, dict) else r.email
 
         if rtype not in VALID_RECIPIENT_TYPES:
-            raise AlertValidationError(f"Recipient[{idx}]: type must be 'orguser' or 'external'")
+            raise AlertValidationError(
+                f"Recipient[{idx}]: type must be 'orguser', 'external', or 'user_group'"
+            )
         if rtype == "orguser":
             if not orguser_id:
                 raise AlertValidationError(
@@ -60,6 +63,16 @@ def _validate_recipients(recipients: list, org: Org) -> None:
             if not OrgUser.objects.filter(id=orguser_id, org=org).exists():
                 raise AlertValidationError(
                     f"Recipient[{idx}]: OrgUser {orguser_id} not in this org"
+                )
+        elif rtype == "user_group":
+            user_group_id = r.get("user_group_id") if isinstance(r, dict) else r.user_group_id
+            if not user_group_id:
+                raise AlertValidationError(
+                    f"Recipient[{idx}]: user_group_id is required for type='user_group'"
+                )
+            if not OrgUserGroup.objects.filter(id=user_group_id, org=org).exists():
+                raise AlertValidationError(
+                    f"Recipient[{idx}]: UserGroup {user_group_id} not in this org"
                 )
         else:  # external
             if not email:
@@ -129,7 +142,9 @@ class AlertService:
     @staticmethod
     def get_alert(alert_id: int, org: Org) -> Alert:
         try:
-            return Alert.objects.select_related("metric", "kpi").get(id=alert_id, org=org)
+            return Alert.objects.select_related("metric", "kpi", "created_by__user").get(
+                id=alert_id, org=org
+            )
         except Alert.DoesNotExist:
             raise AlertNotFoundError(alert_id)
 
@@ -155,7 +170,7 @@ class AlertService:
         )
         queryset = (
             Alert.objects.filter(query)
-            .select_related("metric", "kpi")
+            .select_related("metric", "kpi", "created_by__user")
             .annotate(latest_fire_at=Subquery(latest_fire.values("evaluated_at")[:1]))
             .order_by(F("latest_fire_at").desc(nulls_last=True), "-updated_at")
         )
@@ -170,7 +185,7 @@ class AlertService:
             ]
             queryset = (
                 Alert.objects.filter(id__in=ids)
-                .select_related("metric", "kpi")
+                .select_related("metric", "kpi", "created_by__user")
                 .annotate(latest_fire_at=Subquery(latest_fire.values("evaluated_at")[:1]))
                 .order_by(F("latest_fire_at").desc(nulls_last=True), "-updated_at")
             )
@@ -277,6 +292,9 @@ class AlertService:
     def update_alert(alert_id: int, org: Org, orguser: OrgUser, payload: AlertUpdate) -> Alert:
         alert = AlertService.get_alert(alert_id, org)
 
+        if not is_creator_or_admin(orguser, alert):
+            raise AlertPermissionError("Only the owner or an admin can edit this alert.")
+
         if payload.name is not None:
             if Alert.objects.filter(org=org, name=payload.name).exclude(id=alert_id).exists():
                 raise AlertValidationError(f"An alert named '{payload.name}' already exists")
@@ -356,9 +374,79 @@ class AlertService:
     @staticmethod
     def toggle_alert(alert_id: int, org: Org, orguser: OrgUser, is_active: bool) -> Alert:
         alert = AlertService.get_alert(alert_id, org)
+        if not is_creator_or_admin(orguser, alert):
+            raise AlertPermissionError("Only the owner or an admin can toggle this alert.")
         alert.is_active = is_active
         alert.last_modified_by = orguser
         alert.save(update_fields=["is_active", "last_modified_by", "updated_at"])
+        return alert
+
+    # --- transfer ownership ---
+
+    @staticmethod
+    def list_transfer_candidates(alert_id: int, org: Org, caller: OrgUser) -> List[dict]:
+        """Org members eligible to receive ownership of the alert.
+
+        Eligibility: same org, and their role holds ``can_edit_alerts`` (so
+        they can actually manage the alert after transfer). Excludes the
+        current owner. Only the current owner or an Admin may see this list.
+        """
+        alert = AlertService.get_alert(alert_id, org)
+        if not is_creator_or_admin(caller, alert):
+            raise AlertPermissionError("Only the owner or an admin can transfer this alert.")
+
+        eligible_role_ids = (
+            RolePermission.objects.filter(permission__slug="can_edit_alerts")
+            .values_list("role_id", flat=True)
+            .distinct()
+        )
+        rows = (
+            OrgUser.objects.filter(org=org, new_role_id__in=eligible_role_ids)
+            .exclude(id=alert.created_by_id)
+            .select_related("user", "new_role")
+        )
+        return [
+            {
+                "orguser_id": ou.id,
+                "email": ou.user.email,
+                "role_name": ou.new_role.name if ou.new_role else None,
+            }
+            for ou in rows
+        ]
+
+    @staticmethod
+    def transfer_ownership(alert_id: int, org: Org, caller: OrgUser, to_orguser_id: int) -> Alert:
+        """Set ``alert.created_by`` to another org member.
+
+        Rules:
+        - Caller must be the current owner or Admin.
+        - Recipient must be in the same org.
+        - Recipient must hold ``can_edit_alerts`` via their role, so the
+          transfer produces a manageable owner. (Alerts have no per-resource
+          shares, so we can only check the role floor.)
+        """
+        alert = AlertService.get_alert(alert_id, org)
+        if not is_creator_or_admin(caller, alert):
+            raise AlertPermissionError("Only the owner or an admin can transfer this alert.")
+
+        recipient = OrgUser.objects.filter(org=org, id=to_orguser_id).first()
+        if recipient is None:
+            raise AlertValidationError("recipient not found in this org")
+
+        if recipient.id == alert.created_by_id:
+            return alert  # no-op
+
+        has_edit = (
+            recipient.new_role_id is not None
+            and RolePermission.objects.filter(
+                role_id=recipient.new_role_id, permission__slug="can_edit_alerts"
+            ).exists()
+        )
+        if not has_edit:
+            raise AlertValidationError("recipient's role does not include Edit Alerts permission")
+
+        alert.created_by = recipient
+        alert.save(update_fields=["created_by"])
         return alert
 
     @staticmethod
@@ -367,7 +455,7 @@ class AlertService:
         audit log) don't need a separate fetch of their own."""
         alert = AlertService.get_alert(alert_id, org)
         # Only allow deletion if the user is the owner (creator) or an admin
-        if not can_delete_resource(orguser, alert):
+        if not is_creator_or_admin(orguser, alert):
             raise AlertPermissionError("Only the owner or an admin can delete this alert.")
         alert_name = alert.name
         alert.delete()

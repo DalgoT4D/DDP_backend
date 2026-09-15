@@ -1670,7 +1670,7 @@ def test_teardown_survives_an_org_with_no_plan_row(
     assert not OrgPlans.objects.filter(org=trial_org).exists()
 
 
-@patch("ddpui.core.trial.clone_service.awsses.send_trial_ops_alert")
+@patch("ddpui.core.trial.clone_service.trial_notifications.send_ops_alert")
 @patch("ddpui.core.trial.clone_service.time.sleep")
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")
@@ -1699,7 +1699,7 @@ def test_teardown_alerts_engineering_when_it_gives_up(
     assert "cleanup_trial_clone --email a@b.org" in body
 
 
-@patch("ddpui.core.trial.clone_service.awsses.send_trial_ops_alert")
+@patch("ddpui.core.trial.clone_service.trial_notifications.send_ops_alert")
 @patch("ddpui.core.trial.clone_service.time.sleep")
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")
@@ -1722,7 +1722,7 @@ def test_teardown_does_not_alert_when_it_succeeds(
     mock_alert.assert_not_called()
 
 
-@patch("ddpui.core.trial.clone_service.awsses.send_trial_ops_alert")
+@patch("ddpui.core.trial.clone_service.trial_notifications.send_ops_alert")
 @patch("ddpui.core.trial.clone_service.time.sleep")
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")
@@ -1775,7 +1775,7 @@ def test_teardown_sends_exactly_one_alert_even_when_both_actions_fail(
     assert "trial-1mail" in mock_alert.call_args.args[1]
 
 
-@patch("ddpui.core.trial.clone_service.awsses.send_trial_ops_alert")
+@patch("ddpui.core.trial.clone_service.trial_notifications.send_ops_alert")
 @patch("ddpui.core.trial.clone_service.time.sleep")
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")

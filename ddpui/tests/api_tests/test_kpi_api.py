@@ -172,7 +172,7 @@ class TestCreateKPI:
 class TestGetKPI:
     def test_get_success(self, orguser, sample_kpi, seed_db):
         request = mock_request(orguser)
-        response = get_kpi(request, sample_kpi.id)
+        response = get_kpi(request, kpi_id=sample_kpi.id)
         assert response.id == sample_kpi.id
         assert response.metric.id == sample_kpi.metric_id
         assert response.created_by == "kpiapiuser@test.com"
@@ -180,7 +180,7 @@ class TestGetKPI:
     def test_get_not_found(self, orguser, seed_db):
         request = mock_request(orguser)
         with pytest.raises(HttpError) as exc_info:
-            get_kpi(request, 99999)
+            get_kpi(request, kpi_id=99999)
         assert exc_info.value.status_code == 404
 
 
@@ -190,7 +190,7 @@ class TestUpdateKPI:
         payload = KPIUpdate(
             name="Updated API KPI", target_value=2000.0, extra_config=KPIExtraConfig()
         )
-        response = update_kpi(request, sample_kpi.id, payload)
+        response = update_kpi(request, kpi_id=sample_kpi.id, payload=payload)
         assert response.name == "Updated API KPI"
         assert response.target_value == 2000.0
 
@@ -198,20 +198,20 @@ class TestUpdateKPI:
         request = mock_request(orguser)
         payload = KPIUpdate(name="Nope", extra_config=KPIExtraConfig())
         with pytest.raises(HttpError) as exc_info:
-            update_kpi(request, 99999, payload)
+            update_kpi(request, kpi_id=99999, payload=payload)
         assert exc_info.value.status_code == 404
 
 
 class TestDeleteKPI:
     def test_delete_success(self, orguser, sample_kpi, seed_db):
         request = mock_request(orguser)
-        response = delete_kpi(request, sample_kpi.id)
+        response = delete_kpi(request, kpi_id=sample_kpi.id)
         assert response["success"] is True
 
     def test_delete_not_found(self, orguser, seed_db):
         request = mock_request(orguser)
         with pytest.raises(HttpError) as exc_info:
-            delete_kpi(request, 99999)
+            delete_kpi(request, kpi_id=99999)
         assert exc_info.value.status_code == 404
 
 
@@ -264,7 +264,7 @@ class TestKPIAuditLogs:
             extra_config=KPIExtraConfig(),
         )
 
-        response = update_kpi(request, sample_kpi.id, payload)
+        response = update_kpi(request, kpi_id=sample_kpi.id, payload=payload)
 
         assert response.name == "Updated KPI Name"
         mock_audit_log.assert_called_once()
@@ -301,7 +301,7 @@ class TestKPIAuditLogs:
         payload = KPIUpdate(metric_id=other_metric.id, extra_config=KPIExtraConfig())
 
         try:
-            update_kpi(request, sample_kpi.id, payload)
+            update_kpi(request, kpi_id=sample_kpi.id, payload=payload)
 
             call_kwargs = mock_audit_log.call_args[1]
             resource_fields = call_kwargs["resource_fields"]
@@ -332,7 +332,7 @@ class TestKPIAuditLogs:
         kpi_id = kpi.id
 
         request = mock_request(orguser)
-        delete_kpi(request, kpi_id)
+        delete_kpi(request, kpi_id=kpi_id)
 
         mock_audit_log.assert_called_once()
         call_kwargs = mock_audit_log.call_args[1]

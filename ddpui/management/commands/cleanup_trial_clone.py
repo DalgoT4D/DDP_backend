@@ -45,7 +45,7 @@ from ddpui.core.trial.constants import (
 )
 from ddpui.core.trial.signup_record import record_deletion
 from ddpui.core.trial.warehouse_provision import drop_trial_database, email_hash8
-from ddpui.utils import awsses
+from ddpui.core.notifications.triggers import trial as trial_notifications
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -151,7 +151,7 @@ class Command(BaseCommand):
         and tracebacks stay in the logs.
         """
         listed = "\n".join(f"- {slug}" for slug, _ in failures)
-        awsses.send_trial_ops_alert(
+        trial_notifications.send_ops_alert(
             f"cleanup failed for {len(failures)} org(s)",
             f"{listed}\n\n"
             "Retries next hour. If the same orgs keep appearing:\n"

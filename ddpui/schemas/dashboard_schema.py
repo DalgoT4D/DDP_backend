@@ -78,12 +78,17 @@ class DashboardResponse(Schema):
     published_at: Optional[datetime] = None
     is_locked: bool = False
     locked_by: Optional[str] = None
+    is_favorite: bool = False
     created_by: Optional[str] = None  # creator's email; None if the creator was deleted
     org_id: int
     last_modified_by: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     filters: List[DashboardFilterResponse] = []
+    # The requestor's own level on this dashboard ("view" | "edit") — the UI
+    # mirrors enforcement from this; never "no_access" (those rows are hidden).
+    access_level: Optional[str] = None
+    is_private: bool = False
 
 
 # =============================================================================
@@ -141,42 +146,6 @@ class LockResponse(Schema):
     lock_token: str
     expires_at: datetime
     locked_by: str
-
-
-# =============================================================================
-# Sharing Schemas
-# =============================================================================
-
-
-class ShareToggle(Schema):
-    """Schema for toggling public sharing (used by dashboards and reports)"""
-
-    is_public: bool
-
-
-class ShareResponse(Schema):
-    """Schema for share response (used by dashboards and reports)"""
-
-    is_public: bool
-    public_url: Optional[str] = None
-    public_share_token: Optional[str] = None
-    message: str
-
-
-class ShareStatus(Schema):
-    """Schema for share status response (used by dashboards and reports)"""
-
-    is_public: bool
-    public_url: Optional[str] = None
-    public_access_count: int
-    last_public_accessed: Optional[datetime] = None
-    public_shared_at: Optional[datetime] = None
-
-
-# Backwards-compatible aliases
-DashboardShareToggle = ShareToggle
-DashboardShareResponse = ShareResponse
-DashboardShareStatus = ShareStatus
 
 
 # =============================================================================
