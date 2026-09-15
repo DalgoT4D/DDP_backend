@@ -58,7 +58,10 @@ def pydantic_validation_error_handler(
     These are raised during response payload validation
     exc.errors() is correct
     """
-    return Response({"detail": exc.errors()}, status=500)
+    try:
+        return Response({"detail": exc.errors()}, status=500)
+    except TypeError:
+        return Response({"detail": str(exc.errors())}, status=500)
 
 
 @src_api.exception_handler(Exception)
