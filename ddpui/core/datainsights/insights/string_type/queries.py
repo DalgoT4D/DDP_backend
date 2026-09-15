@@ -245,7 +245,7 @@ class StringLengthStats(ColInsight):
                     ),
                     "other_modes": [
                         (float(other_mode) if other_mode else None)
-                        for other_mode in result[0]["other_modes"]
+                        for other_mode in (result[0]["other_modes"] or [])
                     ],
                 }
             }
