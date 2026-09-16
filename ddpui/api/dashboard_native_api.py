@@ -22,6 +22,7 @@ from ddpui.models.resource_share import AccessLevel, AccessRequest, ResourceShar
 from ddpui.core.access import access_control
 from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.core.access.resource_share import sync_dashboard_cascade
+from ddpui.utils.constants import MAX_IMAGE_UPLOAD_SIZE_BYTES
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -33,12 +34,9 @@ from ddpui.services.dashboard_service import (
     DashboardServiceError,
     FilterNotFoundError,
     FilterValidationError,
-    MAX_WIDGET_IMAGE_SIZE_BYTES,
-    WidgetImagePermissionError,
     WidgetImageStorageError,
     WidgetImageValidationError,
     delete_dashboard_safely,
-    delete_widget_image,
     remap_widget_images,
     upload_widget_image,
 )
@@ -54,7 +52,6 @@ from ddpui.schemas.dashboard_schema import (
     LockResponse,
     LandingPageResponse,
     LandingPageResolveResponse,
-    WidgetImageDeleteRequest,
     WidgetImageUploadResponse,
 )
 from ddpui.core.audit_log_service import create_audit_log
@@ -126,7 +123,7 @@ def upload_dashboard_widget_image(request, file: UploadedFile = File(...)):
 
     # Checked from file.size (multipart metadata) before reading, so an oversized
     # upload is rejected without first loading its whole content into memory.
-    if file.size is not None and file.size > MAX_WIDGET_IMAGE_SIZE_BYTES:
+    if file.size is not None and file.size > MAX_IMAGE_UPLOAD_SIZE_BYTES:
         raise HttpError(400, "File size exceeds the 5MB limit")
 
     try:
@@ -141,25 +138,6 @@ def upload_dashboard_widget_image(request, file: UploadedFile = File(...)):
         raise HttpError(502, err.message) from err
 
     return WidgetImageUploadResponse(image_url=image_url, image_key=image_key)
-
-
-@dashboard_native_router.delete("/images/")
-@has_permission(["can_edit_dashboards"])
-def delete_dashboard_widget_image(request, payload: WidgetImageDeleteRequest):
-    """Delete a dashboard widget image from S3 (on explicit remove, or when
-    replacing an image with a new upload)."""
-    orguser: OrgUser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "no associated org")
-
-    try:
-        delete_widget_image(payload.image_key, orguser.org)
-    except WidgetImagePermissionError as err:
-        raise HttpError(403, err.message) from err
-    except WidgetImageStorageError as err:
-        raise HttpError(502, err.message) from err
-
-    return {"success": True}
 
 
 @dashboard_native_router.get("/{dashboard_id}/", response=DashboardResponse)

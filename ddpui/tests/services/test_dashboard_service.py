@@ -39,7 +39,6 @@ from ddpui.services.dashboard_service import (
     WidgetImagePermissionError,
     WidgetImageStorageError,
     upload_widget_image,
-    delete_widget_image,
     copy_widget_image,
 )
 from ddpui.schemas.dashboard_schema import DashboardCreate, DashboardUpdate, DashboardTabSchema
@@ -706,7 +705,7 @@ class TestUpdateDashboardTabs:
 
 
 # ================================================================================
-# Test upload_widget_image / delete_widget_image (dashboard text/image widgets)
+# Test upload_widget_image (dashboard text/image widgets)
 # ================================================================================
 
 
@@ -768,69 +767,6 @@ class TestUploadWidgetImage:
         ):
             with pytest.raises(WidgetImageStorageError):
                 upload_widget_image(b"fake-bytes", "image/png", org)
-
-
-class TestDeleteWidgetImage:
-    """Tests for delete_widget_image()"""
-
-    def test_delete_widget_image_wrong_org_prefix(self, org):
-        """Test that a key outside this org's own prefix is rejected without touching S3"""
-        with pytest.raises(WidgetImagePermissionError):
-            delete_widget_image("orgs/some-other-org/dashboards/images/file.png", org)
-
-    def test_delete_widget_image_success(self, org, monkeypatch):
-        """Test a successful delete calls S3 with the right bucket/key"""
-        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
-        image_key = f"orgs/{org.pk}/dashboards/images/file.png"
-
-        with patch("ddpui.services.dashboard_service.delete_file") as mock_delete:
-            delete_widget_image(image_key, org)
-
-        mock_delete.assert_called_once_with("test-bucket", image_key)
-
-    def test_delete_widget_image_s3_failure(self, org, monkeypatch):
-        """Test that an S3 delete failure surfaces as a storage error"""
-        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
-        image_key = f"orgs/{org.pk}/dashboards/images/file.png"
-
-        with patch(
-            "ddpui.services.dashboard_service.delete_file",
-            side_effect=Exception("S3 unavailable"),
-        ):
-            with pytest.raises(WidgetImageStorageError):
-                delete_widget_image(image_key, org)
-
-    def test_delete_widget_image_duplicate_slug_cannot_access_other_orgs_image(self, org):
-        """Two orgs sharing the same slug (slug is nullable and has no uniqueness
-        constraint — see models/org.py) must NOT be able to delete each other's
-        images. The ownership check is keyed by org.pk precisely to prevent this."""
-        other_org = Org.objects.create(
-            name="Another Org With Same Slug",
-            slug=org.slug,  # deliberately identical — slug is not unique-enforced
-            airbyte_workspace_id="workspace-id-dup-slug",
-        )
-        image_key = f"orgs/{org.pk}/dashboards/images/file.png"
-
-        try:
-            with pytest.raises(WidgetImagePermissionError):
-                delete_widget_image(image_key, other_org)
-        finally:
-            other_org.delete()
-
-    def test_delete_widget_image_survives_org_slug_change(self, org, monkeypatch):
-        """Changing an org's slug after an image was uploaded must not break
-        deleting that image later — the key is scoped by the immutable org.pk,
-        not the mutable slug."""
-        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
-        image_key = f"orgs/{org.pk}/dashboards/images/file.png"
-
-        org.slug = "a-brand-new-slug"
-        org.save()
-
-        with patch("ddpui.services.dashboard_service.delete_file") as mock_delete:
-            delete_widget_image(image_key, org)
-
-        mock_delete.assert_called_once_with("test-bucket", image_key)
 
 
 class TestCopyWidgetImage:

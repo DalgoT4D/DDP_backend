@@ -179,15 +179,10 @@ class WidgetImageUploadResponse(Schema):
 
     Unlike the org logo, this isn't persisted to any model field — a
     dashboard can hold many widget images, each embedded inline in that
-    dashboard's own JSON config. image_key is returned so the frontend can
-    pass it back later to delete the file when the image is removed/replaced.
+    dashboard's own JSON config. image_key is stored there too so the
+    backend can locate the S3 object later (e.g. copy_widget_image on
+    duplicate/clone).
     """
 
     image_url: str
     image_key: str
-
-
-class WidgetImageDeleteRequest(Schema):
-    """Request schema for deleting a dashboard widget image from S3"""
-
-    image_key: str = Field(..., min_length=1)

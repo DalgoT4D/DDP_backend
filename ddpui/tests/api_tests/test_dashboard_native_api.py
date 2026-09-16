@@ -45,7 +45,6 @@ from ddpui.api.dashboard_native_api import (
     set_personal_landing_dashboard,
     set_org_default_dashboard,
     upload_dashboard_widget_image,
-    delete_dashboard_widget_image,
 )
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
@@ -53,11 +52,9 @@ from ddpui.schemas.dashboard_schema import (
     DashboardTabSchema,
     FilterCreate,
     FilterUpdate,
-    WidgetImageDeleteRequest,
 )
 from ddpui.services.dashboard_service import (
     WidgetImageValidationError,
-    WidgetImagePermissionError,
 )
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
@@ -1178,7 +1175,7 @@ def test_set_org_default_dashboard_creates_audit_log(
 
 
 # ================================================================================
-# Test upload_dashboard_widget_image / delete_dashboard_widget_image endpoints
+# Test upload_dashboard_widget_image endpoint
 # ================================================================================
 
 
@@ -1221,36 +1218,3 @@ class TestUploadDashboardWidgetImage:
                 upload_dashboard_widget_image(request, file=file)
 
         assert excinfo.value.status_code == 400
-
-
-class TestDeleteDashboardWidgetImage:
-    """Tests for delete_dashboard_widget_image endpoint"""
-
-    def test_delete_widget_image_success(self, orguser, seed_db):
-        """Test a successful delete forwards the image key and org to the service"""
-        request = mock_request(orguser)
-        payload = WidgetImageDeleteRequest(
-            image_key=f"orgs/{orguser.org.pk}/dashboards/images/file.png"
-        )
-
-        with patch("ddpui.api.dashboard_native_api.delete_widget_image") as mock_delete:
-            response = delete_dashboard_widget_image(request, payload=payload)
-
-        assert response == {"success": True}
-        mock_delete.assert_called_once_with(payload.image_key, orguser.org)
-
-    def test_delete_widget_image_permission_error_returns_403(self, orguser, seed_db):
-        """Test that a cross-org key rejection from the service surfaces as HTTP 403"""
-        request = mock_request(orguser)
-        payload = WidgetImageDeleteRequest(
-            image_key="orgs/some-other-org/dashboards/images/file.png"
-        )
-
-        with patch(
-            "ddpui.api.dashboard_native_api.delete_widget_image",
-            side_effect=WidgetImagePermissionError(),
-        ):
-            with pytest.raises(HttpError) as excinfo:
-                delete_dashboard_widget_image(request, payload=payload)
-
-        assert excinfo.value.status_code == 403

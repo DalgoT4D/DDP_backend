@@ -41,9 +41,14 @@ from ddpui.core.charts.charts_service import (
     transform_data_for_chart,
 )
 from ddpui.schemas.dashboard_schema import DashboardTabSchema
+from ddpui.utils.constants import (
+    ALLOWED_IMAGE_CONTENT_TYPES,
+    MAX_IMAGE_UPLOAD_SIZE_BYTES,
+    IMAGE_CONTENT_TYPE_TO_EXT,
+)
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
-from ddpui.utils.s3_utils import upload_file, delete_file, copy_file
+from ddpui.utils.s3_utils import upload_file, copy_file
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.schemas.dashboard_schema import DashboardUpdate, FilterUpdate
 
@@ -1177,15 +1182,6 @@ def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, 
 # Widget Images (dashboard text/image widgets)
 # =============================================================================
 
-ALLOWED_WIDGET_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-MAX_WIDGET_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
-WIDGET_IMAGE_CONTENT_TYPE_TO_EXT = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/gif": "gif",
-    "image/webp": "webp",
-}
-
 
 def _get_widget_image_bucket() -> str:
     bucket = os.getenv("S3_IMAGES_BUCKET")
@@ -1202,19 +1198,19 @@ def upload_widget_image(file_bytes: bytes, content_type: str, org: Org) -> Tuple
     dashboard's own JSON config — so this only returns (url, key) for the
     caller to store there.
     """
-    if content_type not in ALLOWED_WIDGET_IMAGE_CONTENT_TYPES:
+    if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
         raise WidgetImageValidationError(
             f"Invalid file type: {content_type}. Allowed types: "
-            f"{', '.join(sorted(ALLOWED_WIDGET_IMAGE_CONTENT_TYPES))}"
+            f"{', '.join(sorted(ALLOWED_IMAGE_CONTENT_TYPES))}"
         )
-    if len(file_bytes) > MAX_WIDGET_IMAGE_SIZE_BYTES:
+    if len(file_bytes) > MAX_IMAGE_UPLOAD_SIZE_BYTES:
         raise WidgetImageValidationError("File size exceeds the 5MB limit")
 
     bucket = _get_widget_image_bucket()
-    ext = WIDGET_IMAGE_CONTENT_TYPE_TO_EXT[content_type]
+    ext = IMAGE_CONTENT_TYPE_TO_EXT[content_type]
     # Keyed by org.pk, not org.slug — slug is nullable and not unique-enforced
     # (plain slugify(org.name) with no collision check), so two orgs could share
-    # a slug and pass each other's ownership check in delete_widget_image below.
+    # a slug and pass each other's ownership check in copy_widget_image below.
     # pk is the DB-guaranteed-unique, immutable identifier this needs.
     image_key = f"orgs/{org.pk}/dashboards/images/{uuid.uuid4()}.{ext}"
     try:
@@ -1225,26 +1221,6 @@ def upload_widget_image(file_bytes: bytes, content_type: str, org: Org) -> Tuple
 
     logger.info(f"Uploaded dashboard widget image for {org.slug} to s3://{bucket}/{image_key}")
     return image_url, image_key
-
-
-def delete_widget_image(image_key: str, org: Org) -> None:
-    """Delete a dashboard widget image from S3.
-
-    Only deletes keys under this org's own prefix, so one org can't delete
-    another org's S3 objects by passing an arbitrary key. Keyed by org.pk (see
-    upload_widget_image) rather than slug, which isn't guaranteed unique.
-    """
-    expected_prefix = f"orgs/{org.pk}/dashboards/images/"
-    if not image_key.startswith(expected_prefix):
-        raise WidgetImagePermissionError()
-
-    bucket = _get_widget_image_bucket()
-    try:
-        delete_file(bucket, image_key)
-    except Exception as err:
-        logger.error(f"S3 delete failed for widget image {image_key}: {err}")
-        raise WidgetImageStorageError("Failed to delete image from S3") from err
-    logger.info(f"Deleted dashboard widget image s3://{bucket}/{image_key}")
 
 
 def copy_widget_image(image_key: str, source_org: Org, dest_org: Org) -> Tuple[str, str]:
