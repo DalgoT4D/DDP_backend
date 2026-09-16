@@ -46,6 +46,7 @@ from ddpui.schemas.chart_schemas.data import (
     ChartDataResponse,
     DataPreviewResponse,
     ExecuteChartQuery,
+    MapDataOverlayPayload,
     TransformDataForChart,
 )
 from ddpui.schemas.chart_schemas.geojson import (
@@ -98,6 +99,7 @@ __all__ = [
     "ChartDataResponse",
     "DataPreviewResponse",
     "ExecuteChartQuery",
+    "MapDataOverlayPayload",
     "TransformDataForChart",
     # geojson
     "GeoJSONListResponse",

@@ -82,14 +82,24 @@ def test_analyst_keeps_infra_view_loses_infra_write(seed_db):
     } <= analyst
 
 
-def test_member_is_view_only_content(seed_db):
+def test_member_content_permissions(seed_db):
+    # resource-sharing model: members can fully manage their own content;
+    # access-control (is_private + org floor + explicit shares) governs visibility.
     member = slugs_for("member")
-    # can view the four content resources
+    # can view all four content types
     assert CONTENT_VIEW <= member
-    # strictly view-only: every slug is a view slug or an explicitly allowed non-view
-    # basic — a blocklist of write prefixes would let can_run_* / can_sync_* slip through
-    allowed_non_view = {"can_request_llm_analysis_feature", "public"}
-    non_view = {s for s in member if not s.startswith("can_view_")}
-    assert non_view <= allowed_non_view
-    # no infra visibility
-    assert not (INFRA_VIEW & member)
+    # can manage their own content resources
+    assert {
+        "can_create_dashboards",
+        "can_edit_dashboards",
+        "can_delete_dashboards",
+        "can_share_dashboards",
+    } <= member
+    assert {"can_create_charts", "can_edit_charts", "can_delete_charts"} <= member
+    assert {"can_create_kpis", "can_edit_kpis", "can_delete_kpis"} <= member
+    # can invite other users (needed for sharing workflows)
+    assert "can_create_invitation" in member
+    # infra permissions are blocked: members cannot touch pipelines, dbt, sources
+    assert not (INFRA_WRITE & member)
+    member_infra_block = INFRA_VIEW - {"can_view_warehouses"}
+    assert not (member_infra_block & member)

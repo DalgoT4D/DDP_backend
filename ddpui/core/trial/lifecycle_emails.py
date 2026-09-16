@@ -20,12 +20,12 @@ from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.schemas.userpreferences_schema import TrialWalkthroughFlowState
-from ddpui.utils.awsses import (
-    send_trial_day3_not_started_email,
-    send_trial_day3_in_progress_email,
-    send_trial_completion_email,
-    send_trial_midpoint_email,
-    send_trial_pre_end_email,
+from ddpui.core.notifications.triggers.trial import (
+    send_completion,
+    send_day3_in_progress,
+    send_day3_not_started,
+    send_midpoint,
+    send_pre_end,
 )
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -182,15 +182,15 @@ def send_decided_email(kind, to_email, completed, day_number, total_days, end_da
 
     if kind == EMAIL_DAY3:
         if completed:
-            send_trial_day3_in_progress_email(to_email, completed[0], workspace_url, call_url)
+            send_day3_in_progress(to_email, completed[0], workspace_url, call_url)
         else:
-            send_trial_day3_not_started_email(to_email, workspace_url, call_url)
+            send_day3_not_started(to_email, workspace_url, call_url)
     elif kind == EMAIL_COMPLETION:
-        send_trial_completion_email(to_email, workspace_url, call_url)
+        send_completion(to_email, workspace_url, call_url)
     elif kind == EMAIL_MIDPOINT:
-        send_trial_midpoint_email(to_email, day_number, total_days, call_url)
+        send_midpoint(to_email, day_number, total_days, call_url)
     elif kind == EMAIL_PRE_END:
-        send_trial_pre_end_email(
+        send_pre_end(
             to_email,
             day_number,
             total_days,

@@ -1766,5 +1766,170 @@
             "role": 5,
             "permission": 82
         }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 222,
+        "fields": { "role": 1, "permission": 86 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 223,
+        "fields": { "role": 1, "permission": 87 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 224,
+        "fields": { "role": 1, "permission": 88 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 225,
+        "fields": { "role": 1, "permission": 89 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 226,
+        "fields": { "role": 2, "permission": 86 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 227,
+        "fields": { "role": 2, "permission": 87 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 228,
+        "fields": { "role": 2, "permission": 88 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 229,
+        "fields": { "role": 2, "permission": 89 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 230,
+        "fields": { "role": 4, "permission": 86 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 231,
+        "fields": { "role": 4, "permission": 87 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 232,
+        "fields": { "role": 4, "permission": 88 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 233,
+        "fields": { "role": 4, "permission": 89 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 234,
+        "fields": { "role": 1, "permission": 90 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 235,
+        "fields": { "role": 2, "permission": 90 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 236,
+        "fields": { "role": 1, "permission": 91 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 237,
+        "fields": { "role": 2, "permission": 91 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 238,
+        "fields": { "role": 1, "permission": 92 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 239,
+        "fields": { "role": 2, "permission": 92 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 240,
+        "fields": { "role": 4, "permission": 92 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 241,
+        "fields": { "role": 5, "permission": 45 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 242,
+        "fields": { "role": 5, "permission": 6 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 243,
+        "fields": { "role": 5, "permission": 69 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 244,
+        "fields": { "role": 5, "permission": 66 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 245,
+        "fields": { "role": 5, "permission": 79 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 246,
+        "fields": { "role": 5, "permission": 70 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 247,
+        "fields": { "role": 5, "permission": 67 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 248,
+        "fields": { "role": 5, "permission": 80 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 249,
+        "fields": { "role": 5, "permission": 71 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 250,
+        "fields": { "role": 5, "permission": 68 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 251,
+        "fields": { "role": 5, "permission": 81 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 252,
+        "fields": { "role": 5, "permission": 72 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 253,
+        "fields": { "role": 4, "permission": 51 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 254,
+        "fields": { "role": 5, "permission": 51 }
     }
 ]

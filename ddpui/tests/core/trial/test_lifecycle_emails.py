@@ -25,7 +25,7 @@ from ddpui.core.trial.lifecycle_emails import (
     trial_window,
     run_trial_lifecycle_sweep,
 )
-from ddpui.utils.email_templates import TRIAL_FLOW_COPY
+from ddpui.core.notifications.templates import TRIAL_FLOW_COPY
 
 
 UTC = pytz.UTC
@@ -240,7 +240,7 @@ def _make_trial(slug, days_ago, completed=(), plan=OrgPlanType.FREE_TRIAL.value,
 def test_sweep_sends_not_started_email_on_day_three():
     """a day-3 trial with nothing completed gets email A and is flagged"""
     org, orguser = _make_trial("trial-a", days_ago=3)
-    with patch("ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email") as mock_send:
+    with patch("ddpui.core.trial.lifecycle_emails.send_day3_not_started") as mock_send:
         assert run_trial_lifecycle_sweep() == 1
         mock_send.assert_called_once()
         assert mock_send.call_args[0][0] == "trial-a@x.org"
@@ -252,7 +252,7 @@ def test_sweep_sends_not_started_email_on_day_three():
 def test_sweep_sends_in_progress_email_with_the_completed_flow():
     """one completed flow routes to email B, and the flow name is passed through"""
     _make_trial("trial-b", days_ago=3, completed=("insights",))
-    with patch("ddpui.core.trial.lifecycle_emails.send_trial_day3_in_progress_email") as mock_send:
+    with patch("ddpui.core.trial.lifecycle_emails.send_day3_in_progress") as mock_send:
         assert run_trial_lifecycle_sweep() == 1
         assert mock_send.call_args[0][1] == "insights"
 
@@ -260,7 +260,7 @@ def test_sweep_sends_in_progress_email_with_the_completed_flow():
 def test_sweep_sends_completion_email_and_stamps_both_flags():
     """both flows complete sends C and locks out the day-3 email"""
     _, orguser = _make_trial("trial-c", days_ago=5, completed=("insights", "automate_pipeline"))
-    with patch("ddpui.core.trial.lifecycle_emails.send_trial_completion_email") as mock_send:
+    with patch("ddpui.core.trial.lifecycle_emails.send_completion") as mock_send:
         assert run_trial_lifecycle_sweep() == 1
         mock_send.assert_called_once()
 
@@ -272,7 +272,7 @@ def test_sweep_sends_completion_email_and_stamps_both_flags():
 def test_sweep_is_idempotent():
     """a second sweep with unchanged state sends nothing"""
     _make_trial("trial-d", days_ago=3)
-    with patch("ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email"):
+    with patch("ddpui.core.trial.lifecycle_emails.send_day3_not_started"):
         assert run_trial_lifecycle_sweep() == 1
         assert run_trial_lifecycle_sweep() == 0
 
@@ -280,9 +280,9 @@ def test_sweep_is_idempotent():
 def test_sweep_sends_one_email_per_run():
     """a day-7 trial with no flags gets the day-3 email first, midpoint on the next run"""
     _make_trial("trial-e", days_ago=7)
-    with patch(
-        "ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email"
-    ) as mock_a, patch("ddpui.core.trial.lifecycle_emails.send_trial_midpoint_email") as mock_mid:
+    with patch("ddpui.core.trial.lifecycle_emails.send_day3_not_started") as mock_a, patch(
+        "ddpui.core.trial.lifecycle_emails.send_midpoint"
+    ) as mock_mid:
         assert run_trial_lifecycle_sweep() == 1
         assert mock_a.call_count == 1
         assert mock_mid.call_count == 0
@@ -307,7 +307,7 @@ def test_sweep_sends_pre_end_email_with_a_formatted_end_date():
     prefs.trial_emails_sent = {EMAIL_DAY3: "x", EMAIL_MIDPOINT: "y"}
     prefs.save()
 
-    with patch("ddpui.core.trial.lifecycle_emails.send_trial_pre_end_email") as mock_send:
+    with patch("ddpui.core.trial.lifecycle_emails.send_pre_end") as mock_send:
         assert run_trial_lifecycle_sweep() == 1
         mock_send.assert_called_once()
 
@@ -331,7 +331,7 @@ def test_sweep_passes_workspace_and_schedule_call_urls_to_the_right_parameter():
     of the two settings would be invisible at sweep level while both are "" in every other
     test. Pin each value to its actual parameter position."""
     _make_trial("trial-urls", days_ago=5, completed=("insights", "automate_pipeline"))
-    with patch("ddpui.core.trial.lifecycle_emails.send_trial_completion_email") as mock_send:
+    with patch("ddpui.core.trial.lifecycle_emails.send_completion") as mock_send:
         assert run_trial_lifecycle_sweep() == 1
         mock_send.assert_called_once()
 
@@ -368,7 +368,7 @@ def test_sweep_leaves_flag_unset_when_the_send_fails():
     """an SES failure must not mark the email as sent — the next run retries"""
     _, orguser = _make_trial("trial-f", days_ago=3)
     with patch(
-        "ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email",
+        "ddpui.core.trial.lifecycle_emails.send_day3_not_started",
         side_effect=Exception("ses down"),
     ):
         assert run_trial_lifecycle_sweep() == 0
@@ -392,7 +392,7 @@ def test_sweep_stamps_the_flag_only_after_the_send_returns():
         assert prefs.trial_emails_sent == {}
 
     with patch(
-        "ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email",
+        "ddpui.core.trial.lifecycle_emails.send_day3_not_started",
         side_effect=_assert_not_yet_stamped,
     ):
         assert run_trial_lifecycle_sweep() == 1
@@ -413,7 +413,7 @@ def test_sweep_continues_after_one_trial_raises():
             raise Exception("ses down")
 
     with patch(
-        "ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email",
+        "ddpui.core.trial.lifecycle_emails.send_day3_not_started",
         side_effect=_flaky,
     ):
         assert run_trial_lifecycle_sweep() == 1
@@ -444,7 +444,7 @@ def test_sweep_creates_missing_preferences_rather_than_skipping():
     user = User.objects.create(username="noprefs@x.org", email="noprefs@x.org")
     OrgUser.objects.create(user=user, org=org)
 
-    with patch("ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email"):
+    with patch("ddpui.core.trial.lifecycle_emails.send_day3_not_started"):
         assert run_trial_lifecycle_sweep() == 1
     assert UserPreferences.objects.filter(orguser__org=org).exists()
 

@@ -113,7 +113,7 @@ class TestRenderShareReportEmail:
     """Tests for the share report email template"""
 
     def test_renders_with_private_url_only(self):
-        from ddpui.utils.email_templates import render_share_report_email
+        from ddpui.core.notifications.templates import render_share_report_email
 
         plain, html = render_share_report_email(
             sender_name="Alice",
@@ -131,7 +131,7 @@ class TestRenderShareReportEmail:
         assert "Public Link" not in html
 
     def test_renders_with_public_url(self):
-        from ddpui.utils.email_templates import render_share_report_email
+        from ddpui.core.notifications.templates import render_share_report_email
 
         plain, html = render_share_report_email(
             sender_name="Bob",
@@ -148,7 +148,7 @@ class TestRenderShareReportEmail:
         assert "abc" in html
 
     def test_escapes_html_in_user_content(self):
-        from ddpui.utils.email_templates import render_share_report_email
+        from ddpui.core.notifications.templates import render_share_report_email
 
         _, html = render_share_report_email(
             sender_name="<script>alert('xss')</script>",
@@ -169,7 +169,7 @@ class TestSendReportEmailTask:
     """Tests for the Celery task"""
 
     @patch("ddpui.celeryworkers.report_tasks.create_notification")
-    @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
+    @patch("ddpui.core.notifications.triggers.report_share.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
     @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
@@ -207,7 +207,7 @@ class TestSendReportEmailTask:
         mock_create_notification.assert_not_called()
 
     @patch("ddpui.celeryworkers.report_tasks.create_notification")
-    @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
+    @patch("ddpui.core.notifications.triggers.report_share.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
     @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
@@ -238,7 +238,7 @@ class TestSendReportEmailTask:
         assert first_call[1]["subject"] == "Custom Subject Line"
 
     @patch("ddpui.celeryworkers.report_tasks.create_notification")
-    @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
+    @patch("ddpui.core.notifications.triggers.report_share.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
     @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
@@ -311,7 +311,7 @@ class TestSendReportEmailTask:
         assert notification_data.recipients == [orguser.id]
 
     @patch("ddpui.celeryworkers.report_tasks.create_notification")
-    @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
+    @patch("ddpui.core.notifications.triggers.report_share.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
     @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")

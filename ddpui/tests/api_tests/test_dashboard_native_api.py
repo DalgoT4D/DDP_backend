@@ -27,6 +27,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
+from ddpui.models.favorite import Favorite
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.api.dashboard_native_api import (
     list_dashboards,
@@ -38,8 +39,8 @@ from ddpui.api.dashboard_native_api import (
     create_filter,
     update_filter,
     delete_filter,
-    toggle_dashboard_sharing,
-    get_dashboard_sharing_status,
+    favorite_dashboard,
+    unfavorite_dashboard,
     set_personal_landing_dashboard,
     set_org_default_dashboard,
 )
@@ -47,7 +48,6 @@ from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
     DashboardTabSchema,
-    DashboardShareToggle,
     FilterCreate,
     FilterUpdate,
 )
@@ -272,6 +272,148 @@ class TestGetDashboard:
         other_orguser.delete()
         other_user.delete()
         other_org.delete()
+
+
+def _dashboard_is_favorite(request, dashboard_id):
+    """Read is_favorite off list_dashboards, the endpoint the star UI actually renders from."""
+    response = list_dashboards(request)
+    return next(d for d in response if d.id == dashboard_id).is_favorite
+
+
+class TestFavoriteDashboard:
+    """Tests for favorite_dashboard / unfavorite_dashboard endpoints"""
+
+    def test_favorite_dashboard_success(self, orguser, sample_dashboard, seed_db):
+        """Favoriting a dashboard returns is_favorite=True and is reflected on list_dashboards"""
+        request = mock_request(orguser)
+
+        response = favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response == {"is_favorite": True}
+        assert _dashboard_is_favorite(request, sample_dashboard.id) is True
+
+    def test_favorite_dashboard_idempotent(self, orguser, sample_dashboard, seed_db):
+        """Favoriting an already-favorited dashboard doesn't error or duplicate"""
+        request = mock_request(orguser)
+
+        favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+        response = favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response == {"is_favorite": True}
+
+    def test_unfavorite_dashboard_success(self, orguser, sample_dashboard, seed_db):
+        """Unfavoriting a dashboard returns is_favorite=False and is reflected on list_dashboards"""
+        request = mock_request(orguser)
+        favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        response = unfavorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response == {"is_favorite": False}
+        assert _dashboard_is_favorite(request, sample_dashboard.id) is False
+
+    def test_unfavorite_dashboard_not_favorited(self, orguser, sample_dashboard, seed_db):
+        """Unfavoriting a dashboard that was never favorited is a no-op, not an error"""
+        request = mock_request(orguser)
+
+        response = unfavorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response == {"is_favorite": False}
+
+    def test_favorite_dashboard_not_found(self, orguser, seed_db):
+        """Favoriting a non-existent dashboard returns 404"""
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            favorite_dashboard(request, dashboard_id=99999)
+
+        assert excinfo.value.status_code == 404
+
+    def test_favorite_is_per_user(self, orguser, sample_dashboard, org, seed_db):
+        """One user's favorite has no effect on another user's view of the same dashboard"""
+        other_user = User.objects.create(username="otherfavuser", email="otherfav@test.com")
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+
+        favorite_dashboard(mock_request(orguser), dashboard_id=sample_dashboard.id)
+
+        assert _dashboard_is_favorite(mock_request(orguser), sample_dashboard.id) is True
+        assert _dashboard_is_favorite(mock_request(other_orguser), sample_dashboard.id) is False
+
+        # Cleanup
+        other_orguser.delete()
+        other_user.delete()
+
+    def test_list_dashboards_reflects_favorite(self, orguser, sample_dashboard, seed_db):
+        """list_dashboards marks only the favorited dashboard as is_favorite"""
+        request = mock_request(orguser)
+        favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        response = list_dashboards(request)
+
+        favorited = [d for d in response if d.id == sample_dashboard.id]
+        assert len(favorited) == 1
+        assert favorited[0].is_favorite is True
+
+    def test_get_dashboard_reflects_favorite(self, orguser, sample_dashboard, seed_db):
+        """get_dashboard reports the user's real favorite state, not the schema default"""
+        request = mock_request(orguser)
+
+        assert get_dashboard(request, dashboard_id=sample_dashboard.id).is_favorite is False
+
+        favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert get_dashboard(request, dashboard_id=sample_dashboard.id).is_favorite is True
+
+    def test_get_dashboard_favorite_is_per_user(self, orguser, sample_dashboard, org, seed_db):
+        """get_dashboard scopes is_favorite to the requesting user"""
+        other_user = User.objects.create(
+            username="otherdashdetailuser", email="otherdashdetail@test.com"
+        )
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+
+        favorite_dashboard(mock_request(orguser), dashboard_id=sample_dashboard.id)
+
+        assert (
+            get_dashboard(mock_request(orguser), dashboard_id=sample_dashboard.id).is_favorite
+            is True
+        )
+        assert (
+            get_dashboard(mock_request(other_orguser), dashboard_id=sample_dashboard.id).is_favorite
+            is False
+        )
+
+        # Cleanup
+        other_orguser.delete()
+        other_user.delete()
+
+    def test_delete_dashboard_removes_favorite_rows(self, orguser, sample_dashboard, seed_db):
+        """Deleting a dashboard cleans up its Favorite rows instead of orphaning them"""
+        # Create another dashboard so we're not deleting the last one in the org
+        Dashboard.objects.create(
+            title="Another Dashboard",
+            dashboard_type="native",
+            grid_columns=12,
+            created_by=orguser,
+            org=orguser.org,
+        )
+
+        dashboard_id = sample_dashboard.id
+        request = mock_request(orguser)
+        favorite_dashboard(request, dashboard_id=dashboard_id)
+        assert Favorite.objects.filter(resource_type="dashboard", resource_id=dashboard_id).exists()
+
+        delete_dashboard(request, dashboard_id=dashboard_id)
+
+        assert not Favorite.objects.filter(
+            resource_type="dashboard", resource_id=dashboard_id
+        ).exists()
 
 
 # ================================================================================
@@ -697,59 +839,10 @@ class TestDuplicateDashboardTabs:
 # ================================================================================
 
 
-class TestSharingPermissions:
-    """Sharing is manageable by the creator or an org admin — including
-    dashboards whose creator was deleted (created_by=None)."""
-
-    def test_admin_can_toggle_sharing_on_orphaned_dashboard(self, orguser, org, seed_db):
-        """an admin can make an orphaned dashboard public"""
-        dashboard = Dashboard.objects.create(title="Orphaned", org=org, created_by=None)
-        request = mock_request(orguser)
-
-        response = toggle_dashboard_sharing(
-            request, dashboard.id, DashboardShareToggle(is_public=True)
-        )
-
-        dashboard.refresh_from_db()
-        assert dashboard.is_public is True
-        assert dashboard.public_share_token
-        assert response.is_public is True
-        dashboard.delete()
-
-    def test_admin_can_view_sharing_status_of_orphaned_dashboard(self, orguser, org, seed_db):
-        """an admin can read the sharing status of an orphaned dashboard"""
-        dashboard = Dashboard.objects.create(
-            title="Orphaned", org=org, created_by=None, is_public=True
-        )
-        request = mock_request(orguser)
-
-        response = get_dashboard_sharing_status(request, dashboard.id)
-
-        assert response.is_public is True
-        dashboard.delete()
-
-    def test_non_admin_still_cannot_toggle_sharing_of_others_dashboard(self, orguser, org, seed_db):
-        """an analyst (has the share permission, not an admin) can neither toggle
-        nor view sharing of a dashboard they didn't create"""
-        dashboard = Dashboard.objects.create(title="Not theirs", org=org, created_by=orguser)
-        analyst_user = User.objects.create(username="analyst-share", email="analyst-share")
-        analyst = OrgUser.objects.create(
-            user=analyst_user, org=org, new_role=Role.objects.filter(slug=ANALYST_ROLE).first()
-        )
-        request = mock_request(analyst)
-
-        with pytest.raises(HttpError) as excinfo:
-            toggle_dashboard_sharing(request, dashboard.id, DashboardShareToggle(is_public=True))
-        assert "creator or an org admin" in str(excinfo.value)
-
-        with pytest.raises(HttpError) as excinfo:
-            get_dashboard_sharing_status(request, dashboard.id)
-        assert "creator or an org admin" in str(excinfo.value)
-
-        dashboard.refresh_from_db()
-        assert dashboard.is_public is False
-        dashboard.delete()
-        analyst_user.delete()
+# TestSharingPermissions removed — toggle_dashboard_sharing /
+# get_dashboard_sharing_status endpoints deleted when public/private
+# consolidated into PATCH /general-access. Coverage lives in
+# test_access_api.py (transfer + general-access sections).
 
 
 # ================================================================================
@@ -798,7 +891,7 @@ def test_update_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, sa
     request = mock_request(orguser)
     payload = DashboardUpdate(title="Updated Dashboard Title")
 
-    response = update_dashboard(request, sample_dashboard.id, payload)
+    response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
     assert response.title == "Updated Dashboard Title"
     mock_audit_log.assert_called_once()
@@ -825,7 +918,7 @@ def test_update_dashboard_no_fields_touched_skips_audit_log(
     request = mock_request(orguser)
     payload = DashboardUpdate()
 
-    update_dashboard(request, sample_dashboard.id, payload)
+    update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
     mock_audit_log.assert_not_called()
 
@@ -848,7 +941,7 @@ def test_update_dashboard_none_vs_empty_string_skips_audit_log(
     request = mock_request(orguser)
     payload = DashboardUpdate(description="")
 
-    update_dashboard(request, dashboard.id, payload)
+    update_dashboard(request, dashboard_id=dashboard.id, payload=payload)
 
     mock_audit_log.assert_not_called()
 
@@ -870,7 +963,7 @@ def test_update_dashboard_same_values_skips_audit_log(
         grid_columns=sample_dashboard.grid_columns,
     )
 
-    update_dashboard(request, sample_dashboard.id, payload)
+    update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
     mock_audit_log.assert_not_called()
 
@@ -887,7 +980,7 @@ def test_update_dashboard_mixed_changed_and_unchanged_fields(
         description="A brand new description",  # changed
     )
 
-    update_dashboard(request, sample_dashboard.id, payload)
+    update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
     mock_audit_log.assert_called_once()
     resource_fields = mock_audit_log.call_args[1]["resource_fields"]
@@ -915,7 +1008,7 @@ def test_update_dashboard_tabs_logs_full_tabs_json(
         ]
     )
 
-    update_dashboard(request, sample_dashboard.id, payload)
+    update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
     call_kwargs = mock_audit_log.call_args[1]
     resource_fields = call_kwargs["resource_fields"]
@@ -953,7 +1046,7 @@ def test_delete_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, or
     dashboard_id = dashboard.id
 
     request = mock_request(orguser)
-    delete_dashboard(request, dashboard_id)
+    delete_dashboard(request, dashboard_id=dashboard_id)
 
     mock_audit_log.assert_called_once()
     call_kwargs = mock_audit_log.call_args[1]
@@ -972,7 +1065,7 @@ def test_duplicate_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser,
     """Test that duplicating a dashboard creates an audit log entry."""
     request = mock_request(orguser)
 
-    response = duplicate_dashboard(request, sample_dashboard.id)
+    response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
 
     assert "Copy" in response.title
     mock_audit_log.assert_called_once()
@@ -988,26 +1081,8 @@ def test_duplicate_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser,
     Dashboard.objects.filter(id=response.id).delete()
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
-def test_toggle_dashboard_sharing_creates_audit_log(
-    mock_audit_log, seed_db, orguser, sample_dashboard
-):
-    """Test that toggling dashboard sharing creates an audit log entry with the title."""
-    request = mock_request(orguser)
-    payload = DashboardShareToggle(is_public=True)
-
-    toggle_dashboard_sharing(request, sample_dashboard.id, payload)
-
-    mock_audit_log.assert_called_once()
-    call_kwargs = mock_audit_log.call_args[1]
-    assert call_kwargs["org"] == orguser.org
-    assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
-    assert call_kwargs["action"] == AuditLogAction.SHARE
-    assert call_kwargs["resource_id"] == str(sample_dashboard.id)
-    assert call_kwargs["resource_fields"] == {
-        "title": sample_dashboard.title,
-        "is_public": {"old": False, "new": True},
-    }
+# test_toggle_dashboard_sharing_creates_audit_log removed — audit-log-on-public-toggle
+# coverage moved to test_access_api.py via the /general-access endpoint.
 
 
 @patch("ddpui.api.dashboard_native_api.create_audit_log")
@@ -1017,7 +1092,7 @@ def test_set_personal_landing_dashboard_creates_audit_log(
     """Test that setting a personal landing dashboard creates an audit log entry with the title."""
     request = mock_request(orguser)
 
-    set_personal_landing_dashboard(request, sample_dashboard.id)
+    set_personal_landing_dashboard(request, dashboard_id=sample_dashboard.id)
 
     mock_audit_log.assert_called_once()
     call_kwargs = mock_audit_log.call_args[1]
@@ -1038,7 +1113,7 @@ def test_set_org_default_dashboard_creates_audit_log(
     """Test that setting the org default dashboard creates an audit log entry with the title."""
     request = mock_request(orguser)
 
-    set_org_default_dashboard(request, sample_dashboard.id)
+    set_org_default_dashboard(request, dashboard_id=sample_dashboard.id)
 
     mock_audit_log.assert_called_once()
     call_kwargs = mock_audit_log.call_args[1]

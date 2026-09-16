@@ -9,6 +9,7 @@ from ddpui.models.org_plans import OrgPlans
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
+    UpdateAccessDefaultsSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
 )
@@ -17,14 +18,16 @@ from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from django.db import transaction
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import LEVEL_RANK
 from ddpui.ddpdbt import elementary_service
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import (
     prefect_service,
 )
-from ddpui.utils.awsses import biz_dev_recipients, send_text_message
+from ddpui.core.notifications.templates import build_subscription_request_email
+from ddpui.core.notifications.triggers.biz_dev import biz_dev_recipients
+from ddpui.utils.awsses import send_text_message
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.email_templates import build_subscription_request_email
 from ddpui.utils.redis_client import RedisClient
 
 orgpreference_router = Router()
@@ -124,6 +127,28 @@ def update_discord_notifications(request, payload: UpdateDiscordNotificationsSch
         org_preferences.discord_webhook = None
         org_preferences.enable_discord_notifications = False
 
+    org_preferences.save()
+
+    return {"success": True, "res": org_preferences.to_json()}
+
+
+@orgpreference_router.put("/access-defaults")
+@has_permission(["can_manage_access_defaults"])
+def update_access_defaults(request, payload: UpdateAccessDefaultsSchema):
+    """Updates org-wide access defaults (analyst/member default level + public sharing toggle)."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_preferences = OrgPreferences.objects.filter(org=org).first()
+    if org_preferences is None:
+        org_preferences = OrgPreferences.objects.create(org=org)
+
+    if LEVEL_RANK[payload.default_member_level] > LEVEL_RANK[payload.default_analyst_level]:
+        raise HttpError(400, "member floor cannot exceed analyst floor")
+
+    org_preferences.default_analyst_level = payload.default_analyst_level
+    org_preferences.default_member_level = payload.default_member_level
+    org_preferences.allow_public_sharing = payload.allow_public_sharing
     org_preferences.save()
 
     return {"success": True, "res": org_preferences.to_json()}

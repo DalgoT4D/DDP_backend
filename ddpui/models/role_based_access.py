@@ -1,5 +1,14 @@
+from enum import Enum
+
 from django.db import models
 import uuid
+
+
+class RoleSlug(str, Enum):
+    SUPER_ADMIN = "super-admin"
+    ADMIN = "admin"
+    ANALYST = "analyst"
+    MEMBER = "member"
 
 
 class Role(models.Model):

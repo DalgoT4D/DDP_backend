@@ -24,6 +24,7 @@ from ddpui.core.webhooks.webhook_functions import (
     get_org_from_flow_run,
 )
 from ddpui.core.notifications.delivery import notify_org_managers
+from ddpui.core.notifications.triggers.schema_change import notify_schema_change
 
 from ddpui.ddpdbt import elementary_service
 from ddpui.ddpdbt.elementary_service import (
@@ -445,7 +446,7 @@ def detect_schema_changes_for_org(org: Org, delay=0):
                     frontend_url = frontend_url[:-1]
                 connections_page = f"{frontend_url}/pipeline/ingest?tab=connections"
                 connection_name = connection_catalog["name"]
-                notify_org_managers(
+                notify_schema_change(
                     org,
                     f"To the admins of {org.name},\n\nThis email is to let you know that"
                     f' schema changes have been detected in your Dalgo sources for "{connection_name}".'
