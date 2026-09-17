@@ -118,6 +118,14 @@ def test_realistic_discovery_turn_fits_in_the_recursion_limit():
 
 def test_sql_error_recovery_second_attempt_succeeds():
     class FlakyWarehouse(FakeWarehouse):
+        def get_table_columns(self, db_schema, db_table):
+            # "districtname" must resolve statically so the resolvability
+            # backstop (Fix 2) lets it through to the warehouse, which is what
+            # actually fails here — a genuine runtime error, not a static one
+            return super().get_table_columns(db_schema, db_table) + [
+                {"name": "districtname", "data_type": "text"}
+            ]
+
         def execute(self, sql):
             if "districtname" in sql:
                 raise RuntimeError('column "districtname" does not exist')

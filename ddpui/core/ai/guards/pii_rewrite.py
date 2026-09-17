@@ -97,13 +97,37 @@ def _qualified_tree(sql: str, dialect: str, schema_map: dict) -> exp.Expression:
     # sqlglot lowercase the map's keys makes a quoted identifier unmatchable.
     schema = MappingSchema(schema_map, normalize=False, dialect=dialect)
     try:
-        return qualify(tree, dialect=dialect, schema=schema)
+        qualified = qualify(tree, dialect=dialect, schema=schema)
     except OptimizeError as err:
         raise UnresolvableProjection(
             f"Could not work out which table each selected column belongs to ({err}). "
             "Re-check the column names with get_table_details, then list the selected "
             "columns explicitly and qualify each one with its table."
         ) from err
+    if _has_unexpanded_star(qualified):
+        raise UnresolvableProjection(
+            "Could not expand * into concrete columns, so the query cannot be reviewed "
+            "for personal data. Use get_table_details to get the column names, then "
+            "list the columns you need explicitly instead of SELECT *."
+        )
+    return qualified
+
+
+def _has_unexpanded_star(tree: exp.Expression) -> bool:
+    """True when a projection is still a bare star — qualify() could not expand it,
+    usually because the schema map lacks that table's columns. Only DIRECT projection
+    entries count: a nested star like COUNT(*) is legitimate and returns no values."""
+    for scope in traverse_scope(tree):
+        select = scope.expression
+        if not isinstance(select, exp.Select):
+            continue
+        for projection in select.expressions:
+            target = projection.unalias() if isinstance(projection, exp.Alias) else projection
+            if isinstance(target, exp.Star):
+                return True
+            if isinstance(target, exp.Column) and target.name == "*":
+                return True
+    return False
 
 
 def _projected_columns(

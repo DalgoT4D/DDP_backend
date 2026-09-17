@@ -83,12 +83,15 @@ def test_execute_sql_rejects_writes_without_touching_warehouse():
 
 
 def test_execute_sql_returns_warehouse_error_as_feedback():
+    # "district" must resolve statically (it's in FakeWarehouse.columns) so the
+    # new resolvability backstop (Fix 2) passes and the query reaches the
+    # warehouse, where this fake simulates a genuine runtime error
     class ExplodingWarehouse(FakeWarehouse):
         def execute(self, sql):
             raise RuntimeError('column "districtname" does not exist\nLINE 1: ...')
 
     content, artifact = execute_sql.func(
-        sql="SELECT districtname FROM prod.surveys",
+        sql="SELECT district FROM prod.surveys",
         runtime=make_runtime(ExplodingWarehouse()),
     )
     assert content.startswith("Query failed:")
@@ -303,5 +306,20 @@ def test_execute_sql_without_ticks_runs_unhashed():
 
     _, artifact = execute_sql.func(sql="SELECT district FROM prod.surveys", runtime=runtime)
 
+    # the projection is now always resolved (a catalog round-trip), even with
+    # nothing ticked, but the SQL that reaches the warehouse stays unhashed
     assert artifact["status"] == "success"
     assert "MD5" not in warehouse.executed[-1]
+
+
+def test_execute_sql_rejects_an_unexpandable_star_even_with_nothing_ticked():
+    warehouse = FakeWarehouse(rows=[{"n": 1}])
+    warehouse.columns = []  # warehouse reports no columns for this table
+    warehouse.catalog_rows = [{"table_name": "beneficiaries", "approx_rows": 10}]
+
+    content, artifact = execute_sql.func(
+        sql="SELECT * FROM prod.beneficiaries", runtime=make_runtime(warehouse)
+    )
+
+    assert artifact["status"] == "rejected"
+    assert warehouse.executed == [] or all("SELECT *" not in q for q in warehouse.executed)

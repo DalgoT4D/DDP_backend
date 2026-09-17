@@ -171,6 +171,23 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
                 )
                 return
             approve = bool(payload.get("approve"))
+            # server-side enforcement of the fail-closed card: `columns: None` means
+            # the card could not be reviewed for PII, so approval must be refused
+            # here even if some other client skipped the browser's own disabled-button
+            # check. `.get("columns", False)` distinguishes "key absent" (a non-PII
+            # tool like create_chart, which is fine) from "explicitly None".
+            if approve and any(
+                request.get("columns", False) is None
+                for request in pending["event"].get("requests", [])
+            ):
+                await self._send_event(
+                    {
+                        "type": "error",
+                        "message": "This query could not be checked for personal data. "
+                        "Please cancel it and ask again.",
+                    }
+                )
+                return
             pii_columns = _allowed_pii_columns(pending, payload.get("pii_columns"))
             question = "[user approved the action]" if approve else "[user cancelled the action]"
             model_id = resolve_selected_model(pending.get("model"))

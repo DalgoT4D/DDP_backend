@@ -98,12 +98,19 @@ def _execute_with_timeout(ctx: RunContext, sql: str) -> list[dict]:
 
 def _apply_pii_hashing(ctx: RunContext, sql: str) -> str:
     """Hash the columns the user ticked, before the guard sees the statement — so
-    the guard validates exactly the string that will run."""
-    if not ctx.pii_columns:
-        return sql
+    the guard validates exactly the string that will run.
+
+    Always resolves the projection, even with nothing ticked: this is the only
+    place that would notice an unexpandable SELECT * before it runs unhashed.
+    That costs one extra catalog round-trip on the no-PII path — the design this
+    replaced avoided it — but a fail-closed check is worth one catalog call.
+    """
     try:
         tree = sqlglot.parse_one(sql, dialect=ctx.dialect)
     except sqlglot.errors.ParseError:
         return sql  # let the guard produce the parse error the model should read
     schema_map = catalog.schema_map_for(ctx, sql_guard.referenced_tables(tree))
+    pii_rewrite.resolve_projection(sql, ctx.dialect, schema_map)
+    if not ctx.pii_columns:
+        return sql
     return pii_rewrite.hash_projection(sql, ctx.dialect, schema_map, ctx.pii_columns)

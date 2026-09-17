@@ -133,6 +133,31 @@ def test_unknown_column_raises_with_an_llm_readable_message():
         resolve_projection("SELECT nope FROM prod.people", "postgres", SCHEMA)
 
 
+def test_unexpandable_star_is_rejected_rather_than_yielding_an_empty_card():
+    # schema_map_for returns {} for a table whose columns the warehouse client
+    # skips (bigquery STRUCT/RECORD), so qualify() cannot expand the star
+    short_map = {"prod": {"people": {"id": "integer", "name": "text"}, "ben": {}}}
+    with pytest.raises(UnresolvableProjection, match="SELECT \\*"):
+        resolve_projection(
+            "SELECT * FROM prod.people p JOIN prod.ben b ON p.id = b.bid",
+            "postgres",
+            short_map,
+        )
+
+
+def test_qualified_star_is_rejected_rather_than_producing_a_star_column_key():
+    with pytest.raises(UnresolvableProjection):
+        resolve_projection("SELECT p.* FROM prod.people p", "postgres", {"prod": {"people": {}}})
+
+
+def test_count_star_is_not_mistaken_for_an_unexpanded_star():
+    # COUNT(*) projects no physical column but is perfectly reviewable
+    assert (
+        resolve_projection("SELECT COUNT(*) AS n FROM prod.beneficiaries", "postgres", SCHEMA) == []
+    )
+    assert resolve_projection("SELECT COUNT(*) FROM prod.beneficiaries", "postgres", SCHEMA) == []
+
+
 def rewrite(sql, ticked, dialect="postgres"):
     return hash_projection(sql, dialect, SCHEMA, set(ticked))
 
