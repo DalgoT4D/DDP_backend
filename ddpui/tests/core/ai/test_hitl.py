@@ -224,3 +224,33 @@ def test_non_sql_tools_get_no_columns_field():
     }
     event = input_required_event(interrupt_value, make_context(FakeWarehouse()))
     assert "columns" not in event["requests"][0]
+
+
+def test_profile_column_pauses_for_approval():
+    warehouse = FakeWarehouse(rows=[{"value": "Pune", "occurrences": 4}])
+    model = ScriptedChatModel(
+        script=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "profile_column",
+                        "args": {
+                            "schema_name": "prod",
+                            "table_name": "surveys",
+                            "column_name": "district",
+                        },
+                        "id": "p1",
+                    }
+                ],
+            ),
+            AIMessage(content="Mostly Pune."),
+        ]
+    )
+    agent = build_agent(checkpointer=InMemorySaver(), model=model)
+
+    result, _config = _invoke(agent, "what districts are there?", make_context(warehouse))
+
+    interrupt = result["__interrupt__"][0]
+    assert [r["name"] for r in interrupt.value["action_requests"]] == ["profile_column"]
+    assert warehouse.executed == []

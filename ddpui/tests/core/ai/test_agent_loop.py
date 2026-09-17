@@ -113,7 +113,7 @@ def test_realistic_discovery_turn_fits_in_the_recursion_limit():
         )
         resumes += 1
     assert result["messages"][-1].content == "Here is your answer."
-    assert resumes == 2  # both execute_sql calls paused for approval
+    assert resumes == 3  # the profile_column call and both execute_sql calls paused for approval
 
 
 def test_sql_error_recovery_second_attempt_succeeds():

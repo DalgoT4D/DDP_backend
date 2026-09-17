@@ -27,11 +27,13 @@ from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.chat_with_data")
 
-# Tool calls that pause for user approval before executing. Metadata lookups
-# (list_tables, get_table_details, profile_column) are deliberately NOT gated —
-# gating them would cost several clicks before any question can be answered.
+# Tool calls that pause for user approval before executing. The two warehouse
+# tools that return real VALUES are gated so the user can mark PII columns first;
+# pure metadata lookups (list_schemas, list_tables, get_table_details) are not —
+# gating them would cost several clicks before any question could be answered.
 APPROVAL_TOOLS = (
     "execute_sql",
+    "profile_column",
     "create_chart",
     "create_dashboard",
     "add_charts_to_dashboard",

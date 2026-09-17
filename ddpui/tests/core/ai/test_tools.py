@@ -167,6 +167,38 @@ def test_profile_column_unknown_column_gives_guidance():
     assert "does not exist" in result and "get_table_details" in result
 
 
+def test_profile_column_hashes_a_ticked_column():
+    warehouse = FakeWarehouse(rows=[{"value": "abc123", "occurrences": 4}])
+    warehouse.columns = [{"name": "phone", "data_type": "text"}]
+    warehouse.catalog_rows = [{"table_name": "beneficiaries", "approx_rows": 10}]
+    runtime = make_runtime(warehouse)
+    runtime.context.pii_columns = {"prod.beneficiaries.phone"}
+
+    out = profile_column.func(
+        schema_name="prod",
+        table_name="beneficiaries",
+        column_name="phone",
+        runtime=runtime,
+    )
+
+    assert "md5" in warehouse.executed[-1].lower()
+    assert "abc123" in out
+
+
+def test_profile_column_without_ticks_is_unhashed():
+    warehouse = FakeWarehouse(rows=[{"value": "Pune", "occurrences": 4}])
+    warehouse.catalog_rows = [{"table_name": "surveys", "approx_rows": 10}]
+
+    profile_column.func(
+        schema_name="prod",
+        table_name="surveys",
+        column_name="district",
+        runtime=make_runtime(warehouse),
+    )
+
+    assert "md5" not in warehouse.executed[-1].lower()
+
+
 def test_execute_sql_sets_postgres_statement_timeout_on_same_connection():
     executed = []
 

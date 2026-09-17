@@ -70,7 +70,7 @@ SQL_AGENT_TOOLS = (
 )
 
 # Only warehouse reads pause for approval on this agent
-SQL_APPROVAL_TOOLS = ("execute_sql",)
+SQL_APPROVAL_TOOLS = ("execute_sql", "profile_column")
 
 
 def available_models() -> list[dict]:

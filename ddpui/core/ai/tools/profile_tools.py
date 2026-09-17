@@ -17,7 +17,10 @@ def profile_column(
 ) -> str:
     """See a column's most common distinct values. ALWAYS use this before filtering
     on a text column — the stored values often differ from what the user said
-    (e.g. the user says 'Maharashtra' but the column stores 'MH')."""
+    (e.g. the user says 'Maharashtra' but the column stores 'MH').
+
+    If the values come back as long hex strings, the user has marked this column
+    as containing personal data. Do not retry — continue without profiling it."""
     ctx = runtime.context
     try:
         catalog.check_table(ctx, schema_name, table_name)
@@ -29,6 +32,12 @@ def profile_column(
 
     qualified = catalog.qualified(ctx.dialect, schema_name, table_name)
     quoted_col = f"`{column_name}`" if ctx.dialect == "bigquery" else f'"{column_name}"'
+    if f"{schema_name}.{table_name}.{column_name}" in ctx.pii_columns:
+        quoted_col = (
+            f"TO_HEX(MD5(CAST({quoted_col} AS STRING)))"
+            if ctx.dialect == "bigquery"
+            else f"md5({quoted_col}::text)"
+        )
     sql = (
         f"SELECT {quoted_col} AS value, COUNT(*) AS occurrences FROM {qualified} "
         f"GROUP BY 1 ORDER BY 2 DESC LIMIT {TOP_VALUES_COUNT}"
