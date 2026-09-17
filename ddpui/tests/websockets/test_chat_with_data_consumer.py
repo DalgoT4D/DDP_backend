@@ -27,7 +27,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from django.core.management import call_command
 
-from ddpui.websockets.chat_with_data_consumer import ChatWithDataConsumer
+from ddpui.websockets.chat_with_data_consumer import ChatWithDataConsumer, _allowed_pii_columns
 from ddpui.websockets.schemas import WebsocketCloseCodes
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -366,3 +366,27 @@ def test_connect_without_token_is_closed(seed_db):
         await communicator.disconnect()
 
     run(scenario())
+
+
+def _pending(columns):
+    return {"event": {"requests": [{"tool": "execute_sql", "columns": columns}]}}
+
+
+def test_only_columns_the_card_offered_are_accepted():
+    pending = _pending(
+        [
+            {"schema": "prod", "table": "beneficiaries", "column": "phone"},
+            {"schema": "prod", "table": "beneficiaries", "column": "district"},
+        ]
+    )
+    allowed = _allowed_pii_columns(pending, ["prod.beneficiaries.phone", "prod.other.secret"])
+    assert allowed == {"prod.beneficiaries.phone"}
+
+
+def test_a_card_with_no_columns_accepts_nothing():
+    assert _allowed_pii_columns(_pending(None), ["prod.beneficiaries.phone"]) == set()
+
+
+def test_a_non_list_payload_is_ignored():
+    pending = _pending([{"schema": "prod", "table": "b", "column": "phone"}])
+    assert _allowed_pii_columns(pending, "prod.b.phone") == set()
