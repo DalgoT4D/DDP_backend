@@ -234,12 +234,10 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
         agent = build_agent(
             checkpointer=checkpointer,
             model=get_chat_model(model_id),
-            pii_rules=context.pii_rules,
         )
         guide_agent = build_guide_agent(
             checkpointer=checkpointer,
             model=get_chat_model(model_id),
-            pii_rules=context.pii_rules,
         )
 
         final_answer = ""

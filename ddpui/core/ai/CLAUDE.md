@@ -30,8 +30,8 @@ and agents read first.
 
 Priya types "how many surveys in Maharashtra?" into the chat. The WebSocket
 consumer (`ddpui/websockets/chat_with_data_consumer.py`) authenticates her,
-builds a `RunContext` (her org's warehouse, allowed schemas, permissions, PII
-rules, org memory), and hands the question to the turn runner.
+builds a `RunContext` (her org's warehouse, allowed schemas, permissions, org
+memory), and hands the question to the turn runner.
 
 ```
 question ──► route_node ──┬─ small talk       → casual_reply_node → END
@@ -137,13 +137,19 @@ that, and `RECURSION_LIMIT` (160 graph steps) is the runaway backstop.
 - **One artifact contract.** Tools attach structured results to their messages;
   `messages/artifacts.py` is the only interpreter. The live stream, the audit,
   and history replay all read through it so they can never disagree.
-- **PII is masked before the model sees it.** `agent/pii.py`: immovable
-  defaults (emails, credit cards, Indian phone numbers, Aadhaar with Verhoeff
-  checksum, PAN with holder-type check) plus additive per-org regex rules
-  (`ChatWithDataOrgConfig.pii_rules`, validated at save time). Masking covers
-  the user's message AND query results, and rewrites the checkpointed state —
-  PII never reaches a model provider, the checkpoint DB, or traces. The UI's
-  result table (from the tool artifact) is not masked.
+- **The user marks PII, we hash it.** There is no PII detection — column names in
+  NGO warehouses are too vague for a regex or a model to judge, and the PII that
+  matters (beneficiary ids, case numbers, addresses) matches no known pattern. So
+  the approval card for `execute_sql` and `profile_column` lists every
+  `schema.table.column` the query touches, the user ticks the PII ones, and
+  `guards/pii_rewrite.py` wraps those in the warehouse's own hash function inside
+  the projection — at the source, so CTEs and subqueries are covered. `WHERE`,
+  `JOIN` and `GROUP BY` are untouched: values used only there never come back in a
+  row. Ticks live in the browser's `sessionStorage` for the open session only,
+  travel in the resume payload, and are narrowed to what the card offered before
+  reaching `RunContext.pii_columns`. Nothing is stored server-side and nothing is
+  audited — deliberate for v1. PII the user types into the chat box is NOT
+  protected; the composer says so.
 - **Org memory is reference, not instructions.** Admin-curated facts
   (`ChatWithDataOrgMemory`, ≤5,000 chars) render into both system prompts
   inside an `<org_memory>` tag with an explicit injection disclaimer
