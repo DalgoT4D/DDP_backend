@@ -194,7 +194,7 @@ async def run_turn(
                 interrupts = chunk["__interrupt__"]
                 if interrupts:
                     status = "paused"
-                    event = input_required_event(interrupts[0].value)
+                    event = input_required_event(interrupts[0].value, context)
                     # trace continuity: the consumer stores this and passes it
                     # back as resume_trace_id, keeping the question one trace
                     event["trace_id"] = trace_id

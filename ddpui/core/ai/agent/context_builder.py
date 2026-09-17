@@ -117,6 +117,5 @@ def build_run_context(orguser: OrgUser) -> RunContext:
         can_edit_dashboards="can_edit_dashboards" in granted,
         can_create_metrics="can_create_metrics" in granted,
         can_create_kpis="can_create_kpis" in granted,
-        pii_rules=(config.pii_rules if config else []) or [],
         org_memory=memory.text if memory else "",
     )

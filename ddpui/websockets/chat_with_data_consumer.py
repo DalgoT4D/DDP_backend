@@ -66,6 +66,26 @@ PENDING_INPUT_TTL_S = 24 * 60 * 60
 DEFAULT_SESSION_TITLE = "New chat"
 
 
+def _allowed_pii_columns(pending: dict, requested) -> set[str]:
+    """The client's ticked columns, narrowed to what the pending card offered.
+
+    The browser is the only store of these ticks, so the list arrives from the
+    client — but it may only name columns this card actually listed. Anything else
+    is dropped and logged rather than trusted."""
+    if not isinstance(requested, list):
+        return set()
+    offered = {
+        f"{column['schema']}.{column['table']}.{column['column']}"
+        for request in pending.get("event", {}).get("requests", [])
+        for column in (request.get("columns") or [])
+    }
+    asked = {str(entry) for entry in requested}
+    rejected = asked - offered
+    if rejected:
+        logger.error(f"dropping pii_columns not offered by the card: {sorted(rejected)}")
+    return asked & offered
+
+
 class ChatWithDataConsumer(AsyncWebsocketConsumer):
     """One connection per chat session; runs agent turns and streams events."""
 
@@ -117,6 +137,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
         pending = self._get_pending_input()
         resume_payload: dict | None = None
         resume_trace_id: str | None = None
+        pii_columns: set[str] = set()
 
         if action == "send_message":
             question = str(payload.get("message", "")).strip()
@@ -150,6 +171,24 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
                 )
                 return
             approve = bool(payload.get("approve"))
+            # server-side enforcement of the fail-closed card: `columns: None` means
+            # the card could not be reviewed for PII, so approval must be refused
+            # here even if some other client skipped the browser's own disabled-button
+            # check. `.get("columns", False)` distinguishes "key absent" (a non-PII
+            # tool like create_chart, which is fine) from "explicitly None".
+            if approve and any(
+                request.get("columns", False) is None
+                for request in pending["event"].get("requests", [])
+            ):
+                await self._send_event(
+                    {
+                        "type": "error",
+                        "message": "This query could not be checked for personal data. "
+                        "Please cancel it and ask again.",
+                    }
+                )
+                return
+            pii_columns = _allowed_pii_columns(pending, payload.get("pii_columns"))
             question = "[user approved the action]" if approve else "[user cancelled the action]"
             model_id = resolve_selected_model(pending.get("model"))
             resume_payload = build_resume_payload(
@@ -182,7 +221,11 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
 
         try:
             await self._run_turn(
-                question, model_id, resume_payload=resume_payload, resume_trace_id=resume_trace_id
+                question,
+                model_id,
+                resume_payload=resume_payload,
+                resume_trace_id=resume_trace_id,
+                pii_columns=pii_columns,
             )
         finally:
             self._release_turn_lock()
@@ -193,23 +236,25 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
         model_id: str,
         resume_payload: dict | None = None,
         resume_trace_id: str | None = None,
+        pii_columns: set[str] | None = None,
     ):
         try:
             context = await database_sync_to_async(build_run_context)(self.orguser)
         except ChatWithDataNotReady as err:
             await self._send_event({"type": "error", "message": str(err)})
             return
+        # the user's PII ticks for the tool call this resume approves; a fresh
+        # turn has none, and nothing carries over between turns
+        context.pii_columns = pii_columns or set()
 
         checkpointer = await get_checkpointer()
         agent = build_agent(
             checkpointer=checkpointer,
             model=get_chat_model(model_id),
-            pii_rules=context.pii_rules,
         )
         guide_agent = build_guide_agent(
             checkpointer=checkpointer,
             model=get_chat_model(model_id),
-            pii_rules=context.pii_rules,
         )
 
         final_answer = ""

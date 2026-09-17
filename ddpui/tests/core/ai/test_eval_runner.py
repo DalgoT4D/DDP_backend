@@ -42,6 +42,11 @@ def run(item, *, script, warehouse=None, intent=None, routed=None):
 
 
 def test_gold_sql_match_passes(routed_as):
+    # the resolvability backstop (Fix 2) needs beneficiary_id in the schema map
+    # for the agent's SQL to resolve statically
+    warehouse = FakeWarehouse(rows=[{"n": 171}])
+    warehouse.columns = [{"name": "beneficiary_id", "data_type": "integer"}]
+
     item = {
         "question": "how many beneficiaries enrolled?",
         "expected_intent": "data_question",
@@ -49,6 +54,7 @@ def test_gold_sql_match_passes(routed_as):
     }
     result = run(
         item,
+        warehouse=warehouse,
         script=[
             sql_call("SELECT COUNT(DISTINCT beneficiary_id) AS n FROM prod.enrollments", "c1"),
             AIMessage(content="**171** beneficiaries are enrolled."),

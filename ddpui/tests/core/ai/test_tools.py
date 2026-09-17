@@ -17,6 +17,7 @@ from ddpui.core.ai.tools.schema_tools import (
 )
 from ddpui.core.ai.tools.profile_tools import profile_column
 from ddpui.core.ai.tools.sql_tools import execute_sql
+from ddpui.core.ai.tools import catalog
 
 
 class FakeWarehouse:
@@ -82,12 +83,15 @@ def test_execute_sql_rejects_writes_without_touching_warehouse():
 
 
 def test_execute_sql_returns_warehouse_error_as_feedback():
+    # "district" must resolve statically (it's in FakeWarehouse.columns) so the
+    # new resolvability backstop (Fix 2) passes and the query reaches the
+    # warehouse, where this fake simulates a genuine runtime error
     class ExplodingWarehouse(FakeWarehouse):
         def execute(self, sql):
             raise RuntimeError('column "districtname" does not exist\nLINE 1: ...')
 
     content, artifact = execute_sql.func(
-        sql="SELECT districtname FROM prod.surveys",
+        sql="SELECT district FROM prod.surveys",
         runtime=make_runtime(ExplodingWarehouse()),
     )
     assert content.startswith("Query failed:")
@@ -166,6 +170,38 @@ def test_profile_column_unknown_column_gives_guidance():
     assert "does not exist" in result and "get_table_details" in result
 
 
+def test_profile_column_hashes_a_ticked_column():
+    warehouse = FakeWarehouse(rows=[{"value": "abc123", "occurrences": 4}])
+    warehouse.columns = [{"name": "phone", "data_type": "text"}]
+    warehouse.catalog_rows = [{"table_name": "beneficiaries", "approx_rows": 10}]
+    runtime = make_runtime(warehouse)
+    runtime.context.pii_columns = {"prod.beneficiaries.phone"}
+
+    out = profile_column.func(
+        schema_name="prod",
+        table_name="beneficiaries",
+        column_name="phone",
+        runtime=runtime,
+    )
+
+    assert "md5" in warehouse.executed[-1].lower()
+    assert "abc123" in out
+
+
+def test_profile_column_without_ticks_is_unhashed():
+    warehouse = FakeWarehouse(rows=[{"value": "Pune", "occurrences": 4}])
+    warehouse.catalog_rows = [{"table_name": "surveys", "approx_rows": 10}]
+
+    profile_column.func(
+        schema_name="prod",
+        table_name="surveys",
+        column_name="district",
+        runtime=make_runtime(warehouse),
+    )
+
+    assert "md5" not in warehouse.executed[-1].lower()
+
+
 def test_execute_sql_sets_postgres_statement_timeout_on_same_connection():
     executed = []
 
@@ -224,3 +260,66 @@ def test_registry_names_filter_selects_a_subset_and_rejects_typos():
     assert [t.name for t in subset] == ["execute_sql", "ask_user"]
     with _pytest.raises(KeyError, match="no_such_tool"):
         get_tools(names=("no_such_tool",))
+
+
+def test_schema_map_for_shapes_the_qualify_input():
+    warehouse = FakeWarehouse()
+    warehouse.columns = [
+        {"name": "phone", "data_type": "text"},
+        {"name": "person_id", "data_type": "integer"},
+    ]
+    ctx = make_runtime(warehouse).context
+
+    mapping = catalog.schema_map_for(ctx, {"prod.beneficiaries"})
+
+    assert mapping == {"prod": {"beneficiaries": {"phone": "text", "person_id": "integer"}}}
+
+
+def test_schema_map_for_skips_unqualified_names():
+    ctx = make_runtime(FakeWarehouse()).context
+    assert catalog.schema_map_for(ctx, {"bare_name"}) == {}
+
+
+def test_execute_sql_hashes_ticked_columns():
+    warehouse = FakeWarehouse(rows=[{"phone": "abc123"}])
+    warehouse.columns = [
+        {"name": "phone", "data_type": "text"},
+        {"name": "district", "data_type": "text"},
+    ]
+    warehouse.catalog_rows = [{"table_name": "beneficiaries", "approx_rows": 10}]
+    runtime = make_runtime(warehouse)
+    runtime.context.pii_columns = {"prod.beneficiaries.phone"}
+
+    content, artifact = execute_sql.func(
+        sql="SELECT phone, district FROM prod.beneficiaries",
+        runtime=runtime,
+    )
+
+    assert artifact["status"] == "success"
+    assert "MD5(CAST(" in artifact["sql"]
+    assert "MD5" in warehouse.executed[-1]
+
+
+def test_execute_sql_without_ticks_runs_unhashed():
+    warehouse = FakeWarehouse(rows=[{"district": "Pune"}])
+    runtime = make_runtime(warehouse)
+
+    _, artifact = execute_sql.func(sql="SELECT district FROM prod.surveys", runtime=runtime)
+
+    # the projection is now always resolved (a catalog round-trip), even with
+    # nothing ticked, but the SQL that reaches the warehouse stays unhashed
+    assert artifact["status"] == "success"
+    assert "MD5" not in warehouse.executed[-1]
+
+
+def test_execute_sql_rejects_an_unexpandable_star_even_with_nothing_ticked():
+    warehouse = FakeWarehouse(rows=[{"n": 1}])
+    warehouse.columns = []  # warehouse reports no columns for this table
+    warehouse.catalog_rows = [{"table_name": "beneficiaries", "approx_rows": 10}]
+
+    content, artifact = execute_sql.func(
+        sql="SELECT * FROM prod.beneficiaries", runtime=make_runtime(warehouse)
+    )
+
+    assert artifact["status"] == "rejected"
+    assert warehouse.executed == [] or all("SELECT *" not in q for q in warehouse.executed)

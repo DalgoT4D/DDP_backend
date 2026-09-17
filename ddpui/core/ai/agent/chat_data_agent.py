@@ -25,17 +25,21 @@ from ddpui.core.ai.agent.middleware import (
     sql_retry_limiter,
     trim_history,
 )
-from ddpui.core.ai.agent.pii import build_pii_middleware
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import get_tools
 
 # Upper bound on GRAPH STEPS per turn — backstop against runaway loops.
-# Every middleware hook is its own graph node, so one model⇄tool cycle costs
-# ~12 steps with the current stack (7 before_model hooks incl. 5 PII rules +
-# model + 3 after_model + tools) — plus one more per org-defined PII rule.
-# 160 ≈ headroom for ~13 tool calls; a legitimate heavy turn on a messy
-# warehouse uses ~12 (schemas → tables → details ×3 → profile ×2 → sql ×5
-# with retries — MAX_SQL_ATTEMPTS is 5). The real runaway guard is
+# Every before_model/after_model hook is its own graph node (a wrap_model_call
+# hook like org_system_prompt or clear_old_tool_results wraps the model call
+# in place and adds none). One model⇄tool cycle now costs ~6 steps (3
+# before_model: sql_retry_limiter, repair_foreign_tool_errors, trim_history;
+# + model; + 1 after_model: the HITL approval gate; + tools) — down from ~16
+# when 5 PIIMiddleware instances each added a before_model AND an after_model
+# node. 160 ≈ headroom for ~26 cycles now (was ~10); a legitimate heavy turn
+# on a messy warehouse uses ~12 (schemas → tables → details ×3 → profile ×2 →
+# sql ×5 with retries — MAX_SQL_ATTEMPTS is 5). profile_column and execute_sql
+# both pausing for approval (Task 7) doesn't erode this: each pause/resume is
+# a fresh invocation with its own step budget. The real runaway guard is
 # sql_retry_limiter, not this ceiling.
 # If you add middleware, re-check test_realistic_discovery_turn_fits_in_the_recursion_limit.
 RECURSION_LIMIT = 160
@@ -70,7 +74,7 @@ SQL_AGENT_TOOLS = (
 )
 
 # Only warehouse reads pause for approval on this agent
-SQL_APPROVAL_TOOLS = ("execute_sql",)
+SQL_APPROVAL_TOOLS = ("execute_sql", "profile_column")
 
 
 def available_models() -> list[dict]:
@@ -122,6 +126,9 @@ program managers, not engineers — they know their programs deeply but do not k
 lowercase and fail with "column does not exist".
 - Access is strictly read-only. Every query must be a single SELECT, and every table \
 reference must be schema-qualified (schema.table).
+- Name the columns you select explicitly and qualify each one with its table \
+(e.g. SELECT p.name, b.district — never SELECT *). The user reviews this column \
+list before the query runs, so it must be readable.
 {org_memory_section(ctx)}
 ## How to work
 1. Discover before you write: use list_tables and get_table_details to learn exact \
@@ -192,19 +199,14 @@ def build_agent(
     checkpointer: BaseCheckpointSaver | None = None,
     model: BaseChatModel | None = None,
     human_in_the_loop: bool = True,
-    pii_rules: list[dict] | None = None,
 ):
     """Compile the agent graph. `model` is overridable for tests and the REPL.
 
     `human_in_the_loop=False` disables the approval/clarification interrupts for
     contexts with no human to answer them (evals, REPL) — there ask_user falls
-    back to its tool body and gated tools run without approval.
-
-    `pii_rules` are the org's extra PII detectors (RunContext.pii_rules),
-    layered on top of the immovable defaults — see agent/pii.py."""
+    back to its tool body and gated tools run without approval."""
     middleware = [
         sql_retry_limiter,  # must precede other before_model hooks: it can jump to end
-        *build_pii_middleware(pii_rules),  # mask PII before anything downstream sees it
         repair_foreign_tool_errors(SQL_AGENT_TOOLS),  # un-poison cross-agent tool errors
         org_system_prompt,
         trim_history,

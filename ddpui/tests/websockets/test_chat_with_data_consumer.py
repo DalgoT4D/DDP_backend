@@ -6,6 +6,7 @@ scripted; the checkpointer is in-memory.
 """
 
 import asyncio
+import json
 import os
 import uuid as uuid_lib
 
@@ -27,7 +28,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from django.core.management import call_command
 
-from ddpui.websockets.chat_with_data_consumer import ChatWithDataConsumer
+from ddpui.websockets.chat_with_data_consumer import ChatWithDataConsumer, _allowed_pii_columns
 from ddpui.websockets.schemas import WebsocketCloseCodes
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -295,6 +296,46 @@ def test_full_turn_streams_events_and_updates_title(orguser, scripted_turn):
     assert session.title == "Survey counts"
 
 
+def test_resume_approval_refuses_a_card_that_could_not_be_checked_for_pii(orguser, scripted_turn):
+    """Server-side enforcement of Fix 3: a request whose `columns` is explicitly
+    None (an unreviewable projection) must refuse approval even if some other
+    client skipped the browser's own disabled-button check."""
+    session = scripted_turn
+
+    async def scenario():
+        communicator = make_communicator(
+            session_id=session.id, token=token_for(orguser), orgslug=orguser.org.slug
+        )
+        connected, _ = await communicator.connect()
+        assert connected
+
+        await communicator.send_json_to({"action": "send_message", "message": "how many?"})
+        while True:
+            event = await communicator.receive_json_from(timeout=10)
+            if event["type"] == "input_required":
+                break
+
+        # rewrite the pending card in redis as if the projection could not be
+        # resolved for PII review (what pii_rewrite.UnresolvableProjection
+        # leaves behind), independent of how the card actually got there
+        from ddpui.websockets import chat_with_data_consumer as consumer_module
+
+        redis = consumer_module.RedisClient.get_instance()
+        key = f"chat_with_data:pending_input:{session.id}"
+        pending = json.loads(redis.get(key))
+        pending["event"]["requests"][0]["columns"] = None
+        redis.set(key, json.dumps(pending))
+
+        await communicator.send_json_to({"action": "resume_approval", "approve": True})
+        event = await communicator.receive_json_from(timeout=10)
+        assert event["type"] == "error"
+        assert "could not be checked" in event["message"]
+
+        await communicator.disconnect()
+
+    run(scenario())
+
+
 def test_unsupported_action_yields_error_event(orguser, scripted_turn):
     session = scripted_turn
 
@@ -366,3 +407,47 @@ def test_connect_without_token_is_closed(seed_db):
         await communicator.disconnect()
 
     run(scenario())
+
+
+def _pending(columns):
+    return {"event": {"requests": [{"tool": "execute_sql", "columns": columns}]}}
+
+
+def test_only_columns_the_card_offered_are_accepted():
+    pending = _pending(
+        [
+            {"schema": "prod", "table": "beneficiaries", "column": "phone"},
+            {"schema": "prod", "table": "beneficiaries", "column": "district"},
+        ]
+    )
+    allowed = _allowed_pii_columns(pending, ["prod.beneficiaries.phone", "prod.other.secret"])
+    assert allowed == {"prod.beneficiaries.phone"}
+
+
+def test_a_card_with_no_columns_accepts_nothing():
+    assert _allowed_pii_columns(_pending(None), ["prod.beneficiaries.phone"]) == set()
+
+
+def test_a_non_list_payload_is_ignored():
+    pending = _pending([{"schema": "prod", "table": "b", "column": "phone"}])
+    assert _allowed_pii_columns(pending, "prod.b.phone") == set()
+
+
+def test_mixed_card_offers_only_the_reviewable_requests_columns():
+    """One request could not be reviewed (columns: None), a sibling request
+    could — _allowed_pii_columns itself only ever offers what was reviewable;
+    the None request contributes nothing, whether or not it is refused
+    upstream (that refusal is the consumer's job, see Fix 3)."""
+    pending = {
+        "event": {
+            "requests": [
+                {"tool": "execute_sql", "columns": None},
+                {
+                    "tool": "profile_column",
+                    "columns": [{"schema": "prod", "table": "beneficiaries", "column": "phone"}],
+                },
+            ]
+        }
+    }
+    allowed = _allowed_pii_columns(pending, ["prod.beneficiaries.phone"])
+    assert allowed == {"prod.beneficiaries.phone"}
