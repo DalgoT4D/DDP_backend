@@ -97,6 +97,24 @@ def test_having_count_literal_is_not_a_column_literal():
     assert flags(sql) == {"prod.beneficiaries.phone": False}
 
 
+def test_sibling_subqueries_reusing_an_alias_resolve_independently():
+    sql = (
+        "SELECT x.phone, y.name "
+        "FROM (SELECT t.phone FROM prod.beneficiaries t) x "
+        "JOIN (SELECT t.name FROM prod.people t) y ON TRUE"
+    )
+    assert keys(sql) == ["prod.beneficiaries.phone", "prod.people.name"]
+
+
+def test_two_ctes_reusing_an_alias_resolve_independently():
+    sql = (
+        "WITH a AS (SELECT t.phone FROM prod.beneficiaries t), "
+        "b AS (SELECT t.name FROM prod.people t) "
+        "SELECT a.phone, b.name FROM a JOIN b ON TRUE"
+    )
+    assert keys(sql) == ["prod.beneficiaries.phone", "prod.people.name"]
+
+
 def test_unknown_column_raises_with_an_llm_readable_message():
     with pytest.raises(UnresolvableProjection, match="get_table_details"):
         resolve_projection("SELECT nope FROM prod.people", "postgres", SCHEMA)

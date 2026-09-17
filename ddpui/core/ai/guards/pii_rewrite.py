@@ -25,6 +25,7 @@ import sqlglot
 from sqlglot import expressions as exp
 from sqlglot.errors import OptimizeError, ParseError
 from sqlglot.optimizer.qualify import qualify
+from sqlglot.optimizer.scope import traverse_scope
 
 # Predicates whose literal operand puts a real value into the SQL text itself.
 # That text is persisted in the tool artifact, the checkpoint and the trace, so
@@ -70,17 +71,15 @@ def resolve_projection(sql: str, dialect: str, schema_map: dict) -> list[Project
     Over-listing only costs the user a tick that does nothing; under-listing would
     hide a column they needed to mask."""
     tree = _qualified_tree(sql, dialect, schema_map)
-    aliases = _alias_map(tree)
-    literals = _columns_compared_to_literals(tree, aliases)
+    literals = _columns_compared_to_literals(tree)
 
     found: dict[str, ProjectedColumn] = {}
-    for column in _projected_columns(tree, aliases):
-        schema, table = aliases[column.table]
-        key = f"{schema}.{table}.{column.name}"
+    for _column, key in _projected_columns(tree):
+        schema, table, column_name = key.split(".", 2)
         found[key] = ProjectedColumn(
             schema=schema,
             table=table,
-            column=column.name,
+            column=column_name,
             has_literal=key in literals,
         )
     return [found[key] for key in sorted(found)]
@@ -101,49 +100,55 @@ def _qualified_tree(sql: str, dialect: str, schema_map: dict) -> exp.Expression:
         ) from err
 
 
-def _alias_map(tree: exp.Expression) -> dict[str, tuple[str, str]]:
-    """{alias or table name: (schema, table)} for physical tables only.
-
-    qualify() rewrites every column to carry its table's ALIAS, not its schema, so
-    this is what turns `b.phone` into prod.beneficiaries.phone. CTE and subquery
-    names have no schema and are excluded — a column pointing at one is not a
-    physical column, and the hash is applied inside that CTE instead."""
-    return {
-        table.alias_or_name: (table.db, table.name)
-        for table in tree.find_all(exp.Table)
-        if table.db
-    }
-
-
-def _projected_columns(tree: exp.Expression, aliases: dict) -> list[exp.Column]:
-    """Every column reference inside any SELECT list in the tree that resolves to
-    a physical table."""
-    columns = []
-    for select in tree.find_all(exp.Select):
+def _projected_columns(tree: exp.Expression) -> list[tuple[exp.Column, str]]:
+    """(column node, schema.table.column) for every physical column projected in
+    any scope. Resolution is per-scope: two subqueries may use the same alias for
+    different tables, and a tree-wide alias map would silently merge them."""
+    pairs = []
+    for scope in traverse_scope(tree):
+        select = scope.expression
+        if not isinstance(select, exp.Select):
+            continue
         for projection in select.expressions:
-            columns.extend(
-                column for column in projection.find_all(exp.Column) if column.table in aliases
-            )
-    return columns
+            for column in projection.find_all(exp.Column):
+                key = _physical_key(scope, column)
+                if key:
+                    pairs.append((column, key))
+    return pairs
 
 
-def _columns_compared_to_literals(tree: exp.Expression, aliases: dict) -> set[str]:
+def _physical_key(scope, column: exp.Column) -> str | None:
+    """schema.table.column when this column reads from a real table in this scope,
+    else None — a column sourced from a CTE or subquery is hashed inside that body
+    instead, where it leaves its physical table."""
+    source = scope.sources.get(column.table)
+    if isinstance(source, exp.Table) and source.db:
+        return f"{source.db}.{source.name}.{column.name}"
+    return None
+
+
+def _columns_compared_to_literals(tree: exp.Expression) -> set[str]:
     """schema.table.column keys the SQL compares against a literal OUTSIDE any
     projection — i.e. a real value sitting in the query text."""
-    in_projection = {
+    projection_nodes = {
         id(node)
-        for select in tree.find_all(exp.Select)
-        for projection in select.expressions
+        for scope in traverse_scope(tree)
+        if isinstance(scope.expression, exp.Select)
+        for projection in scope.expression.expressions
         for node in projection.walk()
     }
     keys: set[str] = set()
-    for predicate in tree.find_all(*_PREDICATES):
-        if id(predicate) in in_projection:
+    for scope in traverse_scope(tree):
+        select = scope.expression
+        if not isinstance(select, exp.Select):
             continue
-        if not any(predicate.find_all(exp.Literal)):
-            continue
-        for column in predicate.find_all(exp.Column):
-            if column.table in aliases:
-                schema, table = aliases[column.table]
-                keys.add(f"{schema}.{table}.{column.name}")
+        for predicate in select.find_all(*_PREDICATES):
+            if id(predicate) in projection_nodes:
+                continue
+            if not any(predicate.find_all(exp.Literal)):
+                continue
+            for column in predicate.find_all(exp.Column):
+                key = _physical_key(scope, column)
+                if key:
+                    keys.add(key)
     return keys
