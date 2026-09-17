@@ -90,7 +90,7 @@ def test_ask_user_pauses_and_the_answer_becomes_the_tool_result():
     result, config = _invoke(agent, "how many enrollments?", context)
 
     interrupt = result["__interrupt__"][0]
-    event = input_required_event(interrupt.value)
+    event = input_required_event(interrupt.value, context)
     assert event["kind"] == "question"
     assert event["question"] == "Which program do you mean?"
 
@@ -114,7 +114,8 @@ def test_input_required_event_approval_kind_carries_sql():
                 }
             ],
             "review_configs": [],
-        }
+        },
+        make_context(FakeWarehouse()),
     )
     assert event == {
         "type": "input_required",
@@ -125,6 +126,7 @@ def test_input_required_event_approval_kind_carries_sql():
                 "args": {"sql": "SELECT 1"},
                 "description": "Waiting for your go-ahead",
                 "sql": "SELECT 1",
+                "columns": [],
             }
         ],
     }
@@ -162,3 +164,63 @@ def test_ask_user_without_middleware_falls_back_to_its_body():
     tool_messages = [m for m in result["messages"] if m.type == "tool" and m.name == "ask_user"]
     assert tool_messages and "No user is available" in tool_messages[-1].content
     assert result["messages"][-1].content == "Assuming 2026: 41 surveys."
+
+
+def test_approval_event_lists_the_querys_columns():
+    warehouse = FakeWarehouse()
+    warehouse.columns = [
+        {"name": "phone", "data_type": "text"},
+        {"name": "district", "data_type": "text"},
+    ]
+    warehouse.catalog_rows = [{"table_name": "beneficiaries", "approx_rows": 10}]
+    interrupt_value = {
+        "action_requests": [
+            {
+                "name": "execute_sql",
+                "args": {"sql": "SELECT phone FROM prod.beneficiaries WHERE phone = '99'"},
+                "description": "",
+            }
+        ]
+    }
+
+    event = input_required_event(interrupt_value, make_context(warehouse))
+
+    assert event["requests"][0]["columns"] == [
+        {
+            "schema": "prod",
+            "table": "beneficiaries",
+            "column": "phone",
+            "has_literal": True,
+        }
+    ]
+
+
+def test_approval_event_reports_a_column_build_failure():
+    warehouse = FakeWarehouse()
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("catalog unreachable")
+
+    warehouse.get_table_columns = boom
+    interrupt_value = {
+        "action_requests": [
+            {
+                "name": "execute_sql",
+                "args": {"sql": "SELECT district FROM prod.surveys"},
+                "description": "",
+            }
+        ]
+    }
+
+    event = input_required_event(interrupt_value, make_context(warehouse))
+
+    assert event["requests"][0]["columns"] is None
+    assert "catalog unreachable" in event["requests"][0]["columns_error"]
+
+
+def test_non_sql_tools_get_no_columns_field():
+    interrupt_value = {
+        "action_requests": [{"name": "create_chart", "args": {"title": "x"}, "description": ""}]
+    }
+    event = input_required_event(interrupt_value, make_context(FakeWarehouse()))
+    assert "columns" not in event["requests"][0]
