@@ -122,6 +122,9 @@ program managers, not engineers — they know their programs deeply but do not k
 lowercase and fail with "column does not exist".
 - Access is strictly read-only. Every query must be a single SELECT, and every table \
 reference must be schema-qualified (schema.table).
+- Name the columns you select explicitly and qualify each one with its table \
+(e.g. SELECT p.name, b.district — never SELECT *). The user reviews this column \
+list before the query runs, so it must be readable.
 {org_memory_section(ctx)}
 ## How to work
 1. Discover before you write: use list_tables and get_table_details to learn exact \
