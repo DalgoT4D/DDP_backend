@@ -74,14 +74,15 @@ def resolve_projection(sql: str, dialect: str, schema_map: dict) -> list[Project
     literals = _columns_compared_to_literals(tree)
 
     found: dict[str, ProjectedColumn] = {}
-    for _column, key in _projected_columns(tree):
-        schema, table, column_name = key.split(".", 2)
-        found[key] = ProjectedColumn(
+    for _column, source in _projected_columns(tree):
+        schema, table, column_name = source
+        resolved = ProjectedColumn(
             schema=schema,
             table=table,
             column=column_name,
-            has_literal=key in literals,
+            has_literal=source in literals,
         )
+        found[resolved.key] = resolved
     return [found[key] for key in sorted(found)]
 
 
@@ -100,10 +101,15 @@ def _qualified_tree(sql: str, dialect: str, schema_map: dict) -> exp.Expression:
         ) from err
 
 
-def _projected_columns(tree: exp.Expression) -> list[tuple[exp.Column, str]]:
-    """(column node, schema.table.column) for every physical column projected in
-    any scope. Resolution is per-scope: two subqueries may use the same alias for
-    different tables, and a tree-wide alias map would silently merge them."""
+def _projected_columns(
+    tree: exp.Expression,
+) -> list[tuple[exp.Column, tuple[str, str, str]]]:
+    """(column node, (schema, table, column)) for every physical column projected
+    in any scope. Yields the triple, not the joined "schema.table.column" key —
+    format with ".".join(source) if a joined string is needed.
+
+    Resolution is per-scope: two subqueries may use the same alias for different
+    tables, and a tree-wide alias map would silently merge them."""
     pairs = []
     for scope in traverse_scope(tree):
         select = scope.expression
@@ -111,25 +117,30 @@ def _projected_columns(tree: exp.Expression) -> list[tuple[exp.Column, str]]:
             continue
         for projection in select.expressions:
             for column in projection.find_all(exp.Column):
-                key = _physical_key(scope, column)
-                if key:
-                    pairs.append((column, key))
+                # find_all crosses scope boundaries; a column inside a scalar
+                # subquery belongs to that subquery's scope, which traverse_scope
+                # visits separately and where it resolves correctly
+                if column.find_ancestor(exp.Select) is not select:
+                    continue
+                source = _physical_source(scope, column)
+                if source:
+                    pairs.append((column, source))
     return pairs
 
 
-def _physical_key(scope, column: exp.Column) -> str | None:
-    """schema.table.column when this column reads from a real table in this scope,
-    else None — a column sourced from a CTE or subquery is hashed inside that body
-    instead, where it leaves its physical table."""
+def _physical_source(scope, column: exp.Column) -> tuple[str, str, str] | None:
+    """(schema, table, column) when this column reads from a real table in this
+    scope, else None — a column sourced from a CTE or subquery is hashed inside
+    that body instead, where it leaves its physical table."""
     source = scope.sources.get(column.table)
     if isinstance(source, exp.Table) and source.db:
-        return f"{source.db}.{source.name}.{column.name}"
+        return source.db, source.name, column.name
     return None
 
 
-def _columns_compared_to_literals(tree: exp.Expression) -> set[str]:
-    """schema.table.column keys the SQL compares against a literal OUTSIDE any
-    projection — i.e. a real value sitting in the query text."""
+def _columns_compared_to_literals(tree: exp.Expression) -> set[tuple[str, str, str]]:
+    """(schema, table, column) triples the SQL compares against a literal OUTSIDE
+    any projection — i.e. a real value sitting in the query text."""
     projection_nodes = {
         id(node)
         for scope in traverse_scope(tree)
@@ -137,7 +148,7 @@ def _columns_compared_to_literals(tree: exp.Expression) -> set[str]:
         for projection in scope.expression.expressions
         for node in projection.walk()
     }
-    keys: set[str] = set()
+    keys: set[tuple[str, str, str]] = set()
     for scope in traverse_scope(tree):
         select = scope.expression
         if not isinstance(select, exp.Select):
@@ -145,10 +156,14 @@ def _columns_compared_to_literals(tree: exp.Expression) -> set[str]:
         for predicate in select.find_all(*_PREDICATES):
             if id(predicate) in projection_nodes:
                 continue
+            if predicate.find_ancestor(exp.Select) is not select:
+                continue
             if not any(predicate.find_all(exp.Literal)):
                 continue
             for column in predicate.find_all(exp.Column):
-                key = _physical_key(scope, column)
-                if key:
-                    keys.add(key)
+                if column.find_ancestor(exp.Select) is not select:
+                    continue
+                source = _physical_source(scope, column)
+                if source:
+                    keys.add(source)
     return keys

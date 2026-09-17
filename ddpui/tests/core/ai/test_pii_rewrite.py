@@ -115,6 +115,16 @@ def test_two_ctes_reusing_an_alias_resolve_independently():
     assert keys(sql) == ["prod.beneficiaries.phone", "prod.people.name"]
 
 
+def test_scalar_subquery_columns_do_not_leak_into_the_outer_scope():
+    # the inner alias `t` shadows the outer `t`; each must resolve in its own scope
+    sql = (
+        "SELECT t.name, "
+        "(SELECT t.phone FROM prod.beneficiaries t WHERE t.person_id = 5) AS sub "
+        "FROM prod.people t"
+    )
+    assert keys(sql) == ["prod.beneficiaries.phone", "prod.people.name"]
+
+
 def test_unknown_column_raises_with_an_llm_readable_message():
     with pytest.raises(UnresolvableProjection, match="get_table_details"):
         resolve_projection("SELECT nope FROM prod.people", "postgres", SCHEMA)
