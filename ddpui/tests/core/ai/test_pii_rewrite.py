@@ -5,9 +5,12 @@ returns, so these tests exercise the same input the tools pass in production.
 """
 
 import pytest
+import sqlglot
 
 from ddpui.core.ai.guards.pii_rewrite import (
     UnresolvableProjection,
+    _qualified_tree,
+    hash_projection,
     resolve_projection,
 )
 
@@ -128,3 +131,74 @@ def test_scalar_subquery_columns_do_not_leak_into_the_outer_scope():
 def test_unknown_column_raises_with_an_llm_readable_message():
     with pytest.raises(UnresolvableProjection, match="get_table_details"):
         resolve_projection("SELECT nope FROM prod.people", "postgres", SCHEMA)
+
+
+def rewrite(sql, ticked, dialect="postgres"):
+    return hash_projection(sql, dialect, SCHEMA, set(ticked))
+
+
+def test_ticked_column_is_wrapped_and_keeps_its_alias():
+    out = rewrite(
+        "SELECT phone AS contact FROM prod.beneficiaries",
+        {"prod.beneficiaries.phone"},
+    )
+    assert "MD5(CAST(" in out
+    assert 'AS "contact"' in out
+
+
+def test_no_ticks_returns_the_sql_verbatim():
+    sql = "SELECT phone FROM prod.beneficiaries"
+    assert rewrite(sql, set()) == sql
+
+
+def test_unticked_columns_are_left_alone():
+    out = rewrite(
+        "SELECT phone, district FROM prod.beneficiaries",
+        {"prod.beneficiaries.phone"},
+    )
+    assert out.count("MD5") == 1
+    assert '"district"' in out
+
+
+def test_count_distinct_wraps_inside_the_aggregate():
+    out = rewrite(
+        "SELECT COUNT(DISTINCT phone) AS uniq FROM prod.beneficiaries",
+        {"prod.beneficiaries.phone"},
+    )
+    assert "COUNT(DISTINCT MD5(CAST(" in out
+    assert 'AS "uniq"' in out
+
+
+def test_where_and_join_are_untouched_by_the_rewrite():
+    sql = (
+        "SELECT p.name, b.phone FROM prod.people p "
+        "JOIN prod.beneficiaries b ON b.person_id = p.id "
+        "WHERE b.phone = '9876543210'"
+    )
+    hashed = sqlglot.parse_one(rewrite(sql, {"prod.beneficiaries.phone"}), dialect="postgres")
+    plain = _qualified_tree(sql, "postgres", SCHEMA)
+
+    assert hashed.args["where"].sql() == plain.args["where"].sql()
+    assert hashed.args["joins"][0].sql() == plain.args["joins"][0].sql()
+    assert "MD5" in hashed.sql()  # the projection DID change
+
+
+def test_cte_column_is_hashed_inside_the_cte_body():
+    out = rewrite(
+        "WITH x AS (SELECT phone FROM prod.beneficiaries) "
+        "SELECT phone, COUNT(*) FROM x GROUP BY phone",
+        {"prod.beneficiaries.phone"},
+    )
+    # hashed at the source, so the outer query's x.phone is already a hash
+    assert out.index("MD5") < out.index('FROM "x"')
+    assert out.count("MD5") == 1
+
+
+def test_bigquery_uses_to_hex_over_md5():
+    out = rewrite(
+        "SELECT phone FROM prod.beneficiaries",
+        {"prod.beneficiaries.phone"},
+        dialect="bigquery",
+    )
+    assert "TO_HEX(MD5(CAST(" in out
+    assert "STRING" in out

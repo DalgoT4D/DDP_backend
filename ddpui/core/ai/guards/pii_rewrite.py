@@ -138,6 +138,38 @@ def _physical_source(scope, column: exp.Column) -> tuple[str, str, str] | None:
     return None
 
 
+# Warehouse-side hash per dialect. The cast is required: these functions take
+# text, and PII columns are often numeric (phone numbers, beneficiary ids).
+# Plain md5, deliberately unsalted — the same value must hash identically across
+# queries so a hashed column can still be counted and joined.
+_HASH_CAST_TYPE = {"postgres": "text", "bigquery": "string"}
+
+
+def hash_projection(sql: str, dialect: str, schema_map: dict, pii_columns: set[str]) -> str:
+    """Wrap each ticked column in the warehouse's hash function wherever it is
+    projected. Returns `sql` untouched when nothing is ticked, so the no-PII path
+    costs no reserialization."""
+    if not pii_columns:
+        return sql
+
+    tree = _qualified_tree(sql, dialect, schema_map)
+    for column, source in _projected_columns(tree):
+        if ".".join(source) in pii_columns:
+            column.replace(_hashed(column, dialect))
+    return tree.sql(dialect=dialect)
+
+
+def _hashed(column: exp.Column, dialect: str) -> exp.Expression:
+    """md5(col::text) on postgres, TO_HEX(MD5(CAST(col AS STRING))) on bigquery —
+    both return hex text, so the result reads the same to the model either way."""
+    cast_type = _HASH_CAST_TYPE.get(dialect, "text")
+    casted = exp.cast(column.copy(), cast_type, dialect=dialect)
+    digest = exp.func("md5", casted, dialect=dialect)
+    if dialect == "bigquery":
+        return exp.func("to_hex", digest, dialect=dialect)
+    return digest
+
+
 def _columns_compared_to_literals(tree: exp.Expression) -> set[tuple[str, str, str]]:
     """(schema, table, column) triples the SQL compares against a literal OUTSIDE
     any projection — i.e. a real value sitting in the query text."""
