@@ -26,6 +26,7 @@ from sqlglot import expressions as exp
 from sqlglot.errors import OptimizeError, ParseError
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import traverse_scope
+from sqlglot.schema import MappingSchema
 
 # Predicates whose literal operand puts a real value into the SQL text itself.
 # That text is persisted in the tool artifact, the checkpoint and the trace, so
@@ -91,8 +92,12 @@ def _qualified_tree(sql: str, dialect: str, schema_map: dict) -> exp.Expression:
         tree = sqlglot.parse_one(sql, dialect=dialect)
     except ParseError as err:
         raise UnresolvableProjection(f"Could not parse the SQL: {err}") from err
+    # normalize=False: the schema map carries the warehouse's real casing, and
+    # Airbyte raw tables are mixed-case (tap."TLM26_StudentDetails"). Letting
+    # sqlglot lowercase the map's keys makes a quoted identifier unmatchable.
+    schema = MappingSchema(schema_map, normalize=False, dialect=dialect)
     try:
-        return qualify(tree, dialect=dialect, schema=schema_map)
+        return qualify(tree, dialect=dialect, schema=schema)
     except OptimizeError as err:
         raise UnresolvableProjection(
             f"Could not work out which table each selected column belongs to ({err}). "

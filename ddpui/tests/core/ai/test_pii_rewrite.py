@@ -202,3 +202,21 @@ def test_bigquery_uses_to_hex_over_md5():
     )
     assert "TO_HEX(MD5(CAST(" in out
     assert "STRING" in out
+
+
+def test_mixed_case_quoted_identifiers_resolve_and_hash():
+    # Airbyte raw tables are mixed-case and the agent is told to double-quote them;
+    # the resolved key must keep the warehouse's real casing so it matches the
+    # key the approval card showed the user
+    schema = {"tap": {"TLM26_StudentDetails": {"Phone_No": "text", "Gender": "text"}}}
+    sql = 'SELECT "Phone_No", "Gender" FROM tap."TLM26_StudentDetails"'
+
+    resolved = [column.key for column in resolve_projection(sql, "postgres", schema)]
+    assert resolved == [
+        "tap.TLM26_StudentDetails.Gender",
+        "tap.TLM26_StudentDetails.Phone_No",
+    ]
+
+    # every key the card offers must actually cause a hash when ticked
+    out = hash_projection(sql, "postgres", schema, set(resolved))
+    assert out.upper().count("MD5") == 2
