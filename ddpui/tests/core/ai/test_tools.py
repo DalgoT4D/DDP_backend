@@ -17,6 +17,7 @@ from ddpui.core.ai.tools.schema_tools import (
 )
 from ddpui.core.ai.tools.profile_tools import profile_column
 from ddpui.core.ai.tools.sql_tools import execute_sql
+from ddpui.core.ai.tools import catalog
 
 
 class FakeWarehouse:
@@ -224,3 +225,21 @@ def test_registry_names_filter_selects_a_subset_and_rejects_typos():
     assert [t.name for t in subset] == ["execute_sql", "ask_user"]
     with _pytest.raises(KeyError, match="no_such_tool"):
         get_tools(names=("no_such_tool",))
+
+
+def test_schema_map_for_shapes_the_qualify_input():
+    warehouse = FakeWarehouse()
+    warehouse.columns = [
+        {"name": "phone", "data_type": "text"},
+        {"name": "person_id", "data_type": "integer"},
+    ]
+    ctx = make_runtime(warehouse).context
+
+    mapping = catalog.schema_map_for(ctx, {"prod.beneficiaries"})
+
+    assert mapping == {"prod": {"beneficiaries": {"phone": "text", "person_id": "integer"}}}
+
+
+def test_schema_map_for_skips_unqualified_names():
+    ctx = make_runtime(FakeWarehouse()).context
+    assert catalog.schema_map_for(ctx, {"bare_name"}) == {}
