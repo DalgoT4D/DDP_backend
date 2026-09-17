@@ -243,3 +243,33 @@ def test_schema_map_for_shapes_the_qualify_input():
 def test_schema_map_for_skips_unqualified_names():
     ctx = make_runtime(FakeWarehouse()).context
     assert catalog.schema_map_for(ctx, {"bare_name"}) == {}
+
+
+def test_execute_sql_hashes_ticked_columns():
+    warehouse = FakeWarehouse(rows=[{"phone": "abc123"}])
+    warehouse.columns = [
+        {"name": "phone", "data_type": "text"},
+        {"name": "district", "data_type": "text"},
+    ]
+    warehouse.catalog_rows = [{"table_name": "beneficiaries", "approx_rows": 10}]
+    runtime = make_runtime(warehouse)
+    runtime.context.pii_columns = {"prod.beneficiaries.phone"}
+
+    content, artifact = execute_sql.func(
+        sql="SELECT phone, district FROM prod.beneficiaries",
+        runtime=runtime,
+    )
+
+    assert artifact["status"] == "success"
+    assert "MD5(CAST(" in artifact["sql"]
+    assert "MD5" in warehouse.executed[-1]
+
+
+def test_execute_sql_without_ticks_runs_unhashed():
+    warehouse = FakeWarehouse(rows=[{"district": "Pune"}])
+    runtime = make_runtime(warehouse)
+
+    _, artifact = execute_sql.func(sql="SELECT district FROM prod.surveys", runtime=runtime)
+
+    assert artifact["status"] == "success"
+    assert "MD5" not in warehouse.executed[-1]
