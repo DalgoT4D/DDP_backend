@@ -91,3 +91,21 @@ AIRBYTE_JOB_STATUS_FAILED = "failed"
 AIRBYTE_JOB_STATUS_CANCELLED = "cancelled"
 
 AIRBYTE_CONNECTION_DEPRECATED = "deprecated"
+
+
+# Image uploads — shared by dashboard widget images and org logo
+ALLOWED_IMAGE_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+}
+MAX_IMAGE_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+IMAGE_CONTENT_TYPE_TO_EXT = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/svg+xml": "svg",
+}
