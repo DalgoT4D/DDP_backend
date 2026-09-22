@@ -981,7 +981,16 @@ def apply_chart_sorting(
                     or f"{matching_metric.aggregation}_{matching_metric.column}"
                 )
         else:
-            # It's a dimension column - use as-is
+            # It's a dimension column - only allow if it appears in GROUP BY
+            # (or if the query has no GROUP BY, i.e. non-aggregate)
+            if query_builder.group_by_clauses:
+                grouped_col_names = {
+                    clause.name
+                    for clause in query_builder.group_by_clauses
+                    if hasattr(clause, "name")
+                }
+                if column_name not in grouped_col_names:
+                    continue
             sort_column = column_name
 
         sort_cols.append((sort_column, direction))
