@@ -124,7 +124,7 @@ class DataStats(ColInsight):
                     "mode": float(result[0]["mode"]) if result[0]["mode"] else None,
                     "other_modes": [
                         (float(other_mode) if other_mode else None)
-                        for other_mode in result[0]["other_modes"]
+                        for other_mode in (result[0]["other_modes"] or [])
                     ],
                 }
             }
