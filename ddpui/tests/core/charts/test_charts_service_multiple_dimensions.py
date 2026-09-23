@@ -402,6 +402,54 @@ class TestGetChartDataTablePreview:
         assert "Average Price" in columns
 
 
+    @patch("ddpui.core.charts.charts_service.build_chart_query")
+    @patch("ddpui.core.charts.charts_service.execute_query")
+    @patch("ddpui.core.charts.charts_service.get_warehouse_client")
+    def test_preview_number_chart_no_dimensions(
+        self, mock_warehouse, mock_execute, mock_build_query
+    ):
+        """Number charts have no dimensions — preview must not crash"""
+        mock_warehouse.return_value = MagicMock()
+        mock_build_query.return_value = MagicMock()
+        mock_execute.return_value = [{"sum_amount": 42000}]
+
+        mock_org_warehouse = MagicMock(spec=OrgWarehouse)
+
+        payload = ChartDataPayload(
+            chart_type="number",
+            schema_name="public",
+            table_name="test",
+            metrics=[ChartMetric(aggregation="sum", column="amount", alias="sum_amount")],
+        )
+
+        result = charts_service.get_chart_data_table_preview(mock_org_warehouse, payload, 0, 10)
+
+        assert result["columns"] == ["sum_amount"]
+        assert result["data"] == [{"sum_amount": 42000}]
+
+    @patch("ddpui.core.charts.charts_service.build_chart_query")
+    @patch("ddpui.core.charts.charts_service.execute_query")
+    @patch("ddpui.core.charts.charts_service.get_warehouse_client")
+    def test_preview_table_chart_no_dimensions_raises(
+        self, mock_warehouse, mock_execute, mock_build_query
+    ):
+        """Table charts still require at least one dimension"""
+        mock_warehouse.return_value = MagicMock()
+        mock_build_query.return_value = MagicMock()
+
+        mock_org_warehouse = MagicMock(spec=OrgWarehouse)
+
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test",
+            metrics=[ChartMetric(aggregation="count", column=None, alias="Total Count")],
+        )
+
+        with pytest.raises(ValueError, match="At least one dimension is required for table charts"):
+            charts_service.get_chart_data_table_preview(mock_org_warehouse, payload, 0, 10)
+
+
 class TestTransformDataForMap:
     """Map transform must support calculated (column_expression) metrics like every other
     aggregated chart type.

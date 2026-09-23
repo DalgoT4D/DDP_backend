@@ -1625,7 +1625,7 @@ def get_chart_data_table_preview(
     dimensions = normalize_dimensions(payload)
 
     # Add all dimension columns
-    if not dimensions or len(dimensions) == 0:
+    if not dimensions and payload.chart_type == "table":
         error_msg = (
             f"Table preview - ERROR: No dimensions found after normalization! "
             f"Payload had: dimensions={payload.dimensions}, dimension_col={payload.dimension_col}, "
@@ -1644,17 +1644,8 @@ def get_chart_data_table_preview(
     # Handle multiple metrics (if present)
     if payload.metrics:
         for metric in payload.metrics:
-            # Handle COUNT(*) case - SQL alias includes count_all_ prefix
-            if (
-                metric.aggregation
-                and metric.aggregation.lower() == "count"
-                and metric.column is None
-            ):
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                display_name = metric.alias or "Total Count"
-            else:
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+            alias = metric_sql_alias(metric)
+            display_name = metric_display_name(metric)
             # Use SQL alias for column_mapping to match query results
             # Use display_name for columns array to match transform_data_for_chart
             column_mapping.append((alias, col_index))
@@ -1690,16 +1681,8 @@ def get_chart_data_table_preview(
         # Transform metric columns from alias to display_name
         if payload.metrics:
             for metric in payload.metrics:
-                if (
-                    metric.aggregation
-                    and metric.aggregation.lower() == "count"
-                    and metric.column is None
-                ):
-                    alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                    display_name = metric.alias or "Total Count"
-                else:
-                    alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+                alias = metric_sql_alias(metric)
+                display_name = metric_display_name(metric)
 
                 # Map from alias (query result key) to display_name (column name)
                 transformed_row[display_name] = row.get(alias, 0)
@@ -1719,15 +1702,7 @@ def get_chart_data_table_preview(
         expected_columns = dimensions.copy()
         if payload.metrics:
             for metric in payload.metrics:
-                if (
-                    metric.aggregation
-                    and metric.aggregation.lower() == "count"
-                    and metric.column is None
-                ):
-                    display_name = metric.alias or "Total Count"
-                else:
-                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
-                expected_columns.append(display_name)
+                expected_columns.append(metric_display_name(metric))
 
         missing_cols = [col for col in expected_columns if col not in transformed_data[0]]
         if missing_cols:
