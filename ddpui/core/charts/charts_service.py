@@ -948,6 +948,10 @@ def apply_chart_sorting(
     if not sort_config:
         return query_builder
 
+    # Collect valid dimension columns (those in GROUP BY) so we can reject
+    # sort columns that would cause a PostgreSQL GroupingError.
+    valid_dimensions = set(normalize_dimensions(payload)) if payload else set()
+
     # Prepare sort columns as list of tuples for order_cols_by method
     sort_cols = []
     for sort_item in sort_config:
@@ -981,7 +985,14 @@ def apply_chart_sorting(
                     or f"{matching_metric.aggregation}_{matching_metric.column}"
                 )
         else:
-            # It's a dimension column - use as-is
+            # Aggregated queries require sort columns to be in GROUP BY;
+            # skip columns that are neither a metric alias nor a dimension.
+            if payload and payload.metrics and column_name not in valid_dimensions:
+                logger.warning(
+                    f"Skipping sort column '{column_name}': "
+                    "not a metric alias or GROUP BY dimension"
+                )
+                continue
             sort_column = column_name
 
         sort_cols.append((sort_column, direction))
