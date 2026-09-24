@@ -7,6 +7,7 @@ import copy
 from datetime import datetime
 
 from ninja import Router, Schema
+from pydantic import ValidationError
 from django.conf import settings
 from django.utils import timezone
 from django.db.models import F
@@ -35,6 +36,7 @@ from ddpui.schemas.chart_schemas import (
     ChartConfig,
     ChartDataResponse,
     ChartDataPayload,
+    ChartSort,
     MapDataOverlayPayload,
 )
 from ddpui.core.charts import charts_service
@@ -1257,9 +1259,25 @@ def get_public_report_chart_data(request, token: str, chart_id: int):
         return 404, PublicErrorResponse(error="Chart data unavailable", is_valid=False)
 
 
+def _apply_live_sort_search_override(
+    chart_payload: ChartDataPayload, sort: Optional[str], search: Optional[str]
+) -> None:
+    """Apply live sort/search on top of the frozen payload — everything else stays frozen."""
+    if not sort and not search:
+        return
+    if chart_payload.extra_config is None:
+        chart_payload.extra_config = {}
+    if sort:
+        chart_payload.extra_config["sort"] = [
+            ChartSort(**item).model_dump() for item in json.loads(sort)
+        ]
+    if search:
+        chart_payload.extra_config["search"] = search
+
+
 @public_router.get(
     "/reports/{token}/charts/{chart_id}/data-preview/",
-    response={200: dict, 404: PublicErrorResponse},
+    response={200: dict, 400: PublicErrorResponse, 404: PublicErrorResponse},
 )
 def get_public_report_table_data(
     request,
@@ -1267,6 +1285,8 @@ def get_public_report_table_data(
     chart_id: int,
     page: int = 0,
     limit: int = 100,
+    sort: Optional[str] = None,
+    search: Optional[str] = None,
     dashboard_filters: Optional[str] = None,
 ):
     """Get table chart data for a public report"""
@@ -1289,6 +1309,7 @@ def get_public_report_table_data(
         )
 
         chart_payload = charts_service.build_chart_data_payload(config, resolved_filters)
+        _apply_live_sort_search_override(chart_payload, sort, search)
 
         preview_data = charts_service.get_chart_data_table_preview(
             org_warehouse, chart_payload, page, limit
@@ -1308,6 +1329,9 @@ def get_public_report_table_data(
         return 404, PublicErrorResponse(
             error="Report not found or no longer public", is_valid=False
         )
+    except (json.JSONDecodeError, TypeError, ValidationError) as e:
+        logger.warning(f"Public report table data - invalid sort parameter: {str(e)}")
+        return 400, PublicErrorResponse(error="Invalid sort parameter", is_valid=False)
     except Exception as e:
         logger.error(f"Public report table data error: {str(e)}")
         return 404, PublicErrorResponse(error="Table data unavailable", is_valid=False)
@@ -1318,9 +1342,16 @@ def get_public_report_table_data(
     response={200: dict, 404: PublicErrorResponse},
 )
 def get_public_report_table_total_rows(
-    request, token: str, chart_id: int, dashboard_filters: Optional[str] = None
+    request,
+    token: str,
+    chart_id: int,
+    search: Optional[str] = None,
+    dashboard_filters: Optional[str] = None,
 ):
-    """Get total row count for table chart in a public report"""
+    """Get total row count for table chart in a public report.
+
+    Sort isn't accepted here — it can't change a row count, only search can.
+    """
     try:
         snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
             token, chart_id, request
@@ -1340,6 +1371,7 @@ def get_public_report_table_total_rows(
         )
 
         chart_payload = charts_service.build_chart_data_payload(config, resolved_filters)
+        _apply_live_sort_search_override(chart_payload, sort=None, search=search)
 
         total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
 

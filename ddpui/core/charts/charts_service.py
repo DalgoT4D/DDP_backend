@@ -6,12 +6,12 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 from collections import defaultdict
 
-from sqlalchemy import column, func, and_, or_, text, literal_column
+from sqlalchemy import column, func, and_, or_, text, literal_column, cast, String
 
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.metric import Metric
 from ddpui.models.visualization import Chart
-from ddpui.core.datainsights.query_builder import AggQueryBuilder
+from ddpui.core.datainsights.query_builder import AggQueryBuilder, build_aggregate_expression
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.custom_logger import CustomLogger
@@ -573,11 +573,40 @@ def build_chart_query(
                 # Aggregated query: use multi-metric query builder
                 query_builder = build_multi_metric_query(payload, query_builder, org_warehouse)
 
-            # Apply filters and sorting before returning
+            # Apply filters, search and sorting before returning
             if payload.dashboard_filters:
                 query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
             if payload.extra_config and payload.extra_config.get("filters"):
                 query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])
+            if payload.extra_config and payload.extra_config.get("search"):
+                # HAVING can only reference GROUP BY keys. With metrics + time_grain +
+                # a warehouse, the primary dimension is grouped by DATE_TRUNC(...), not
+                # its raw column, so search must use that same expression. Otherwise
+                # (any one missing) it's grouped by the raw column, which stays searchable.
+                time_grain = payload.extra_config.get("time_grain")
+                warehouse_type = org_warehouse.wtype.lower() if org_warehouse else None
+                primary_dim_is_time_grained = bool(
+                    payload.metrics
+                    and time_grain
+                    and warehouse_type
+                    and payload.dimension_col
+                    and payload.dimension_col in dimensions
+                )
+                extra_search_expressions = None
+                if primary_dim_is_time_grained:
+                    search_dimensions = [d for d in dimensions if d != payload.dimension_col]
+                    extra_search_expressions = [
+                        apply_time_grain(column(payload.dimension_col), time_grain, warehouse_type)
+                    ]
+                else:
+                    search_dimensions = dimensions
+                query_builder = apply_table_search(
+                    query_builder,
+                    payload.extra_config["search"],
+                    search_dimensions,
+                    payload.metrics,
+                    extra_expressions=extra_search_expressions,
+                )
             if payload.extra_config and payload.extra_config.get("sort"):
                 query_builder = apply_chart_sorting(
                     query_builder, payload.extra_config["sort"], payload
@@ -924,6 +953,69 @@ def apply_chart_filters(
             query_builder.where_clause(column(column_name).is_(None))
         elif operator == "is_not_null":
             query_builder.where_clause(column(column_name).isnot(None))
+
+    return query_builder
+
+
+def apply_table_search(
+    query_builder: AggQueryBuilder,
+    search_term: str,
+    columns: List[str],
+    metrics: Optional[List[Any]] = None,
+    extra_expressions: Optional[List[Any]] = None,
+) -> AggQueryBuilder:
+    """Filter table-chart rows to those where any column, metric, or extra expression
+    contains the search term.
+
+    Case-insensitive substring match, OR'd across columns (matches if ANY column
+    contains the term) — unlike apply_chart_filters, which ANDs distinct filter
+    conditions together and can't express "match in any of these columns".
+
+    Everything is cast to text first: dimensions/metrics aren't always strings
+    (e.g. a boolean column or a COUNT), and lower()/like() only accept text —
+    Postgres errors with "function lower(boolean) does not exist" otherwise.
+
+    Without metrics or extra_expressions, this is a plain WHERE (filters raw rows,
+    cheaper). With either, dimensions are grouped (GROUP BY), so a metric's value
+    only exists post-aggregation — WHERE can't see it. The whole condition (columns +
+    metrics + extra_expressions) moves to HAVING instead, referencing the grouped
+    dimension columns directly (valid — they're GROUP BY keys, not output aliases)
+    alongside the same aggregate/derived expressions used to build the SELECT list.
+
+    Args:
+        query_builder: The AggQueryBuilder instance to modify
+        search_term: Raw search text from the table's search box
+        columns: Column names to search across (a table chart's dimensions)
+        metrics: The chart's metrics (ChartMetric-like objects), if any
+        extra_expressions: Pre-built SQLAlchemy expressions to search via HAVING —
+            e.g. a time-grain-transformed dimension, which must reuse the exact same
+            expression used in GROUP BY rather than its raw column name.
+
+    Returns:
+        Modified query builder with the search condition applied
+    """
+    if not search_term or (not columns and not metrics and not extra_expressions):
+        return query_builder
+
+    pattern = f"%{search_term.strip().lower()}%"
+    conditions = [func.lower(cast(column(col), String)).like(pattern) for col in columns]
+    for expr in extra_expressions or []:
+        conditions.append(func.lower(cast(expr, String)).like(pattern))
+
+    if not metrics and not extra_expressions:
+        query_builder.where_clause(or_(*conditions))
+        return query_builder
+
+    for metric in metrics or []:
+        if metric.column_expression:
+            expr = literal_column(metric.column_expression)
+        else:
+            if not metric.aggregation:
+                continue
+            expr = build_aggregate_expression(metric.column, metric.aggregation)
+        conditions.append(func.lower(cast(expr, String)).like(pattern))
+
+    query_builder.having_clause(or_(*conditions))
 
     return query_builder
 
