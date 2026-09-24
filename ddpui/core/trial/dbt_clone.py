@@ -57,6 +57,8 @@ def _copy_canvas(template_dbt: OrgDbt, trial_dbt: OrgDbt, model_map: dict) -> No
             operation_config=node.operation_config,
             output_cols=node.output_cols,
             dbtmodel=new_dbtmodel,
+            position_x=node.position_x,
+            position_y=node.position_y,
         )
         node_map[node.id] = new_node
 
