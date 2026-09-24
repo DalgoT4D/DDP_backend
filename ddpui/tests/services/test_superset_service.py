@@ -259,3 +259,52 @@ class TestSupersetService:
                 assert args[0] == cache_key
                 assert args[1] == thumbnail_data
                 assert args[2] == 3600  # Thumbnail cache TTL
+
+    def test_import_dashboard_success(self, superset_service, mock_redis):
+        """Test dashboard bundle import posts the zip with csrf + form fields."""
+        bundle_zip = b"fake-zip-bytes"
+
+        with patch.object(superset_service, "get_access_token", return_value="test-token"):
+            with patch.object(
+                superset_service,
+                "get_csrf_token",
+                return_value=("csrf-token", "session-cookie"),
+            ):
+                with patch.object(superset_service, "_make_request_with_retry") as mock_request:
+                    mock_response = Mock()
+                    mock_response.json.return_value = {"message": "OK"}
+                    mock_request.return_value = mock_response
+
+                    result = superset_service.import_dashboard(
+                        bundle_zip,
+                        passwords={"databases/warehouse.yaml": "secret"},
+                    )
+
+                    assert result == {"message": "OK"}
+                    args, kwargs = mock_request.call_args
+                    assert args[0] == "POST"
+                    assert args[1] == "https://superset.example.com/api/v1/dashboard/import/"
+                    assert kwargs["headers"]["X-CSRFToken"] == "csrf-token"
+                    assert kwargs["headers"]["Referer"] == "https://superset.example.com"
+                    assert kwargs["cookies"] == {"session": "session-cookie"}
+                    assert kwargs["files"]["formData"][1] == bundle_zip
+                    assert kwargs["data"]["overwrite"] == "true"
+                    assert json.loads(kwargs["data"]["passwords"]) == {
+                        "databases/warehouse.yaml": "secret"
+                    }
+
+    def test_import_dashboard_defaults(self, superset_service, mock_redis):
+        """Test import defaults: empty passwords, overwrite enabled."""
+        with patch.object(superset_service, "get_access_token", return_value="test-token"):
+            with patch.object(superset_service, "get_csrf_token", return_value=("csrf-token", "")):
+                with patch.object(superset_service, "_make_request_with_retry") as mock_request:
+                    mock_response = Mock()
+                    mock_response.json.return_value = {"message": "OK"}
+                    mock_request.return_value = mock_response
+
+                    superset_service.import_dashboard(b"zip")
+
+                    _, kwargs = mock_request.call_args
+                    assert kwargs["data"]["passwords"] == "{}"
+                    assert kwargs["data"]["overwrite"] == "true"
+                    assert kwargs["cookies"] == {}
