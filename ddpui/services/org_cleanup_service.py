@@ -14,6 +14,7 @@ from ddpui.models.org_plans import OrgPlans
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.llm import LlmSession
 from ddpui.models.metric import KPI, Metric
+from rest_framework.authtoken.models import Token
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import prefect_service
@@ -390,6 +391,7 @@ class OrgCleanupService:
                 remaining = OrgUser.objects.filter(user=user).exclude(org=self.org).count()
                 if remaining == 0:
                     logger.info("deleting user %s (no remaining org memberships)", user.email)
+                    Token.objects.filter(user=user).delete()
                     user.delete()
                 else:
                     logger.info(
