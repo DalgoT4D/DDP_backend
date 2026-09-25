@@ -229,7 +229,6 @@ def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
         )
 
 
-
 def test_post_notification_v1_email_supersadmins():
     """tests the api endpoint /notifications/ ; fail & if logs are being sent"""
     blockid = str(uuid4())
