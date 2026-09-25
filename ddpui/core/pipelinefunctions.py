@@ -38,7 +38,6 @@ from ddpui.utils.constants import (
     TASK_GITPULL,
     TASK_GITCLONE,
     TASK_AIRBYTESYNC,
-    TASK_GENERATE_EDR,
     TASK_AIRBYTERESET,
     UPDATE_SCHEMA,
     TRANSFORM_TASKS_SEQ,
@@ -244,46 +243,6 @@ def setup_git_clone_shell_task_config(
     )
 
 
-def setup_edr_send_report_task_config(
-    org_task: OrgTask,
-    project_dir: str,
-    seq: int = 1,
-    warehouse_secret_block: OrgPrefectBlockv1 = None,
-):
-    """Constructs the prefect payload for the EDR (elementary send-report) task.
-
-    Runner-side (prefect-proxy/proxy/prefect_flows_runner.py:shellopjob) uses:
-      - env["dbt-profile-secret-block"] → to load creds and write profiles.yml
-        + elementary_profiles/profiles.yml at flow-run start.
-      - commands → runs `edr send-report ...` with AWS creds appended from
-        the `edr-s3-creds` Secret block.
-
-    Both `edr` and `dbt` binaries are on the worker's PATH (installed in the
-    runner image + local prefect-proxy venv), so we don't prepend a venv
-    path anymore.
-    """
-    shell_env = {"shell": "/bin/bash"}
-    if warehouse_secret_block:
-        shell_env["dbt-profile-secret-block"] = warehouse_secret_block.block_name
-    else:
-        logger.warning(
-            "OrgWarehouse for org=%s has no dbt_profile_secret_block — EDR runs will fail. "
-            "Run create_or_update_dbt_profile_secret_blk to create the Secret block.",
-            org_task.org.slug,
-        )
-    return PrefectShellTaskSetup(
-        commands=[
-            org_task.task.type + " " + org_task.get_task_parameters(),
-        ],
-        working_dir=project_dir,
-        env=shell_env,
-        slug=org_task.task.slug,
-        type=SHELLOPERATION,
-        seq=seq,
-        orgtask_uuid=str(org_task.uuid),
-    )
-
-
 def pipeline_with_orgtasks(
     org: Org,
     org_tasks: list[OrgTask],
@@ -332,12 +291,6 @@ def pipeline_with_orgtasks(
                 dbt_project_params.project_dir_relative,
                 gitpull_secret_block,
                 gitrepo_url=gitrepo_url or "",
-            ).to_json()
-        elif org_task.task.slug == TASK_GENERATE_EDR:
-            task_config = setup_edr_send_report_task_config(
-                org_task,
-                dbt_project_params.project_dir,
-                warehouse_secret_block=warehouse_secret_block,
             ).to_json()
         else:
             task_config = setup_dbt_core_task_config(

@@ -26,11 +26,6 @@ from ddpui.core.webhooks.webhook_functions import (
 from ddpui.core.notifications.delivery import notify_org_managers
 from ddpui.core.notifications.triggers.schema_change import notify_schema_change
 
-from ddpui.ddpdbt import elementary_service
-from ddpui.ddpdbt.elementary_service import (
-    create_elementary_profile,
-    ensure_edr_sendreport_dataflow,
-)
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
 from ddpui.core.trial.lifecycle_emails import run_trial_lifecycle_sweep
@@ -303,79 +298,13 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
             }
         )
         # Re-raise so the celery task ends in FAILURE state. Callers using
-        # .apply().maybe_throw() (e.g. install_elementary step 1) rely on this
-        # to detect sub-task failure — without it, an EagerResult in SUCCESS
-        # state hides the error and the caller proceeds as if it worked.
-        # .delay() callers are unaffected (they poll TaskProgress in Redis).
+        # .apply().maybe_throw() rely on this to detect sub-task failure —
+        # without it, an EagerResult in SUCCESS state hides the error.
         raise
 
     finally:
         for task_lock in task_locks:
             task_lock.delete()
-
-
-@app.task(bind=True)
-def install_elementary(self, org_id: int, task_id: str, hashkey: str):
-    """Consolidated Elementary setup — runs the three sub-steps as one task so
-    the frontend can render a single progress list.
-
-    Sub-steps (each emits {"stepIndex", "step", "status": running|completed}):
-      0. Create dbt profile              → create_elementary_profile(org)
-      1. Install elementary package      → run_dbt_commands (clean + deps + run --select elementary)
-      2. Schedule reports                → ensure_edr_sendreport_dataflow(org, org_task, cron)
-
-    On failure: emits {"stepIndex", "step", "status": "failed", "message"} for
-    the sub-step that blew up, then re-raises so Celery marks the task failed.
-    """
-    org: Org = Org.objects.get(id=org_id)
-    taskprogress = TaskProgress(task_id, hashkey)
-
-    steps = [
-        (0, "Creating dbt profile"),
-        (1, "Installing elementary package"),
-        (2, "Scheduling reports"),
-    ]
-    current = steps[0]
-
-    def _emit(step, status, message=None):
-        payload = {"stepIndex": step[0], "step": step[1], "status": status}
-        if message:
-            payload["message"] = message
-        taskprogress.add(payload)
-
-    try:
-        current = steps[0]
-        _emit(current, "running")
-        result = create_elementary_profile(org)
-        if isinstance(result, dict) and "error" in result:
-            raise Exception(result["error"])
-        _emit(current, "completed")
-
-        current = steps[1]
-        _emit(current, "running")
-        # run_dbt_commands is a bound celery task; .apply() executes it
-        # synchronously in-process (returns an EagerResult). Use a separate
-        # inner task_id so its verbose dbt-output progress doesn't pollute
-        # the install stream — the frontend only polls the outer install
-        # task_id + hashkey. Use .maybe_throw() instead of .get() to re-raise
-        # inner-task exceptions without tripping celery's "no sync subtasks"
-        # guard (which fires for any .get() call inside a running task).
-        inner_task_id = str(uuid4())
-        run_dbt_commands.apply(
-            args=[org.id, org.dbt.id, inner_task_id, {"options": {"select": "elementary"}}]
-        ).maybe_throw()
-        _emit(current, "completed")
-
-        current = steps[2]
-        _emit(current, "running")
-        result = ensure_edr_sendreport_dataflow(org, "0 0 * * *")
-        if isinstance(result, dict) and "error" in result:
-            raise Exception(result["error"])
-        _emit(current, "completed")
-
-    except Exception as err:
-        _emit(current, "failed", message=str(err))
-        raise
 
 
 def detect_schema_changes_for_org(org: Org, delay=0):

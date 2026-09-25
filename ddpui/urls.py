@@ -5,8 +5,6 @@ from django.http import HttpResponse
 
 from ddpui.routes import src_api, public_api
 from ddpui.html.docs import get_dbt_docs
-from ddpui.html.elementary import get_elementary_report
-
 from ddpui.core.datainsights.generate_result import DataInsightsConsumer
 from ddpui.websockets.airbyte_consumer import SchemaCatalogConsumer, SourceCheckConnectionConsumer
 from ddpui.websockets.chat_with_data_consumer import ChatWithDataConsumer
@@ -27,7 +25,6 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("healthcheck", healthcheck),
     path("docs/<tokenhex>/", get_dbt_docs),
-    path("elementary/<tokenhex>/", get_elementary_report),
     path("prometheus/", include("django_prometheus.urls")),
     path("sentry-debug/", trigger_error),
     path("", src_api.urls),

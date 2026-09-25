@@ -3,7 +3,8 @@
 from typing import Optional, List
 from datetime import timedelta
 
-from ninja import Router
+from ninja import Router, File
+from ninja.files import UploadedFile
 from ninja.errors import HttpError
 from django.utils import timezone
 from django.db import transaction
@@ -21,6 +22,7 @@ from ddpui.models.resource_share import AccessLevel, AccessRequest, ResourceShar
 from ddpui.core.access import access_control
 from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.core.access.resource_share import sync_dashboard_cascade
+from ddpui.utils.constants import MAX_IMAGE_UPLOAD_SIZE_BYTES
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -32,7 +34,11 @@ from ddpui.services.dashboard_service import (
     DashboardServiceError,
     FilterNotFoundError,
     FilterValidationError,
+    WidgetImageStorageError,
+    WidgetImageValidationError,
     delete_dashboard_safely,
+    remap_widget_images,
+    upload_widget_image,
 )
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
@@ -46,6 +52,7 @@ from ddpui.schemas.dashboard_schema import (
     LockResponse,
     LandingPageResponse,
     LandingPageResolveResponse,
+    WidgetImageUploadResponse,
 )
 from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
@@ -89,6 +96,48 @@ def list_dashboards(
         )
         for d in dashboards
     ]
+
+
+# =============================================================================
+# Widget Image Endpoints (dashboard text/image widgets)
+# =============================================================================
+# NOTE: these must be registered before any "/{dashboard_id}/"-pattern route
+# below. Django tries URL patterns in registration order and dashboard_id has
+# no int-only constraint at the URL level, so "/images/" would otherwise get
+# matched as dashboard_id="images" by whichever "/{dashboard_id}/" route came
+# first, sending the request to the wrong view entirely.
+
+
+@dashboard_native_router.put("/images/", response=WidgetImageUploadResponse)
+@has_permission(["can_edit_dashboards"])
+def upload_dashboard_widget_image(request, file: UploadedFile = File(...)):
+    """Upload an image for a dashboard text/image widget.
+
+    Unlike the org logo, this isn't saved to any model — the caller stores
+    the returned image_url inline in the widget's own config, persisted via
+    the normal dashboard save flow.
+    """
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+
+    # Checked from file.size (multipart metadata) before reading, so an oversized
+    # upload is rejected without first loading its whole content into memory.
+    if file.size is not None and file.size > MAX_IMAGE_UPLOAD_SIZE_BYTES:
+        raise HttpError(400, "File size exceeds the 5MB limit")
+
+    try:
+        image_url, image_key = upload_widget_image(
+            file_bytes=file.read(),
+            content_type=file.content_type or "",
+            org=orguser.org,
+        )
+    except WidgetImageValidationError as err:
+        raise HttpError(400, err.message) from err
+    except WidgetImageStorageError as err:
+        raise HttpError(502, err.message) from err
+
+    return WidgetImageUploadResponse(image_url=image_url, image_key=image_key)
 
 
 @dashboard_native_router.get("/{dashboard_id}/", response=DashboardResponse)
@@ -340,9 +389,10 @@ def duplicate_dashboard(request, dashboard_id: int):
             )
             filter_id_mapping[str(original_filter.id)] = str(new_filter.id)
 
-        new_dashboard.tabs = DashboardService.copy_tabs_with_filter_remapping(
+        remapped_tabs = DashboardService.copy_tabs_with_filter_remapping(
             original_dashboard.tabs or [], filter_id_mapping
         )
+        new_dashboard.tabs = remap_widget_images(remapped_tabs, org, org)
         new_dashboard.save()
 
         logger.info(f"Duplicated dashboard {dashboard_id} as {new_dashboard.id} for org {org.id}")

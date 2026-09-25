@@ -167,3 +167,22 @@ class LandingPageResolveResponse(Schema):
     dashboard_title: Optional[str] = None
     dashboard_type: Optional[str] = None
     source: str  # "personal", "org_default", or "none"
+
+
+# =============================================================================
+# Widget Image Schemas
+# =============================================================================
+
+
+class WidgetImageUploadResponse(Schema):
+    """Response schema for a dashboard widget image upload.
+
+    Unlike the org logo, this isn't persisted to any model field — a
+    dashboard can hold many widget images, each embedded inline in that
+    dashboard's own JSON config. image_key is stored there too so the
+    backend can locate the S3 object later (e.g. copy_widget_image on
+    duplicate/clone).
+    """
+
+    image_url: str
+    image_key: str

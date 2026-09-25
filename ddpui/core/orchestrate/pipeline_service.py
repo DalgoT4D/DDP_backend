@@ -99,7 +99,6 @@ class PipelineService:
 
         dbt_orgtasks = []
         git_orgtasks = []
-        edr_orgtasks = []
         auto_managed_dbt_orgtasks = []
 
         # Task slugs that are auto-managed and should not come from frontend
@@ -128,13 +127,10 @@ class PipelineService:
                 continue
             elif org_task.task.type == TaskType.DBT:
                 dbt_orgtasks.append(org_task)
-            elif org_task.task.type == TaskType.EDR:
-                edr_orgtasks.append(org_task)
 
         logger.info(f"{len(dbt_orgtasks)} DBT cli tasks being pushed to the pipeline")
 
-        # Auto-add git step when there are DBT or EDR tasks (both need the repo on disk on EKS)
-        if len(dbt_orgtasks) > 0 or len(edr_orgtasks) > 0:
+        if len(dbt_orgtasks) > 0:
             if PipelineService.is_workpool_eks(org):
                 logger.info("EKS workpool detected, adding git clone step")
                 git_clone_orgtask = PipelineService.get_or_create_git_clone_orgtask(org)
@@ -152,7 +148,7 @@ class PipelineService:
             auto_managed_dbt_orgtasks = [dbt_clean_orgtask, dbt_deps_orgtask]
 
         # get the deployment task configs
-        all_orgtasks = git_orgtasks + auto_managed_dbt_orgtasks + dbt_orgtasks + edr_orgtasks
+        all_orgtasks = git_orgtasks + auto_managed_dbt_orgtasks + dbt_orgtasks
         task_configs, error = pipeline_with_orgtasks(
             org,
             all_orgtasks,
@@ -446,7 +442,7 @@ class PipelineService:
             {"uuid": dataflow_orgtask.orgtask.uuid, "seq": dataflow_orgtask.seq}
             for dataflow_orgtask in DataflowOrgTask.objects.filter(
                 dataflow=org_data_flow,
-                orgtask__task__type__in=[TaskType.DBT, TaskType.EDR],
+                orgtask__task__type__in=[TaskType.DBT],
             )
             .exclude(orgtask__task__slug__in=auto_managed_slugs)
             .all()
