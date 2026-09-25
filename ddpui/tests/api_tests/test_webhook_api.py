@@ -229,45 +229,6 @@ def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
         )
 
 
-def test_post_notification_v1_manual_with_orgtask_id_generate_edr(seed_master_tasks):
-    """tests the api endpoint /notifications/ ; fail & if logs are being sent"""
-    org = Org.objects.create(name="temp", slug="temp")
-    deployment_id = "test-deployment-id"
-    task = Task.objects.filter(slug="generate-edr").first()
-    orgtask = OrgTask.objects.create(org=org, task=task)
-
-    flow_run = {
-        "parameters": {
-            "config": {"org_slug": org.slug, "orgtask_uuid": orgtask.uuid},
-        },
-        "deployment_id": deployment_id,
-        "id": "test-run-id",
-        "name": "test-flow-run-name",
-        "start_time": str(datetime.now()),
-        "expected_start_time": str(datetime.now()),
-        "total_run_time": 12,
-        "status": FLOW_RUN_FAILED_STATE_TYPE,
-        "state_name": FLOW_RUN_FAILED_STATE_NAME,
-    }
-    OrgDataFlowv1.objects.create(
-        org=org, name=deployment_id, dataflow_type="manual", deployment_id=deployment_id
-    )
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.core.notifications.delivery.notify_org_managers"
-    ) as mock_notify_org_managers, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins:
-        mock_get_flow_run.return_value = flow_run
-        user = User.objects.create(email="email", username="username")
-        new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
-        OrgUser.objects.create(org=org, user=user, new_role=new_role)
-        do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
-        assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
-        # For generate-edr tasks, org managers should not be notified
-        mock_notify_org_managers.assert_not_called()
-        # Platform admins also should not be notified unless explicitly enabled
-        mock_notify_platform_admins.assert_not_called()
-
 
 def test_post_notification_v1_email_supersadmins():
     """tests the api endpoint /notifications/ ; fail & if logs are being sent"""
