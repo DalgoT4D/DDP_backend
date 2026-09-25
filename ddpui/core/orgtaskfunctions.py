@@ -6,7 +6,6 @@ do not raise http errors here
 import uuid
 from typing import Union
 from pathlib import Path
-import yaml
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskLock, TaskLockStatus, TaskType
 from ddpui.models.org import (
     Org,
@@ -32,7 +31,7 @@ from ddpui.core.pipelinefunctions import (
     pipeline_with_orgtasks,
 )
 from ddpui.core.orchestrate.pipeline_service import PipelineService
-from ddpui.utils.constants import TASK_GENERATE_EDR, LONG_RUNNING_TASKS
+from ddpui.utils.constants import LONG_RUNNING_TASKS
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.models.flow_runs import PrefectFlowRun
 
@@ -77,64 +76,6 @@ def create_default_transform_tasks(org: Org, dbt_project_params: DbtProjectParam
             create_prefect_deployment_for_dbtcore_task(org_task, dbt_project_params)
 
     return None, None
-
-
-def fetch_elementary_profile_target(orgdbt: OrgDbt) -> str:
-    """fetch the target from the elementary profiles yaml file"""
-    elementary_target = "default"
-
-    # parse the yaml file
-    project_dir = Path(orgdbt.project_dir) / "dbtrepo"
-    elementary_profiles_yml = project_dir / "elementary_profiles" / "profiles.yml"
-
-    if not elementary_profiles_yml.exists():
-        logger.info(
-            f"couldn't find the profiles.yml file for the elementary setup for orgdbt {orgdbt.id}. setting target to default"
-        )
-    else:
-        with open(elementary_profiles_yml, "r") as file:
-            config = yaml.safe_load(file)
-        elementary_config = config.get("elementary", {})
-        outputs = elementary_config.get("outputs", {})
-        targets = list(outputs.keys())
-        if len(targets) > 0:
-            logger.info(
-                f"elementary profiles {str(targets)} found for orgdbt {orgdbt.id}. setting to the first one - {targets[0]}"
-            )
-            elementary_target = targets[0]
-
-    return elementary_target
-
-
-def get_edr_send_report_task(org: Org, **kwargs) -> OrgTask | None:
-    """creates an OrgTask for edr send-report"""
-    task = Task.objects.filter(slug=TASK_GENERATE_EDR).first()
-    if task is None:
-        raise ValueError("TASK_GENERATE_EDR not found")
-
-    if kwargs.get("overwrite") or kwargs.get("create"):
-        options = {
-            "profiles-dir": "elementary_profiles",
-            "bucket-file-path": f"reports/{org.slug}.TODAYS_DATE.html",
-            "profile-target": fetch_elementary_profile_target(org.dbt),
-        }
-
-    org_task = OrgTask.objects.filter(task__slug=TASK_GENERATE_EDR, org=org).first()
-    if org_task:
-        if kwargs.get("overwrite"):
-            org_task.parameters["options"] = options
-            org_task.save()
-        return org_task
-
-    if kwargs.get("create"):
-        org_task = OrgTask.objects.create(
-            org=org,
-            task=task,
-            uuid=uuid.uuid4(),
-            parameters={"options": options},
-            dbt=org.dbt,
-        )
-    return org_task
 
 
 def create_prefect_deployment_for_dbtcore_task(

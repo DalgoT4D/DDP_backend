@@ -80,7 +80,6 @@ from ddpui.core.pipelinefunctions import (
 )
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
-from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
 from ddpui.ddpdbt.dbthelpers import create_or_update_dbt_profile_secret_blk, write_dbt_profiles_yml
 from ddpui.utils.redis_client import RedisClient
 
