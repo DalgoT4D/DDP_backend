@@ -928,17 +928,7 @@ def test_update_destination_snowflake_rejected(mock_update_destination: Mock):
     "ddpui.ddpairbyte.airbytehelpers.write_dbt_profiles_yml",
     mock_write_dbt_profiles_yml=Mock(),
 )
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.create_elementary_profile",
-    mock_create_elementary_profile=Mock(),
-)
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.elementary_setup_status",
-    mock_elementary_setup_status=Mock(),
-)
 def test_update_destination_does_not_refresh_elementary(
-    mock_elementary_setup_status: Mock,
-    mock_create_elementary_profile: Mock,
     mock_write_dbt_profiles_yml: Mock,
     mock_create_or_update_dbt_profile_secret_blk: Mock,
     mock_update_warehouse_credentials: Mock,
@@ -946,7 +936,7 @@ def test_update_destination_does_not_refresh_elementary(
     mock_update_destination: Mock,
 ):
     """update_destination refreshes the dbt-profile SECRET block only — it does not
-    materialize profiles.yml or refresh elementary's profile, even when elementary is set up."""
+    materialize profiles.yml."""
     org = Org.objects.create(name="org", slug="org")
     org_dbt = OrgDbt.objects.create(
         gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
@@ -958,7 +948,6 @@ def test_update_destination_does_not_refresh_elementary(
     mock_update_destination.return_value = {"destinationId": "DESTINATION_ID"}
     mock_retrieve_warehouse_credentials.return_value = {}
     mock_update_warehouse_credentials.return_value = None
-    mock_elementary_setup_status.return_value = "set-up"
 
     payload = AirbyteDestinationUpdate(
         name="name",
@@ -970,9 +959,8 @@ def test_update_destination_does_not_refresh_elementary(
 
     # SECRET block is refreshed (this is the new refresh path)
     mock_create_or_update_dbt_profile_secret_blk.assert_called_once()
-    # Legacy on-disk refresh paths must NOT be called
+    # Legacy on-disk refresh path must NOT be called
     mock_write_dbt_profiles_yml.assert_not_called()
-    mock_create_elementary_profile.assert_not_called()
 
 
 @patch("ddpui.ddpairbyte.airbyte_service.get_connections", mock_get_connections=Mock())

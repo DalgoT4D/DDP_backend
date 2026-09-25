@@ -40,7 +40,6 @@ class TaskProgressHashPrefix(str, Enum):
     CLONEGITREPO = "clone-github-repo"
     DBTWORKSPACE = "setup-dbt-workspace"
     RUNDBTCMDS = "run-dbt-commands"
-    INSTALLELEMENTARY = "install-elementary"
     DATAINSIGHTS = "data-insights"
     SCHEMA_CHANGE = "schema-change"
     SOURCE_SCHEMA_CATALOG = "source-schema-catalog"

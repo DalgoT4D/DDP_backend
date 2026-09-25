@@ -19,7 +19,6 @@ from django.db import transaction
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import LEVEL_RANK
-from ddpui.ddpdbt import elementary_service
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import (
     prefect_service,
@@ -189,14 +188,6 @@ def get_tools_versions(request):
     # Prefect Version
     ver = prefect_service.get_prefect_version()
     versions.append({"Prefect": {"version": ver if ver else "Not available"}})
-
-    # dbt Version
-    ver = elementary_service.get_dbt_version(org)
-    versions.append({"DBT": {"version": ver if ver else "Not available"}})
-
-    # elementary Version
-    ver = elementary_service.get_edr_version(org)
-    versions.append({"Elementary": {"version": ver if ver else "Not available"}})
 
     # Superset Version
     versions.append(
