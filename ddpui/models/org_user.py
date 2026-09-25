@@ -155,6 +155,9 @@ class OrgUserResponse(Schema):
     plan_end_date: datetime | None = None
     work_domain: str | None = None
     has_seen_resource_sharing_notice: bool = False
+    # convenience for the frontend: whether this membership's role grants
+    # can_manage_platform, a fact `permissions` above already carries
+    is_platform_admin: bool = False
 
 
 class Invitation(models.Model):
@@ -162,6 +165,16 @@ class Invitation(models.Model):
 
     invited_email = models.CharField(max_length=50)
     invited_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
+    invited_in_org = models.ForeignKey(
+        Org,
+        on_delete=models.CASCADE,
+        null=True,
+        related_name="invitations",
+        help_text=(
+            "the org this invite grants membership of, when it differs from "
+            "invited_by.org (e.g. a platform admin inviting cross-org)."
+        ),
+    )
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
     invited_new_role = models.ForeignKey(Role, on_delete=models.CASCADE, null=True)

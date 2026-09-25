@@ -12,6 +12,12 @@ class Notification(models.Model):
     urgent = models.BooleanField(default=False)
     scheduled_time = models.DateTimeField(null=True, blank=True)
     sent_time = models.DateTimeField(null=True, blank=True)
+    # additive, for the admin broadcast path (features/admin-portal/plan.md §4.1):
+    # null/empty target_org_ids = whole platform; a pre-existing row keeps
+    # target_org_ids=NULL ("audience unknown, legacy") and both channels on.
+    target_org_ids = models.JSONField(null=True, blank=True)
+    send_in_app = models.BooleanField(default=True)
+    send_email = models.BooleanField(default=True)
 
 
 class NotificationRecipient(models.Model):

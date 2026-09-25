@@ -36,6 +36,11 @@ GUEST_ROLE = RoleSlug.MEMBER
 from ddpui.core.access import access_control, shareable_types
 from ddpui.models.resource_share import AccessLevel, LEVEL_RANK
 
+# Admin Portal authority, granted in seed/003_role_permissions.json to super-admin alone.
+# Seeding it needs `loaddata` followed by `manage.py clear_role_permissions` — the role ->
+# permission map is cached in redis and a warm cache will not contain a new slug.
+PLATFORM_ADMIN_PERMISSION = "can_manage_platform"
+
 
 def has_permission(permission_slugs: list):
     def decorator(api_endpoint):
@@ -59,6 +64,18 @@ def has_permission(permission_slugs: list):
         return wrapper
 
     return decorator
+
+
+def user_has_platform_admin_permission(user: User) -> bool:
+    """
+    True when any of this user's org roles grants PLATFORM_ADMIN_PERMISSION.
+
+    For identity payloads (login, currentuser) which have no org context. Route-level
+    gating uses @has_permission instead, on the role of the org on the request.
+    """
+    return RolePermission.objects.filter(
+        role__orguser__user=user, permission__slug=PLATFORM_ADMIN_PERMISSION
+    ).exists()
 
 
 def has_access(rtype: str, required_level: str, get_resource_id=None):
@@ -132,8 +149,11 @@ def blacklist_jti_in_redis(token_str, token_class):
 class CustomJwtAuthMiddleware(HttpBearer):
     """the authenticate() function is called on every authenticated request via django middleware"""
 
+    # the cookie this middleware reads the access token from
+    cookie_name = "access_token"
+
     def __call__(self, request):
-        cookie_token = request.COOKIES.get("access_token")
+        cookie_token = request.COOKIES.get(self.cookie_name)
 
         if not cookie_token:
             return super().__call__(request)

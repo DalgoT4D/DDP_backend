@@ -63,6 +63,7 @@ from ddpui.ddpairbyte import airbytehelpers
 
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.feature_flags import get_all_feature_flags_for_org
+from ddpui.utils.orguserhelpers import holds_platform_admin, permissions_for_role
 from ddpui.utils.response_wrapper import api_response, ApiResponse
 from ddpui.core.org_logo.exceptions import (
     OrgLogoNotFoundError,
@@ -154,6 +155,7 @@ def get_current_user_v2(request, org_slug: str = None):
         if curr_orguser.org.orgtncs.exists():
             curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
 
+        row_permissions = permissions_for_role(curr_orguser.new_role)
         plan_start, plan_end = curr_orguser.org.plan_window() if curr_orguser.org else (None, None)
 
         res.append(
@@ -164,10 +166,7 @@ def get_current_user_v2(request, org_slug: str = None):
                 active=user.is_active,
                 new_role_slug=curr_orguser.new_role.slug,
                 wtype=warehouse.wtype if warehouse else None,
-                permissions=[
-                    {"slug": rolep.permission.slug, "name": rolep.permission.name}
-                    for rolep in curr_orguser.new_role.rolepermissions.all()
-                ],
+                permissions=row_permissions,
                 is_demo=(
                     curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
                 ),
@@ -179,6 +178,8 @@ def get_current_user_v2(request, org_slug: str = None):
                 plan_end_date=plan_end,
                 work_domain=curr_orguser.work_domain,
                 has_seen_resource_sharing_notice=curr_orguser.has_seen_resource_sharing_notice,
+                # per row, from that row's own role
+                is_platform_admin=holds_platform_admin(row_permissions),
             )
         )
 
@@ -309,6 +310,7 @@ def get_organization_users(request):
     ):
         if curr_orguser.org.orgtncs.exists():
             curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
+        row_permissions = permissions_for_role(curr_orguser.new_role)
         res.append(
             OrgUserResponse(
                 user_id=curr_orguser.user.id,
@@ -317,14 +319,12 @@ def get_organization_users(request):
                 active=curr_orguser.user.is_active,
                 new_role_slug=curr_orguser.new_role.slug,
                 wtype=warehouse.wtype if warehouse else None,
-                permissions=[
-                    {"slug": rolep.permission.slug, "name": rolep.permission.name}
-                    for rolep in curr_orguser.new_role.rolepermissions.all()
-                ],
+                permissions=row_permissions,
                 is_demo=(
                     curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
                 ),
                 subscription_plan=(curr_orguser.org.base_plan() if curr_orguser.org else None),
+                is_platform_admin=holds_platform_admin(row_permissions),
             )
         )
 
@@ -836,32 +836,15 @@ def put_organization_user_v1(request, payload: OrgUserUpdatev1):
 )
 @has_permission(["can_edit_orguser_role"])
 def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
-    """update another OrgUser's role"""
+    """update another OrgUser's role (single-org wrapper around the org-param core)"""
     orguser: OrgUser = request.orguser
 
-    if not orguser.new_role:
-        raise HttpError(403, "Insufficient permissions")
-
-    role_to_be_assgined = Role.objects.filter(uuid=payload.role_uuid).first()
-
-    if not role_to_be_assgined:
-        raise HttpError(400, "Invalid role")
-
-    # you cannot assign a role that is higher than yours
-    if role_to_be_assgined.level > orguser.new_role.level:
-        raise HttpError(403, "Insufficient permissions")
-
-    request_email = payload.toupdate_email.lower().strip()
-    orguser_to_be_assigned = (
-        OrgUser.objects.filter(user__email__iexact=request_email, org=orguser.org)
-        .exclude(user__email__iexact=orguser.user.email)
-        .first()
+    orguser_to_be_assigned, error = orguserfunctions.change_orguser_role_in_org(
+        orguser.org, orguser, payload.toupdate_email, payload.role_uuid
     )
-    if not orguser_to_be_assigned:
-        raise HttpError(400, "User does not exist")
-
-    orguser_to_be_assigned.new_role = role_to_be_assgined
-    orguser_to_be_assigned.save()
+    if error:
+        # preserve the original status codes: permission failures are 403, the rest 400
+        raise HttpError(403 if error == "Insufficient permissions" else 400, error)
 
     # Audit log: user role changed
     _record_audit_log(
@@ -871,7 +854,7 @@ def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
         resource_id=str(orguser_to_be_assigned.id),
         resource_fields={
             "email": orguser_to_be_assigned.user.email,
-            "role": role_to_be_assgined.slug,
+            "role": orguser_to_be_assigned.new_role.slug,
         },
     )
 

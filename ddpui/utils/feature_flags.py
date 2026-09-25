@@ -1,3 +1,5 @@
+from typing import List, Optional
+
 from django.db.models import Q
 from ddpui.models.org import OrgFeatureFlag, Org
 
@@ -101,6 +103,51 @@ def get_all_feature_flags_for_org(org: Org = None) -> dict:
             org_flags[flag.flag_name] = flag.flag_value
 
     return {**global_flags, **org_flags}
+
+
+def get_flag_value_for_orgs(flag_name: str, orgs: List[Org]) -> Optional[dict]:
+    """
+    Resolve ONE flag across MANY orgs in a single query -> {org_id: bool}.
+
+    Same resolution rule as get_all_feature_flags_for_org (an org-specific row wins
+    over the global org=None row, which itself defaults to False), but batched:
+    calling that function once per org costs one query per org.
+
+    Returns:
+        {org_id: bool} covering every org passed in
+        None if the flag_name is not in the allowed feature list
+    """
+    if flag_name not in FEATURE_FLAGS:
+        return None
+
+    global_default = False
+    org_overrides = {}
+    for org_id, flag_value in OrgFeatureFlag.objects.filter(flag_name=flag_name).values_list(
+        "org_id", "flag_value"
+    ):
+        if org_id is None:
+            global_default = flag_value
+        else:
+            org_overrides[org_id] = flag_value
+
+    return {org.id: org_overrides.get(org.id, global_default) for org in orgs}
+
+
+def clear_org_flag(flag_name: str, org: Org = None) -> bool:
+    """
+    Delete the org's (or global) row for this flag, removing the override entirely
+    rather than writing it False. After this, get_all_feature_flags_for_org falls
+    back to the global default (or False if no global row exists either).
+
+    Returns:
+        True if the flag_name is valid (whether or not a row existed to delete)
+        None if the flag_name is not in the allowed feature list
+    """
+    if flag_name not in FEATURE_FLAGS.keys():
+        return None
+
+    OrgFeatureFlag.objects.filter(org=org, flag_name=flag_name).delete()
+    return True
 
 
 def enable_all_global_feature_flags() -> dict:

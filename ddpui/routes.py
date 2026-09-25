@@ -2,6 +2,7 @@ from ninja import NinjaAPI
 from ninja.errors import ValidationError
 from ninja.responses import Response
 from pydantic import ValidationError as PydanticValidationError
+from rest_framework.exceptions import AuthenticationFailed
 
 from ddpui import auth
 from ddpui.api.airbyte_api import airbyte_router
@@ -29,6 +30,7 @@ from ddpui.api.metric_api import metric_router
 from ddpui.api.kpi_api import kpi_router
 from ddpui.api.access_api import access_router
 from ddpui.api.alert_api import alert_router
+from ddpui.api.admin_api import admin_router
 
 src_api = NinjaAPI(
     urls_namespace="api",
@@ -59,6 +61,22 @@ def pydantic_validation_error_handler(
     exc.errors() is correct
     """
     return Response({"detail": exc.errors()}, status=500)
+
+
+@src_api.exception_handler(AuthenticationFailed)
+def drf_authentication_failed_handler(
+    request, exc: AuthenticationFailed
+):  # pylint: disable=unused-argument
+    """
+    Bad credentials on the login endpoints.
+
+    CustomTokenObtainSerializer is a DRF serializer, so a wrong password / unknown user
+    surfaces as DRF's AuthenticationFailed. These are ninja views, not DRF views, so
+    DRF's own exception handler never runs and the exception would otherwise fall
+    through to the generic handler below as a 500. Map it to the 401 it already
+    declares (AuthenticationFailed.status_code == 401).
+    """
+    return Response({"detail": str(exc)}, status=401)
 
 
 @src_api.exception_handler(Exception)
@@ -119,6 +137,7 @@ src_api.add_router("/api/metrics/", metric_router)
 src_api.add_router("/api/kpis/", kpi_router)
 src_api.add_router("/api/alerts/", alert_router)
 src_api.add_router("/api/access/", access_router)
+src_api.add_router("/api/v1/admin/", admin_router)
 
 # Public API without authentication
 public_api = NinjaAPI(
