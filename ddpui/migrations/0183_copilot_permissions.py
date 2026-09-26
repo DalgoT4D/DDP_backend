@@ -56,7 +56,7 @@ def reverse_copilot_permissions(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0184_chatwithdataorgmemory"),
+        ("ddpui", "0182_chat_with_data"),
     ]
 
     operations = [
