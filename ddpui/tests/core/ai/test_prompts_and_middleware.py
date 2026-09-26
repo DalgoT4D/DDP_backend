@@ -141,3 +141,9 @@ def test_over_cap_memory_is_sliced_at_render_time():
     prompt = build_system_prompt(ctx)
     body = prompt.split("<org_memory>\n")[1].split("\n</org_memory>")[0]
     assert len(body) == MAX_ORG_MEMORY_CHARS
+
+
+def test_system_prompt_asks_for_explicit_qualified_columns():
+    prompt = build_system_prompt(make_ctx())
+    assert "never SELECT *" in prompt
+    assert "reviews this column" in prompt

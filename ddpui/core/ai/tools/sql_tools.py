@@ -9,9 +9,10 @@ LLM; the artifact is the structured result table the UI renders (columns/rows),
 carried on the ToolMessage without ever entering the model's context.
 """
 
+import sqlglot
 from langchain.tools import ToolRuntime, tool
 
-from ddpui.core.ai.guards import sql_guard
+from ddpui.core.ai.guards import pii_rewrite, sql_guard
 from ddpui.core.ai.llm_calls.sql_reflection import find_sql_issue
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools import catalog, rendering
@@ -25,6 +26,11 @@ def execute_sql(sql: str, runtime: ToolRuntime[RunContext]) -> tuple[str, dict]:
     schema-qualified (schema.table). If this returns an error, read it carefully,
     fix the SQL (re-check table details if needed), and try again."""
     ctx = runtime.context
+
+    try:
+        sql = _apply_pii_hashing(ctx, sql)
+    except pii_rewrite.UnresolvableProjection as err:
+        return f"SQL rejected: {err}", {"sql": sql, "status": "rejected", "error": str(err)}
 
     try:
         guarded = sql_guard.validate(
@@ -88,3 +94,23 @@ def _execute_with_timeout(ctx: RunContext, sql: str) -> list[dict]:
             result = connection.execute(sql)
             return [dict(row) for row in result.fetchall()]
     return ctx.warehouse.execute(sql)
+
+
+def _apply_pii_hashing(ctx: RunContext, sql: str) -> str:
+    """Hash the columns the user ticked, before the guard sees the statement — so
+    the guard validates exactly the string that will run.
+
+    Always resolves the projection, even with nothing ticked: this is the only
+    place that would notice an unexpandable SELECT * before it runs unhashed.
+    That costs one extra catalog round-trip on the no-PII path — the design this
+    replaced avoided it — but a fail-closed check is worth one catalog call.
+    """
+    try:
+        tree = sqlglot.parse_one(sql, dialect=ctx.dialect)
+    except sqlglot.errors.ParseError:
+        return sql  # let the guard produce the parse error the model should read
+    schema_map = catalog.schema_map_for(ctx, sql_guard.referenced_tables(tree))
+    pii_rewrite.resolve_projection(sql, ctx.dialect, schema_map)
+    if not ctx.pii_columns:
+        return sql
+    return pii_rewrite.hash_projection(sql, ctx.dialect, schema_map, ctx.pii_columns)

@@ -84,7 +84,7 @@ def validate(
         if isinstance(node, _FORBIDDEN_NODES):
             raise GuardError(f"Query must be read-only — found a {node.key.upper()} operation")
 
-    tables = _referenced_tables(tree)
+    tables = referenced_tables(tree)
     _check_schemas(tables, allowed_schemas)
 
     _apply_limit(tree, max_rows)
@@ -92,7 +92,7 @@ def validate(
     return GuardedSQL(sql=tree.sql(dialect=dialect), tables=sorted(tables))
 
 
-def _referenced_tables(tree: exp.Expression) -> set[str]:
+def referenced_tables(tree: exp.Expression) -> set[str]:
     """All physical tables referenced anywhere in the statement, as 'schema.table'.
 
     CTE aliases look like tables in the FROM clause but are not physical tables —

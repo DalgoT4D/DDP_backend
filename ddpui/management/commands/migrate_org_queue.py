@@ -16,7 +16,7 @@ from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType, Task
 from ddpui.ddpprefect import SCHEDULED_PIPELINE_QUEUE, CONNECTION_SYNC_QUEUE, SECRET
 from ddpui.ddpprefect.prefect_service import prefect_get, prefect_put, update_dataflow_v1
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
-from ddpui.utils.constants import TASK_GENERATE_EDR, TASK_GITPULL, TASK_GITCLONE
+from ddpui.utils.constants import TASK_GITPULL, TASK_GITCLONE
 from ddpui.utils.unified_logger import get_logger
 from ddpui.core.orchestrate.pipeline_service import PipelineService
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -24,7 +24,6 @@ from ddpui.core.pipelinefunctions import (
     setup_git_pull_shell_task_config,
     setup_git_clone_shell_task_config,
 )
-from ddpui.ddpdbt.elementary_service import ensure_edr_sendreport_dataflow
 
 # Mapping from queue type to the EKS queue name
 EKS_QUEUE_NAME_MAP = {
@@ -55,7 +54,6 @@ class Command(BaseCommand):
                 "scheduled_pipeline_queue",
                 "connection_sync_queue",
                 "transform_task_queue",
-                "edr_queue",
             ],
             help="Type of queue to migrate",
         )
@@ -178,19 +176,6 @@ class Command(BaseCommand):
 
             dataflow_ids: Set[str] = set()
             for org_task in transform_org_tasks:
-                dataflow_org_tasks = DataflowOrgTask.objects.filter(orgtask=org_task)
-                for dot in dataflow_org_tasks:
-                    if dot.dataflow:
-                        dataflow_ids.add(dot.dataflow.id)
-
-            return list(OrgDataFlowv1.objects.filter(id__in=dataflow_ids, dataflow_type="manual"))
-
-        elif queue_type == "edr_queue":
-            # Get manual dataflows with EDR (Elementary Data Reliability) tasks
-            edr_org_tasks = OrgTask.objects.filter(org=org, task__slug=TASK_GENERATE_EDR)
-
-            dataflow_ids: Set[str] = set()
-            for org_task in edr_org_tasks:
                 dataflow_org_tasks = DataflowOrgTask.objects.filter(orgtask=org_task)
                 for dot in dataflow_org_tasks:
                     if dot.dataflow:
@@ -473,14 +458,3 @@ class Command(BaseCommand):
 
         except Exception as e:
             raise Exception(f"Transform task git step update error: {str(e)}") from e
-
-    def update_edr_deployment(self, dataflow: OrgDataFlowv1, is_workpool_eks: bool):
-        """Rebuild EDR deployment params to add/remove git-clone based on is_workpool_eks.
-        ensure_edr_sendreport_dataflow reads org.get_queue_config() which is already updated."""
-        try:
-            ensure_edr_sendreport_dataflow(dataflow.org, dataflow.cron or "")
-            action = "added git-clone" if is_workpool_eks else "removed git-clone"
-            self.stdout.write(f"  → EDR deployment updated ({action}) for {dataflow.org.slug}")
-            logger.info(f"Updated EDR deployment {dataflow.deployment_name}")
-        except Exception as e:
-            raise Exception(f"EDR git step update error: {str(e)}") from e

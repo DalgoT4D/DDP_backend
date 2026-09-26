@@ -25,7 +25,6 @@ from ddpui.core.ai.agent.middleware import (
     trim_history,
 )
 from ddpui.core.ai.agent.org_memory import org_memory_section
-from ddpui.core.ai.agent.pii import build_pii_middleware
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import get_tools
 
@@ -130,15 +129,12 @@ def build_guide_agent(
     checkpointer: BaseCheckpointSaver | None = None,
     model: BaseChatModel | None = None,
     human_in_the_loop: bool = True,
-    pii_rules: list[dict] | None = None,
 ):
     """Compile the guide agent graph. Same contract as build_agent: `model`
-    overridable for tests, `human_in_the_loop=False` for evals/REPL, org
-    `pii_rules` layered over the default PII middleware."""
+    overridable for tests, `human_in_the_loop=False` for evals/REPL."""
     from ddpui.core.ai.agent.chat_data_agent import get_chat_model
 
     middleware = [
-        *build_pii_middleware(pii_rules),
         repair_foreign_tool_errors(GUIDE_AGENT_TOOLS),  # un-poison cross-agent tool errors
         guide_system_prompt,
         trim_history,

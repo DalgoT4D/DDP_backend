@@ -30,9 +30,10 @@ class RunContext:
     can_edit_dashboards: bool = False
     can_create_metrics: bool = False
     can_create_kpis: bool = False
-    # Org-specific PII detector rules (ChatWithDataOrgConfig.pii_rules) — the
-    # transport passes these into build_agent's PII middleware
-    pii_rules: list[dict] = field(default_factory=list)
+    # schema.table.column keys the user ticked as PII on the approval card for
+    # THIS tool call. Stamped by the transport from the resume payload; never
+    # persisted server-side — the browser re-sends the set with every resume.
+    pii_columns: set[str] = field(default_factory=set)
     # Admin-curated org facts (ChatWithDataOrgMemory.text) — rendered into both
     # system prompts by org_memory_section(); "" means no memory, no section
     org_memory: str = ""

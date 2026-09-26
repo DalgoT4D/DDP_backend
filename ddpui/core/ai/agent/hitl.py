@@ -14,16 +14,26 @@ This module owns both directions of the translation:
   user's decision                  → HITLResponse for Command(resume=...)
 """
 
+import sqlglot
 from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables.config import var_child_runnable_config
 
-# Tool calls that pause for user approval before executing. Metadata lookups
-# (list_tables, get_table_details, profile_column) are deliberately NOT gated —
-# gating them would cost several clicks before any question can be answered.
+from ddpui.core.ai.agent.run_context import RunContext
+from ddpui.core.ai.guards import pii_rewrite, sql_guard
+from ddpui.core.ai.tools import catalog
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("ddpui.chat_with_data")
+
+# Tool calls that pause for user approval before executing. The two warehouse
+# tools that return real VALUES are gated so the user can mark PII columns first;
+# pure metadata lookups (list_schemas, list_tables, get_table_details) are not —
+# gating them would cost several clicks before any question could be answered.
 APPROVAL_TOOLS = (
     "execute_sql",
+    "profile_column",
     "create_chart",
     "create_dashboard",
     "add_charts_to_dashboard",
@@ -31,6 +41,10 @@ APPROVAL_TOOLS = (
 
 # The clarification tool: respond-only, the human's answer IS the tool result
 QUESTION_TOOL = "ask_user"
+
+# Tools whose card carries a PII checkbox list: the only two that return real
+# warehouse values to the model.
+PII_REVIEW_TOOLS = ("execute_sql", "profile_column")
 
 
 class _SyncHumanInTheLoopMiddleware(HumanInTheLoopMiddleware):
@@ -73,21 +87,66 @@ def build_hitl_middleware(
     )
 
 
-def input_required_event(interrupt_value: dict) -> dict:
+def _card_columns(sql: str, ctx: RunContext) -> tuple[list[dict] | None, str]:
+    """The card's checkbox list, or (None, reason) when it cannot be built.
+
+    Fail-closed on purpose: the tool builds its own schema map when it runs, so a
+    transient catalog error here must not produce an empty card that the user
+    approves and the tool then executes unhashed."""
+    try:
+        tree = sqlglot.parse_one(sql, dialect=ctx.dialect)
+        schema_map = catalog.schema_map_for(ctx, sql_guard.referenced_tables(tree))
+        resolved = pii_rewrite.resolve_projection(sql, ctx.dialect, schema_map)
+    except Exception as err:  # pylint: disable=broad-except
+        logger.error(f"could not build the PII column list for the approval card: {err}")
+        return None, str(err)
+    return [
+        {
+            "schema": column.schema,
+            "table": column.table,
+            "column": column.column,
+            "has_literal": column.has_literal,
+        }
+        for column in resolved
+    ], ""
+
+
+def _reviewable_sql(request: dict, ctx: RunContext) -> str:
+    """The SQL whose columns the card reviews. execute_sql carries it as an
+    argument; profile_column names a single column, so synthesize the
+    equivalent SELECT rather than duplicating the tool's query-building."""
+    args = request.get("args", {})
+    if request["name"] == "execute_sql":
+        return str(args.get("sql", ""))
+    column = args.get("column_name")
+    quoted = f"`{column}`" if ctx.dialect == "bigquery" else f'"{column}"'
+    qualified = catalog.qualified(ctx.dialect, args.get("schema_name"), args.get("table_name"))
+    return f"SELECT {quoted} FROM {qualified}"
+
+
+def input_required_event(interrupt_value: dict, ctx: RunContext) -> dict:
     """Translate a HITLRequest interrupt payload into the WS event the UI renders.
 
     kind="question" when the pause is a lone ask_user call (the UI shows the
     question as a normal assistant message and the composer answers it);
-    kind="approval" otherwise (the UI shows approve/cancel cards)."""
-    requests = [
-        {
+    kind="approval" otherwise (the UI shows approve/cancel cards). Requests for a
+    value-returning tool also carry the PII checkbox list."""
+    requests = []
+    for request in interrupt_value.get("action_requests", []):
+        sql = request.get("args", {}).get("sql")
+        entry = {
             "tool": request["name"],
             "args": request.get("args", {}),
             "description": request.get("description", ""),
-            "sql": request.get("args", {}).get("sql"),
+            "sql": sql,
         }
-        for request in interrupt_value.get("action_requests", [])
-    ]
+        if request["name"] in PII_REVIEW_TOOLS:
+            columns, error = _card_columns(_reviewable_sql(request, ctx), ctx)
+            entry["columns"] = columns
+            if columns is None:
+                entry["columns_error"] = error
+        requests.append(entry)
+
     if len(requests) == 1 and requests[0]["tool"] == QUESTION_TOOL:
         return {
             "type": "input_required",

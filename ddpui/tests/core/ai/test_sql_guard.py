@@ -6,8 +6,9 @@ bypass catalog; see features/chat-with-data/v1/plan.md §4.3 in dalgo-core.
 """
 
 import pytest
+import sqlglot
 
-from ddpui.core.ai.guards.sql_guard import validate, GuardError
+from ddpui.core.ai.guards.sql_guard import referenced_tables, validate, GuardError
 
 
 def test_plain_select_passes_and_gets_limit():
@@ -204,3 +205,11 @@ def test_insert_is_rejected():
             allowed_schemas=["prod"],
             max_rows=100,
         )
+
+
+def test_referenced_tables_is_public_and_skips_cte_aliases():
+    tree = sqlglot.parse_one(
+        "WITH recent AS (SELECT * FROM prod.surveys) SELECT * FROM recent",
+        dialect="postgres",
+    )
+    assert referenced_tables(tree) == {"prod.surveys"}

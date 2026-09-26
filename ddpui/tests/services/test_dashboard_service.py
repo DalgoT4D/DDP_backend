@@ -35,6 +35,11 @@ from ddpui.services.dashboard_service import (
     DashboardServiceError,
     FilterNotFoundError,
     FilterValidationError,
+    WidgetImageValidationError,
+    WidgetImagePermissionError,
+    WidgetImageStorageError,
+    upload_widget_image,
+    copy_widget_image,
 )
 from ddpui.schemas.dashboard_schema import DashboardCreate, DashboardUpdate, DashboardTabSchema
 from ddpui.tests.api_tests.test_user_org_api import seed_db
@@ -697,3 +702,92 @@ class TestUpdateDashboardTabs:
         assert updated.title == "New Title Only"
         assert len(updated.tabs) == 1
         assert updated.tabs[0]["id"] == "tab-existing"
+
+
+# ================================================================================
+# Test upload_widget_image (dashboard text/image widgets)
+# ================================================================================
+
+
+class TestUploadWidgetImage:
+    """Tests for upload_widget_image()"""
+
+    def test_upload_widget_image_invalid_content_type(self, org):
+        """Test that a disallowed content type is rejected before touching S3"""
+        with pytest.raises(WidgetImageValidationError) as excinfo:
+            upload_widget_image(b"not-an-image", "application/pdf", org)
+
+        assert "Invalid file type" in excinfo.value.message
+
+    def test_upload_widget_image_oversized(self, org, monkeypatch):
+        """Test that a file over the 5MB limit is rejected before touching S3"""
+        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
+        oversized_bytes = b"0" * (5 * 1024 * 1024 + 1)
+
+        with pytest.raises(WidgetImageValidationError) as excinfo:
+            upload_widget_image(oversized_bytes, "image/png", org)
+
+        assert "5MB" in excinfo.value.message
+
+    def test_upload_widget_image_missing_bucket_env(self, org, monkeypatch):
+        """Test that a missing S3_IMAGES_BUCKET env var surfaces as a storage error"""
+        monkeypatch.delenv("S3_IMAGES_BUCKET", raising=False)
+
+        with pytest.raises(WidgetImageStorageError):
+            upload_widget_image(b"fake-bytes", "image/png", org)
+
+    def test_upload_widget_image_success(self, org, monkeypatch):
+        """Test a successful upload returns the S3 url/key and scopes the key to the org"""
+        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
+
+        with patch(
+            "ddpui.services.dashboard_service.upload_file",
+            return_value="https://test-bucket.s3.ap-south-1.amazonaws.com/fake-key.png",
+        ) as mock_upload:
+            image_url, image_key = upload_widget_image(b"fake-bytes", "image/png", org)
+
+        assert image_url == "https://test-bucket.s3.ap-south-1.amazonaws.com/fake-key.png"
+        assert image_key.startswith(f"orgs/{org.pk}/dashboards/images/")
+        assert image_key.endswith(".png")
+
+        mock_upload.assert_called_once()
+        called_bucket, called_key, called_bytes, called_content_type = mock_upload.call_args[0]
+        assert called_bucket == "test-bucket"
+        assert called_key == image_key
+        assert called_bytes == b"fake-bytes"
+        assert called_content_type == "image/png"
+
+    def test_upload_widget_image_s3_failure(self, org, monkeypatch):
+        """Test that an S3 upload failure surfaces as a storage error"""
+        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
+
+        with patch(
+            "ddpui.services.dashboard_service.upload_file",
+            side_effect=Exception("S3 unavailable"),
+        ):
+            with pytest.raises(WidgetImageStorageError):
+                upload_widget_image(b"fake-bytes", "image/png", org)
+
+
+class TestCopyWidgetImage:
+    """Tests for copy_widget_image()"""
+
+    def test_copy_widget_image_wrong_source_org_prefix(self, org):
+        """An image_key outside source_org's own prefix must be rejected without
+        calling S3 — otherwise a dashboard's stored tabs JSON could carry a
+        crafted imageKey pointing at another org's S3 path, and duplicating/cloning
+        that dashboard would copy the foreign org's private image."""
+        other_org = Org.objects.create(
+            name="Another Org",
+            slug="other-org-copy",
+            airbyte_workspace_id="workspace-id-copy-test",
+        )
+        foreign_image_key = f"orgs/{other_org.pk}/dashboards/images/file.png"
+
+        try:
+            with patch("ddpui.services.dashboard_service.copy_file") as mock_copy:
+                with pytest.raises(WidgetImagePermissionError):
+                    copy_widget_image(foreign_image_key, org, org)
+                mock_copy.assert_not_called()
+        finally:
+            other_org.delete()

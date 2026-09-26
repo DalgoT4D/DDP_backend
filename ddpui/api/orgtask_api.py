@@ -42,12 +42,10 @@ from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
 from ddpui.utils.constants import (
     TRANSFORM_TASKS_SEQ,
-    TASK_GENERATE_EDR,
     LONG_RUNNING_TASKS,
     DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
     TRANSFORM_TASKS_DEPENDENCIES,
 )
-from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.core.pipelinefunctions import (
     fetch_pipeline_lock_v1,
 )
@@ -199,27 +197,13 @@ def post_system_transformation_tasks(request):
     return {"success": 1}
 
 
-@orgtask_router.get("elementary-lock/")
-@has_permission(["can_view_orgtasks"])
-def get_elemetary_task_lock(request):
-    """Check if the elementary report generation task is underway"""
-    org: Org = request.orguser.org
-    org_task = get_edr_send_report_task(org)
-    lock = TaskLock.objects.filter(orgtask=org_task).first()
-    return fetch_orgtask_lock_v1(org_task, lock)
-
-
 @orgtask_router.get("transform/")
 @has_permission(["can_view_orgtasks"])
-def get_prefect_transformation_tasks(request, include_edr: bool = False):
+def get_prefect_transformation_tasks(request):
     """Fetch manual (Transform-tab) dbt deployments for an org. Each response
     row represents one runnable deployment; the "primary" orgtask (the last
     one in the chain by seq, ignoring auto-managed dependencies) determines
-    the label/slug/command/lock/uuid shown.
-
-    `include_edr=true` opts the generate-edr deployment into the response —
-    used by the pipeline form picker. Defaults to False so the Transform tab
-    and other callers don't see EDR."""
+    the label/slug/command/lock/uuid shown."""
     orguser: OrgUser = request.orguser
 
     auto_managed_task_slugs = set(TRANSFORM_TASKS_DEPENDENCIES)
@@ -243,8 +227,6 @@ def get_prefect_transformation_tasks(request, include_edr: bool = False):
                 break
         if primary_dfot is None:
             continue
-        if primary_dfot.orgtask.task.slug == TASK_GENERATE_EDR and not include_edr:
-            continue
         primaries.append((dataflow, primary_dfot.orgtask))
 
     # gather all orgtask ids across all chained deployments so a lock held on
@@ -259,9 +241,7 @@ def get_prefect_transformation_tasks(request, include_edr: bool = False):
 
     res = []
     for dataflow, primary in primaries:
-        command = None
-        if primary.task.type != TaskType.EDR:
-            command = primary.task.type + " " + primary.get_task_parameters()
+        command = primary.task.type + " " + primary.get_task_parameters()
 
         chain_ids = {dfot.orgtask_id for dfot in dataflow.datafloworgtasks.all()}
         matching_locks = [lock for lock in all_locks if lock.orgtask_id in chain_ids]
@@ -334,7 +314,7 @@ def post_delete_orgtask(request, orgtask_uuid):  # pylint: disable=unused-argume
     if org_task is None:
         raise HttpError(400, "task not found")
 
-    if org_task.task.type not in [TaskType.DBT, TaskType.GIT, TaskType.EDR]:
+    if org_task.task.type not in [TaskType.DBT, TaskType.GIT]:
         raise HttpError(400, "task not supported")
 
     if orguser.org.dbt is None:

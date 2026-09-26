@@ -19,9 +19,6 @@ from ddpui.api.dbt_api import (
     put_dbt_schema_v1,
     get_transform_type,
     post_run_dbt_commands,
-    get_elementary_setup_status,
-    post_elementary_check,
-    post_elementary_install,
     post_dbt_publish_changes,
     put_switch_git_repo,
 )
@@ -532,103 +529,6 @@ def test_post_run_dbt_commands_task_filtering(orguser: OrgUser, f_org_tasks):
         # Cleanup
         extra_org_task.delete()
         extra_task.delete()
-
-
-def test_get_elementary_setup_status_failure(orguser):
-    """failure"""
-    request = mock_request(orguser)
-    with patch(
-        "ddpui.api.dbt_api.elementary_service.elementary_setup_status",
-        return_value={"error": "error-message"},
-    ), pytest.raises(HttpError) as excinfo:
-        get_elementary_setup_status(request)
-        assert str(excinfo.value) == "error-message"
-
-
-def test_get_elementary_setup_status_success(orguser):
-    """success"""
-    request = mock_request(orguser)
-    with patch(
-        "ddpui.api.dbt_api.elementary_service.elementary_setup_status",
-        return_value={"status": "set-up"},
-    ):
-        response = get_elementary_setup_status(request)
-        assert response == {"status": "set-up"}
-
-
-# ==================== /elementary/check tests ====================
-
-
-def test_post_elementary_check_no_dbt(orguser):
-    """returns 400 when the org has no dbt workspace"""
-    orguser.org.dbt = None
-    request = mock_request(orguser)
-    with pytest.raises(HttpError) as excinfo:
-        post_elementary_check(request)
-    assert str(excinfo.value) == "dbt is not configured for this client"
-
-
-def test_post_elementary_check_ready(orguser, f_orgwarehouse):
-    """dbt repo has all required elementary config → status=ready"""
-    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
-    request = mock_request(orguser)
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir", return_value="/tmp"
-    ), patch("ddpui.api.dbt_api.os.path.exists", return_value=True), patch(
-        "ddpui.api.dbt_api.GitManager"
-    ) as mock_git_manager, patch(
-        "ddpui.api.dbt_api.elementary_service.check_dbt_files",
-        return_value=(None, {"exists": {"elementary_package": "..."}, "missing": {}}),
-    ):
-        response = post_elementary_check(request)
-    mock_git_manager.return_value.pull_changes.assert_called_once()
-    assert response == {"status": "ready"}
-
-
-def test_post_elementary_check_needs_repo_changes(orguser, f_orgwarehouse):
-    """missing elementary config → status=needs_repo_changes with the snippets"""
-    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
-    request = mock_request(orguser)
-    missing = {
-        "elementary_package": "packages:\n  - package: elementary-data/elementary\n    version: 0.16.1"
-    }
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir", return_value="/tmp"
-    ), patch("ddpui.api.dbt_api.os.path.exists", return_value=True), patch(
-        "ddpui.api.dbt_api.GitManager"
-    ), patch(
-        "ddpui.api.dbt_api.elementary_service.check_dbt_files",
-        return_value=(None, {"exists": {}, "missing": missing}),
-    ):
-        response = post_elementary_check(request)
-    assert response["status"] == "needs_repo_changes"
-    assert response["missing"] == missing
-
-
-# ==================== /elementary/install tests ====================
-
-
-def test_post_elementary_install_no_dbt(orguser):
-    """returns 400 when the org has no dbt workspace"""
-    orguser.org.dbt = None
-    request = mock_request(orguser)
-    with pytest.raises(HttpError) as excinfo:
-        post_elementary_install(request)
-    assert str(excinfo.value) == "dbt is not configured for this client"
-
-
-def test_post_elementary_install_dispatches_celery(orguser):
-    """happy path: dispatches install_elementary celery task, returns task_id + hashkey"""
-    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
-    orguser.org.dbt.save()
-    request = mock_request(orguser)
-    with patch("ddpui.celeryworkers.tasks.install_elementary.delay") as mock_delay:
-        response = post_elementary_install(request)
-    assert "task_id" in response
-    assert response["hashkey"] == f"install-elementary-{orguser.org.slug}"
-    mock_delay.assert_called_once()
-    # First positional arg is org.id
-    assert mock_delay.call_args.args[0] == orguser.org.id
 
 
 # ==================== post_dbt_publish_changes tests ====================

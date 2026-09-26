@@ -100,17 +100,6 @@
     },
     {
         "model": "ddpui.Task",
-        "pk": 10,
-        "fields": {
-            "type": "edr",
-            "slug": "generate-edr",
-            "label": "EDR generate",
-            "command": "send-report",
-            "is_system": true
-        }
-    },
-    {
-        "model": "ddpui.Task",
         "pk": 11,
         "fields": {
             "type": "airbyte",

@@ -9,7 +9,6 @@ from ddpui.models.org import Org, OrgDbt, OrgDataFlowv1
 from ddpui.ddpprefect.prefect_service import get_deployment, update_dataflow_v1
 from ddpui.ddpprefect import DBTCORE
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
-from ddpui.utils.constants import TASK_GENERATE_EDR
 
 load_dotenv()
 
@@ -111,7 +110,6 @@ class Command(BaseCommand):
                 continue
 
             dbt_binary_path = str(Path(dbt_venv_base) / new_dbt_venv / "bin" / "dbt")
-            edr_bin_dir = str(Path(dbt_venv_base) / new_dbt_venv / "bin")
 
             self.stdout.write(f"\nOrg: {target_org.slug}")
 
@@ -173,15 +171,6 @@ class Command(BaseCommand):
                                     self.stdout.write(f"    new: {new_cmd}")
                                     task["commands"][0] = new_cmd
                                     modified = True
-
-                        elif task.get("slug") == TASK_GENERATE_EDR:
-                            old_path = task.get("env", {}).get("PATH", "")
-                            if old_path != edr_bin_dir:
-                                self.stdout.write(
-                                    f"  [{deployment.deployment_name}] EDR PATH: {old_path!r} → {edr_bin_dir!r}"
-                                )
-                                task.setdefault("env", {})["PATH"] = edr_bin_dir
-                                modified = True
 
                     if modified:
                         if not dry_run:

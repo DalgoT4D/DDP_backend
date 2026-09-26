@@ -52,3 +52,19 @@ def qualified(dialect: str, schema: str, table: str) -> str:
     if dialect == "bigquery":
         return f"`{schema}.{table}`"
     return f'"{schema}"."{table}"'
+
+
+def schema_map_for(ctx: RunContext, tables: set[str]) -> dict:
+    """The schema input sqlglot's qualify() needs, so it can resolve aliases and
+    expand SELECT *: {schema: {table: {column: type}}}. One catalog round-trip per
+    table — keep the caller's table set small."""
+    mapping: dict[str, dict[str, dict[str, str]]] = {}
+    for ref in tables:
+        if "." not in ref:
+            continue  # unqualified names are the guard's error to raise, not ours
+        schema, table = ref.split(".", 1)
+        columns = ctx.warehouse.get_table_columns(schema, table)
+        mapping.setdefault(schema, {})[table] = {
+            column["name"]: column["data_type"] for column in columns
+        }
+    return mapping
