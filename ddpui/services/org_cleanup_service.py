@@ -391,9 +391,7 @@ class OrgCleanupService:
                 if remaining == 0:
                     logger.info("deleting user %s (no remaining org memberships)", user.email)
                     with connection.cursor() as cursor:
-                        cursor.execute(
-                            "DELETE FROM authtoken_token WHERE user_id = %s", [user.pk]
-                        )
+                        cursor.execute("DELETE FROM authtoken_token WHERE user_id = %s", [user.pk])
                     user.delete()
                 else:
                     logger.info(

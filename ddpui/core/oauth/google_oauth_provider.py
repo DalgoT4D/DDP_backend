@@ -61,11 +61,9 @@ def _normalize_source_name(source_name: str) -> str:
 # truth for "which connectors support the Dalgo-driven Google OAuth flow".
 GOOGLE_OAUTH_CONNECTORS: dict[str, GoogleOAuthConnector] = {
     _normalize_source_name(GSHEETS_SOURCE_NAME): GoogleOAuthConnector(
-        # Least privilege: read-only Sheets data (no Drive). If a real sync against the
-        # target gsheets connector version demands Drive, add
-        # "https://www.googleapis.com/auth/drive.readonly" (a restricted scope — heavier
-        # Google verification).
-        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"],
+        # Non-sensitive scope (no Google verification): grants only the files the user picks in
+        # the Google Picker, so `spreadsheet_id` must come from the Picker, never a pasted link.
+        scopes=["https://www.googleapis.com/auth/drive.file"],
         credentials_builder=_gsheets_credentials,
     ),
 }
@@ -95,3 +93,21 @@ def oauth_client_secret() -> str:
     if not client_secret:
         raise HttpError(500, "google oauth client secret is not configured")
     return client_secret
+
+
+def picker_api_key() -> str:
+    """Browser API key for the Google Picker. Public by design — restrict it by HTTP referrer
+    in the Cloud console, not by hiding it."""
+    api_key = os.getenv("AIRBYTE_GOOGLE_PICKER_API_KEY")
+    if not api_key:
+        raise HttpError(500, "google picker api key is not configured")
+    return api_key
+
+
+def picker_app_id() -> str:
+    """The Picker's `appId` — the GCP PROJECT NUMBER owning the OAuth client (not the project
+    id, not the client id)."""
+    app_id = os.getenv("AIRBYTE_GOOGLE_PICKER_APP_ID")
+    if not app_id:
+        raise HttpError(500, "google picker app id is not configured")
+    return app_id
