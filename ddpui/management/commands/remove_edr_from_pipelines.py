@@ -100,9 +100,7 @@ class Command(BaseCommand):
                 updated += 1
             except Exception as e:
                 self.stdout.write(
-                    self.style.ERROR(
-                        f"  ✗ Failed to update {dataflow.deployment_name}: {str(e)}"
-                    )
+                    self.style.ERROR(f"  ✗ Failed to update {dataflow.deployment_name}: {str(e)}")
                 )
                 logger.error(
                     "Failed to remove EDR from pipeline %s: %s",
