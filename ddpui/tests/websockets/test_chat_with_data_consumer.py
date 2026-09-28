@@ -152,7 +152,7 @@ def test_connect_closed_for_someone_elses_session(orguser, enabled_org):
 
 
 class FakeRedis:
-    """In-memory stand-in for RedisClient (rate counter + turn lock)."""
+    """In-memory stand-in for RedisClient (turn lock + pending card)."""
 
     def __init__(self):
         self.store = {}
@@ -369,28 +369,6 @@ def test_second_message_rejected_while_turn_in_flight(orguser, scripted_turn):
         event = await communicator.receive_json_from(timeout=5)
         assert event["type"] == "error"
         assert "previous question" in event["message"]
-        await communicator.disconnect()
-
-    run(scenario())
-
-
-def test_rate_limited_user_gets_error_event(orguser, scripted_turn):
-    from ddpui.websockets import chat_with_data_consumer as consumer_module
-
-    session = scripted_turn
-    # user already at the per-minute message cap
-    redis = consumer_module.RedisClient.get_instance()
-    redis.store[f"chat_with_data:rate:{orguser.id}"] = consumer_module.RATE_LIMIT_PER_MINUTE
-
-    async def scenario():
-        communicator = make_communicator(
-            session_id=session.id, token=token_for(orguser), orgslug=orguser.org.slug
-        )
-        await communicator.connect()
-        await communicator.send_json_to({"action": "send_message", "message": "how many?"})
-        event = await communicator.receive_json_from(timeout=5)
-        assert event["type"] == "error"
-        assert "too quickly" in event["message"]
         await communicator.disconnect()
 
     run(scenario())

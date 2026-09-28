@@ -76,8 +76,6 @@ def create_chart(
     title the user will recognize later."""
     ctx = runtime.context
 
-    if not ctx.can_create_charts:
-        return _rejected("you do not have permission to create charts in this organization")
     if chart_type not in CHART_TYPES:
         return _rejected(f"chart_type must be one of {sorted(CHART_TYPES)}")
     if schema_name not in ctx.allowed_schemas:

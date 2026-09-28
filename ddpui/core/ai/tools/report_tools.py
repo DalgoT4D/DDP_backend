@@ -29,12 +29,6 @@ def create_report(
     first. Optional period_start/period_end (YYYY-MM-DD) limit the report to
     a date range when the dashboard has a date filter."""
     ctx = runtime.context
-    # reports ride the dashboard-creation permission, same as the Reports API
-    if not ctx.can_create_dashboards:
-        return rejection(
-            "report", "Report not created", "you do not have permission to create reports"
-        )
-
     try:
         start = date.fromisoformat(period_start) if period_start else None
         end = date.fromisoformat(period_end) if period_end else None

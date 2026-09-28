@@ -80,10 +80,6 @@ They share one checkpointed thread, and three mechanisms keep the pair honest:
   triggers its `handoff_to_platform_guide` tool (return_direct), and the
   TurnGraph continues the SAME turn in the guide agent — the user never
   re-asks. The handoff path skips validate_node (nothing SQL to audit).
-- **Error repair.** When one agent hallucinates the other's tool, the "not a
-  valid tool" error stays in the shared history and would convince the OTHER
-  agent its own tool is broken. `middleware.repair_foreign_tool_errors`
-  durably rewrites exactly those errors (tools the current agent owns).
 
 ## Human in the loop (`agent/hitl.py`)
 
@@ -128,8 +124,8 @@ that, and `RECURSION_LIMIT` (160 graph steps) is the runaway backstop.
   org-specific travels in `RunContext` (`agent/run_context.py`), resolved
   server-side by `agent/context_builder.py` — the only module here that reads
   the ORM for context. Discovery is **scan-then-ask** (since 2026-09-10): the
-  allowlist is every non-system schema, the prompt steers the agent to scan
-  prod/intermediate/staging first and to `ask_user` rather than comb the rest;
+  allowlist is every non-system schema, the prompt steers the agent to
+  `ask_user` rather than comb every schema;
   an admin can pin the list via `ChatWithDataOrgConfig.allowed_schemas`.
 - **The warehouse is read-only.** Creation tools write Dalgo metadata only,
   through the same services the REST API uses (identical validation).
@@ -159,19 +155,17 @@ that, and `RECURSION_LIMIT` (160 graph steps) is the runaway backstop.
 
 Chat is on when the org's `CHAT_WITH_DATA` feature flag is enabled AND a
 warehouse exists (`chat/sessions.get_status`). The Copilot settings page
-(GET/PUT `/api/chat-with-data/settings`, permission
-`can_manage_chat_with_data_settings`) flips that flag and edits the org
+(GET/PUT `/api/chat-with-data/settings`) flips that flag and edits the org
 memory — flipping the toggle IS the org's AI consent (`OrgPreferences.llm_optin`
 deliberately does not gate chat; it still gates the other AI features).
-Chatting needs `can_use_chat_with_data`; creation tools additionally check the
-user's own `can_create_charts`/`can_create_metrics`/… permissions, resolved
-into RunContext at context-build time.
+One permission, `can_use_chat_with_data` (super-admin + admin only), gates
+chat, settings and every tool — creation tools do no further RBAC checks.
 
 Sessions (`ChatWithDataSession`) are owner-scoped rows holding a `thread_id`
 into the checkpointer — message content lives ONLY there. Titles are
 auto-generated after the first exchange (`llm_calls/session_title.py`). The
-consumer rate-limits users (10 messages/min) and holds a Redis turn lock so a
-crashed consumer can't wedge a session.
+consumer holds a Redis turn lock (with TTL) so a crashed consumer can't wedge
+a session.
 
 ## How to extend
 
@@ -217,10 +211,7 @@ stamped with which agent answered and whether a handoff happened.
 
 ```bash
 uv run pytest ddpui/tests/core/ai -v          # unit tests for this package
-uv run python manage.py chat_with_data_repl --org <slug>    # chat from the terminal
 uv run python manage.py chat_with_data_setup  # create checkpointer tables (once per env)
-uv run python manage.py chat_with_data_eval --org <slug> --file ... --tag canary
-                                              # golden-set evals (see evals/README.md)
 uv run python manage.py chat_with_data_dashboards --org <slug>  # Langfuse dashboards
 ```
 

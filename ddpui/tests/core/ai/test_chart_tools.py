@@ -42,7 +42,6 @@ def run_tool(ctx, **kwargs):
 def make_chart_context(**overrides):
     ctx = make_context()
     ctx.orguser_id = 7
-    ctx.can_create_charts = True
     for key, value in overrides.items():
         setattr(ctx, key, value)
     return ctx
@@ -128,20 +127,6 @@ def test_pie_uses_dimension_column_key(saved):
     assert artifact["type"] == "chart"
     assert saved["data"].extra_config["dimension_column"] == "district"
     assert saved["data"].extra_config["metrics"][0]["aggregation"] == "sum"
-
-
-def test_rejects_without_permission(saved):
-    content, artifact = run_tool(
-        make_chart_context(can_create_charts=False),
-        title="t",
-        chart_type="bar",
-        schema_name="prod",
-        table_name="surveys",
-        dimension_column="district",
-    )
-    assert artifact["status"] == "rejected"
-    assert "permission" in content.lower()
-    assert "data" not in saved  # nothing persisted
 
 
 def test_rejects_disallowed_schema(saved):

@@ -21,7 +21,6 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from ddpui.core.ai.agent.hitl import build_hitl_middleware
 from ddpui.core.ai.agent.middleware import (
     clear_old_tool_results,
-    repair_foreign_tool_errors,
     trim_history,
 )
 from ddpui.core.ai.agent.org_memory import org_memory_section
@@ -135,7 +134,6 @@ def build_guide_agent(
     from ddpui.core.ai.agent.chat_data_agent import get_chat_model
 
     middleware = [
-        repair_foreign_tool_errors(GUIDE_AGENT_TOOLS),  # un-poison cross-agent tool errors
         guide_system_prompt,
         trim_history,
         clear_old_tool_results(),

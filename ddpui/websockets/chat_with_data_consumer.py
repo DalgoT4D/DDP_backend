@@ -51,10 +51,6 @@ logger = CustomLogger("ddpui")
 
 REQUIRED_PERMISSION = "can_use_chat_with_data"
 
-# One user may send at most this many messages per minute (across sessions)
-RATE_LIMIT_PER_MINUTE = 10
-RATE_LIMIT_WINDOW_S = 60
-
 # A crashed consumer's turn lock must not wedge the session forever
 TURN_LOCK_TTL_S = 180
 
@@ -199,15 +195,6 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             await self._send_event({"type": "error", "message": "Unsupported action"})
             return
 
-        if not self._check_rate_limit():
-            await self._send_event(
-                {
-                    "type": "error",
-                    "message": "You're sending messages too quickly — give it a few seconds.",
-                }
-            )
-            return
-
         if not self._acquire_turn_lock():
             await self._send_event(
                 {"type": "error", "message": "I'm still working on your previous question."}
@@ -340,9 +327,6 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
         query = parse_qs(self.scope.get("query_string", b"").decode())
         return query.get(name, [None])[0]
 
-    def _rate_key(self) -> str:
-        return f"chat_with_data:rate:{self.orguser.id}"
-
     def _lock_key(self) -> str:
         return f"chat_with_data:turn_lock:{self.session.id}"
 
@@ -376,14 +360,6 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
 
     def _clear_pending_input(self):
         RedisClient.get_instance().delete(self._pending_key())
-
-    def _check_rate_limit(self) -> bool:
-        redis = RedisClient.get_instance()
-        key = self._rate_key()
-        count = redis.incr(key)
-        if count == 1:
-            redis.expire(key, RATE_LIMIT_WINDOW_S)
-        return count <= RATE_LIMIT_PER_MINUTE
 
     def _acquire_turn_lock(self) -> bool:
         redis = RedisClient.get_instance()

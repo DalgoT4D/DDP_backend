@@ -15,13 +15,11 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from ddpui.core.ai.agent.base import build_model_by_id, resolve_model_name
-from ddpui.core.ai.agent.context_builder import priority_sorted_schemas
 from ddpui.core.ai.agent.hitl import build_hitl_middleware
 from ddpui.core.ai.agent.org_memory import org_memory_section
 from ddpui.core.ai.agent.middleware import (
     MAX_SQL_ATTEMPTS,
     clear_old_tool_results,
-    repair_foreign_tool_errors,
     sql_retry_limiter,
     trim_history,
 )
@@ -31,11 +29,11 @@ from ddpui.core.ai.tools.registry import get_tools
 # Upper bound on GRAPH STEPS per turn — backstop against runaway loops.
 # Every before_model/after_model hook is its own graph node (a wrap_model_call
 # hook like org_system_prompt or clear_old_tool_results wraps the model call
-# in place and adds none). One model⇄tool cycle now costs ~6 steps (3
-# before_model: sql_retry_limiter, repair_foreign_tool_errors, trim_history;
+# in place and adds none). One model⇄tool cycle now costs ~5 steps (2
+# before_model: sql_retry_limiter, trim_history;
 # + model; + 1 after_model: the HITL approval gate; + tools) — down from ~16
 # when 5 PIIMiddleware instances each added a before_model AND an after_model
-# node. 160 ≈ headroom for ~26 cycles now (was ~10); a legitimate heavy turn
+# node. 160 ≈ headroom for ~32 cycles now (was ~10); a legitimate heavy turn
 # on a messy warehouse uses ~12 (schemas → tables → details ×3 → profile ×2 →
 # sql ×5 with retries — MAX_SQL_ATTEMPTS is 5). profile_column and execute_sql
 # both pausing for approval (Task 7) doesn't erode this: each pause/resume is
@@ -112,7 +110,7 @@ def get_chat_model(model_id: str | None = None) -> BaseChatModel:
 def build_system_prompt(ctx: RunContext) -> str:
     """The agent's operating instructions, specialized to the org's warehouse."""
     dialect_label = _DIALECT_LABELS.get(ctx.dialect, ctx.dialect)
-    schemas = ", ".join(priority_sorted_schemas(ctx.allowed_schemas)) or "(none)"
+    schemas = ", ".join(sorted(ctx.allowed_schemas)) or "(none)"
 
     return f"""You are Dalgo's data assistant. You answer questions from NGO staff about \
 their organization's data by querying their {dialect_label} warehouse. Your users are \
@@ -132,12 +130,9 @@ list before the query runs, so it must be readable.
 {org_memory_section(ctx)}
 ## How to work
 1. Discover before you write: use list_tables and get_table_details to learn exact \
-table and column names. Never guess a column name. Scan schemas in the order \
-listed above — names containing prod, intermediate, or staging hold the curated \
-data; look at other schemas only if those don't answer the question.
-1b. If the prod/intermediate/staging scan finds no table matching the question, \
-use ask_user to ask which schema or table holds the data — do NOT comb through \
-every remaining schema table by table.
+table and column names. Never guess a column name.
+1b. If no table obviously matches the question, use ask_user to ask which \
+schema or table holds the data — do NOT comb through every schema table by table.
 2. Validate filter values: before filtering on a text column, use profile_column to \
 see the real stored values (users say "Maharashtra"; the column may store "MH").
 3. Query with execute_sql. Results are capped at {ctx.max_result_rows} rows — use \
@@ -207,7 +202,6 @@ def build_agent(
     back to its tool body and gated tools run without approval."""
     middleware = [
         sql_retry_limiter,  # must precede other before_model hooks: it can jump to end
-        repair_foreign_tool_errors(SQL_AGENT_TOOLS),  # un-poison cross-agent tool errors
         org_system_prompt,
         trim_history,
         clear_old_tool_results(),

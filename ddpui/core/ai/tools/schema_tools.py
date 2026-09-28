@@ -6,7 +6,6 @@ and execute_sql, so PII controls only have those two surfaces to cover."""
 
 from langchain.tools import ToolRuntime, tool
 
-from ddpui.core.ai.agent.context_builder import priority_sorted_schemas
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools import catalog
 from ddpui.core.ai.tools.registry import register_tool
@@ -25,9 +24,7 @@ def list_schemas(runtime: ToolRuntime[RunContext]) -> str:
     ctx = runtime.context
     if not ctx.allowed_schemas:
         return "No schemas are available for this organization."
-    return "Available schemas (scan them in this order):\n" + "\n".join(
-        priority_sorted_schemas(ctx.allowed_schemas)
-    )
+    return "Available schemas:\n" + "\n".join(sorted(ctx.allowed_schemas))
 
 
 @register_tool
@@ -87,7 +84,7 @@ def get_table_details(schema_name: str, table_name: str, runtime: ToolRuntime[Ru
         if mixed:
             details += (
                 "\n\nNOTE: these identifiers are case-sensitive and MUST be "
-                'double-quoted in SQL, e.g. '
+                "double-quoted in SQL, e.g. "
                 f'{schema_name}."{table_name}" and "{mixed[-1]}": '
                 + ", ".join(f'"{n}"' for n in mixed)
             )

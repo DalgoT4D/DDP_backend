@@ -42,23 +42,6 @@ uv sync
 uv run python manage.py chat_with_data_setup   # creates checkpointer tables
 ```
 
-## Try the agent from a terminal (no frontend needed)
-
-```bash
-uv run python manage.py chat_with_data_repl --org <org-slug>
-```
-
-```
-you> how many surveys did we run in Pune last month?
-⚙ list_tables {'schema_name': 'prod'}
-  ↳ Tables in prod:
-⚙ get_table_details {'schema_name': 'prod', 'table_name': 'surveys'}
-  ↳ Table prod.surveys
-⚙ execute_sql {'sql': "SELECT COUNT(*) ..."}
-  ↳ Query returned 1 rows.
-You ran 1,284 surveys in Pune in June. ...
-```
-
 ## Watch what the agent is doing (Langfuse)
 
 1. Run Langfuse locally (`docker compose` from the
