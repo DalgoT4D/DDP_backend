@@ -46,10 +46,6 @@ def create_metric(
     get_table_details first. The metric is validated with a test query
     before saving."""
     ctx = runtime.context
-    if not ctx.can_create_metrics:
-        return rejection(
-            "metric", "Metric not created", "you do not have permission to create metrics"
-        )
     if aggregation and aggregation not in VALID_AGGREGATIONS:
         return rejection(
             "metric", "Metric not created", f"aggregation must be one of {VALID_AGGREGATIONS}"
@@ -99,8 +95,6 @@ def create_kpi(
     (is higher better?); time_grain is daily/weekly/monthly/quarterly/yearly.
     Name defaults to the metric's name."""
     ctx = runtime.context
-    if not ctx.can_create_kpis:
-        return rejection("kpi", "KPI not created", "you do not have permission to create KPIs")
     if direction not in VALID_DIRECTIONS:
         return rejection("kpi", "KPI not created", f"direction must be one of {VALID_DIRECTIONS}")
     if time_grain not in VALID_TIME_GRAINS:

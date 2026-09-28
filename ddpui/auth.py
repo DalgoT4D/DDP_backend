@@ -83,15 +83,6 @@ def orguser_has_permission(orguser, permission_slug: str) -> bool:
     ).exists()
 
 
-def granted_permission_slugs(orguser, permission_slugs: list) -> set:
-    """The subset of permission_slugs the orguser's role grants, in one query."""
-    return set(
-        RolePermission.objects.filter(
-            role=orguser.new_role, permission__slug__in=permission_slugs
-        ).values_list("permission__slug", flat=True)
-    )
-
-
 def has_access(rtype: str, required_level: str, get_resource_id=None):
     """Gate that checks the requestor has at least ``required_level`` on the
     named resource.

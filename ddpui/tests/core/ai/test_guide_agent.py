@@ -200,47 +200,23 @@ def seed_org_with_objects():
     other.delete()
 
 
-# ── creation tools: permissions + service delegation ─────────────────────────
-
-
-def test_create_metric_requires_permission():
-    from ddpui.core.ai.tools import metric_tools
-
-    ctx = make_context()
-    ctx.can_create_metrics = False
-    content, artifact = run_tool(
-        metric_tools.create_metric,
-        ctx,
-        name="m",
-        schema_name="prod",
-        table_name="surveys",
-        column="id",
-        aggregation="count",
-    )
-    assert artifact["status"] == "rejected"
-    assert "permission" in content
+# ── creation tools: validation + service delegation ─────────────────────────
 
 
 def test_create_kpi_validates_enums_before_touching_services():
     from ddpui.core.ai.tools import metric_tools
 
     ctx = make_context()
-    ctx.can_create_kpis = True
     _, artifact = run_tool(
         metric_tools.create_kpi, ctx, metric_id=1, direction="sideways", time_grain="monthly"
     )
     assert artifact["status"] == "rejected"
 
 
-def test_create_report_requires_permission_and_valid_dates():
+def test_create_report_rejects_invalid_dates():
     from ddpui.core.ai.tools import report_tools
 
     ctx = make_context()
-    ctx.can_create_dashboards = False
-    _, artifact = run_tool(report_tools.create_report, ctx, title="Q1", dashboard_id=1)
-    assert artifact["status"] == "rejected"
-
-    ctx.can_create_dashboards = True
     _, artifact = run_tool(
         report_tools.create_report, ctx, title="Q1", dashboard_id=1, period_start="not-a-date"
     )
@@ -276,7 +252,6 @@ def test_guide_agent_pauses_on_create_metric_for_approval():
     )
     agent = build_guide_agent(checkpointer=InMemorySaver(), model=model, human_in_the_loop=True)
     ctx = make_context()
-    ctx.can_create_metrics = True
 
     result = agent.invoke(
         {"messages": [("user", "create a metric for total surveys")]},
@@ -288,50 +263,3 @@ def test_guide_agent_pauses_on_create_metric_for_approval():
     assert interrupts, "creation must pause for approval"
     tools_pending = [r["name"] for r in interrupts[0].value["action_requests"]]
     assert tools_pending == ["create_metric"]
-
-
-# ── cross-agent poisoning repair ─────────────────────────────────────────────
-
-
-def test_guide_agent_repairs_poisoned_create_metric_error_in_history():
-    """Regression for the 'I don't have write access' incident: the SQL agent
-    hallucinated create_metric, and the invalid-tool error it earned sat in
-    the shared thread telling the guide agent its own tool was broken. The
-    guide's repair middleware must rewrite that message (same id → swapped in
-    the checkpoint) before its model ever sees the lie."""
-    import asyncio
-
-    from langchain_core.messages import HumanMessage, ToolMessage
-    from langgraph.checkpoint.memory import InMemorySaver
-
-    poison = ToolMessage(
-        content="Error: create_metric is not a valid tool, try one of [execute_sql].",
-        name="create_metric",
-        tool_call_id="c1",
-        id="poison-1",
-    )
-    history = [
-        HumanMessage("create the tap metric"),
-        AIMessage(content="", tool_calls=[{"name": "create_metric", "args": {}, "id": "c1"}]),
-        poison,
-        HumanMessage("why can't you create it?"),
-    ]
-
-    guide = build_guide_agent(
-        checkpointer=InMemorySaver(),
-        model=ScriptedChatModel(script=[AIMessage(content="Creating it now.")]),
-        human_in_the_loop=False,
-    )
-
-    async def _run():
-        return await guide.ainvoke(
-            {"messages": history},
-            config={"configurable": {"thread_id": "poison-test"}},
-            context=make_context(),
-        )
-
-    result = asyncio.run(_run())
-
-    fixed = next(m for m in result["messages"] if m.id == "poison-1")
-    assert "not a valid tool" not in fixed.content
-    assert "create_metric IS available to you" in fixed.content

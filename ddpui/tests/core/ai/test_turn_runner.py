@@ -330,7 +330,6 @@ def test_run_turn_attaches_created_charts_via_guide_agent(orguser, session, monk
 
     context = make_context()
     context.orguser_id = orguser.id
-    context.can_create_charts = True
 
     model = ScriptedChatModel(
         script=[

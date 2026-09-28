@@ -16,7 +16,6 @@ from ddpui.core.ai.agent import context_builder as context_module
 from ddpui.core.ai.agent.context_builder import (
     build_run_context,
     derive_allowed_schemas,
-    priority_sorted_schemas,
 )
 from ddpui.core.ai.agent.org_memory import MAX_ORG_MEMORY_CHARS
 from ddpui.models.chat_with_data import (
@@ -38,15 +37,15 @@ class SchemaWarehouse:
         return [{"schema_name": s} for s in self.schemas]
 
 
-def test_all_non_system_schemas_are_offered_curated_first():
+def test_all_non_system_schemas_are_offered_alphabetically():
     # dbt-schema-only restriction removed 2026-09-10: real questions often
     # live in staging/intermediate tables the dbt output schema misses
     warehouse = SchemaWarehouse(["raw_kobo", "staging", "prod", "intermediate"])
     assert derive_allowed_schemas(warehouse, "postgres") == [
-        "prod",
         "intermediate",
-        "staging",
+        "prod",
         "raw_kobo",
+        "staging",
     ]
 
 
@@ -58,22 +57,11 @@ def test_system_schemas_are_never_offered():
             "pg_temp_12",  # per-connection temp schemas come and go
             "pg_toast_temp_3",
             "airbyte_internal",
-            "_airbyte_staging",  # must not leak in via the "staging" priority match
+            "_airbyte_staging",
             "raw_x",
         ]
     )
     assert derive_allowed_schemas(warehouse, "postgres") == ["raw_x"]
-
-
-def test_priority_sort_matches_substrings_and_keeps_rest_alphabetical():
-    schemas = ["zebra", "analytics_staging", "production", "apple", "intermediate_v2"]
-    assert priority_sorted_schemas(schemas) == [
-        "production",  # "prod" matched as substring
-        "intermediate_v2",
-        "analytics_staging",
-        "apple",
-        "zebra",
-    ]
 
 
 # ── Context building (DB) ───────────────────────────────────────────────────

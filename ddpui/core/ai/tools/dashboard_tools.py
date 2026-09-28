@@ -177,8 +177,6 @@ def create_dashboard(
     user has chosen to create a new dashboard rather than add to an existing
     one — check with list_dashboards + a question first."""
     ctx = runtime.context
-    if not ctx.can_create_dashboards:
-        return _rejected("you do not have permission to create dashboards in this organization")
     if not chart_ids:
         return _rejected("provide at least one chart_id to place on the dashboard")
 
@@ -204,8 +202,6 @@ def add_charts_to_dashboard(
     """Add charts to an EXISTING dashboard (first tab). Get the dashboard_id
     from list_dashboards and confirm the choice with the user first."""
     ctx = runtime.context
-    if not ctx.can_edit_dashboards:
-        return _rejected("you do not have permission to edit dashboards in this organization")
     if not chart_ids:
         return _rejected("provide at least one chart_id to add")
 

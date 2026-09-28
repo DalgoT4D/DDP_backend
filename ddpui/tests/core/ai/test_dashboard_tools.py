@@ -19,8 +19,6 @@ from ddpui.tests.core.ai.test_agent_loop import make_context
 def make_dash_context(**overrides):
     ctx = make_context()
     ctx.orguser_id = 7
-    ctx.can_create_dashboards = True
-    ctx.can_edit_dashboards = True
     for key, value in overrides.items():
         setattr(ctx, key, value)
     return ctx
@@ -99,21 +97,6 @@ def test_create_dashboard_with_charts(monkeypatch):
     }
     assert calls["chart_ids"] == [10, 11]
     assert "Donor Overview" in content
-
-
-def test_create_dashboard_requires_permission(monkeypatch):
-    called = {}
-    monkeypatch.setattr(
-        dashboard_tools, "_create_dashboard", lambda *a, **k: called.setdefault("hit", True)
-    )
-    content, artifact = run_tool(
-        dashboard_tools.create_dashboard,
-        make_dash_context(can_create_dashboards=False),
-        title="t",
-        chart_ids=[1],
-    )
-    assert artifact["status"] == "rejected"
-    assert "hit" not in called
 
 
 def test_create_dashboard_rejects_foreign_charts(monkeypatch):

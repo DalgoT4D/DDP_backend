@@ -37,7 +37,7 @@ def get_status(request):
 
 
 @chat_with_data_router.get("/settings")
-@has_permission(["can_manage_chat_with_data_settings"])
+@has_permission(["can_use_chat_with_data"])
 def get_settings(request):
     """Copilot settings: the org's enable flag + its org memory. Admin-only —
     the memory may describe the org's data layout."""
@@ -47,7 +47,7 @@ def get_settings(request):
 
 
 @chat_with_data_router.put("/settings")
-@has_permission(["can_manage_chat_with_data_settings"])
+@has_permission(["can_use_chat_with_data"])
 def update_settings(request, payload: CopilotSettingsUpdate):
     """Partial update of Copilot settings; omitted fields stay unchanged."""
     orguser: OrgUser = request.orguser

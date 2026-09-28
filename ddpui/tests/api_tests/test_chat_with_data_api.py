@@ -98,7 +98,7 @@ def test_status_requires_warehouse_then_ok(orguser, org, seed_db):
 
 @pytest.fixture
 def analyst_orguser(org, seed_db):
-    """Role 4 — has neither chat access nor settings access after v1.1."""
+    """Role 4 — no can_use_chat_with_data, which gates both chat and settings."""
     user = User.objects.create(username="cwdanalyst", email="cwdanalyst@test.com", password="x")
     ou = OrgUser.objects.create(
         user=user, org=org, new_role=Role.objects.filter(slug=ANALYST_ROLE).first()
@@ -159,7 +159,7 @@ def test_partial_update_of_enabled_leaves_memory_untouched(orguser, org, seed_db
 
 
 def test_analyst_can_neither_manage_settings_nor_chat(analyst_orguser, seed_db):
-    # settings were never theirs; chat access was revoked in v1.1 (seed change)
+    # can_use_chat_with_data is admin-only; analyst grant revoked by 0183
     with pytest.raises(HttpError):
         get_settings(mock_request(analyst_orguser))
     with pytest.raises(HttpError):

@@ -24,12 +24,6 @@ class RunContext:
     warehouse: Any = None
     # Who is chatting — needed by tools that create Dalgo artifacts (charts)
     orguser_id: int | None = None
-    # Resolved from RolePermission at context-build time; tools never query RBAC
-    can_create_charts: bool = False
-    can_create_dashboards: bool = False
-    can_edit_dashboards: bool = False
-    can_create_metrics: bool = False
-    can_create_kpis: bool = False
     # schema.table.column keys the user ticked as PII on the approval card for
     # THIS tool call. Stamped by the transport from the resume payload; never
     # persisted server-side — the browser re-sends the set with every resume.

@@ -6,7 +6,6 @@ database_sync_to_async in async consumers), then pass the context into the run â
 tools never touch the database or trust an LLM-supplied org identifier.
 """
 
-from ddpui.auth import granted_permission_slugs
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.models.chat_with_data import ChatWithDataOrgConfig, ChatWithDataOrgMemory
 from ddpui.models.org import OrgWarehouse
@@ -23,10 +22,6 @@ SYSTEM_SCHEMAS = {
 # Airbyte's internal and staging scratch schemas.
 SYSTEM_SCHEMA_PREFIXES = ("pg_", "_airbyte")
 
-# Discovery scans these first: dbt-convention schemas hold the curated data.
-# Matched as substrings of the schema name ("prod" also catches "production").
-PRIORITY_SCHEMA_NAMES = ("prod", "intermediate", "staging")
-
 DEFAULT_MAX_RESULT_ROWS = 100
 DEFAULT_QUERY_TIMEOUT_S = 30
 
@@ -35,29 +30,14 @@ class ChatWithDataNotReady(Exception):
     """Raised when the org has no warehouse to chat with."""
 
 
-def priority_sorted_schemas(schemas: list[str]) -> list[str]:
-    """Curated-first ordering: prod-ish, then intermediate, then staging, then
-    the rest alphabetically. The prompt and list_schemas present schemas in
-    this order so the agent scans the curated layers before raw ones."""
-
-    def rank(schema: str):
-        low = schema.lower()
-        for position, name in enumerate(PRIORITY_SCHEMA_NAMES):
-            if name in low:
-                return (0, position, low)
-        return (1, 0, low)
-
-    return sorted(schemas, key=rank)
-
-
 def derive_allowed_schemas(warehouse, dialect: str) -> list[str]:
     """Default schema allowlist: every non-system schema in the warehouse.
 
     Deliberately NOT restricted to the org's dbt output schema (removed
     2026-09-10): real questions often live in staging/intermediate tables the
-    dbt schema misses. The agent's prompt steers it to scan prod/intermediate/
-    staging first and to ask the user rather than comb everything else; an
-    admin can still pin the list via ChatWithDataOrgConfig.allowed_schemas."""
+    dbt schema misses. The agent's prompt steers it to ask the user rather than
+    comb every schema; an admin can still pin the list via
+    ChatWithDataOrgConfig.allowed_schemas."""
     if dialect == "bigquery":
         sql = "SELECT schema_name FROM INFORMATION_SCHEMA.SCHEMATA"
     else:
@@ -68,7 +48,7 @@ def derive_allowed_schemas(warehouse, dialect: str) -> list[str]:
         if (name := row["schema_name"]) not in SYSTEM_SCHEMAS
         and not name.startswith(SYSTEM_SCHEMA_PREFIXES)
     }
-    return priority_sorted_schemas(list(existing))
+    return sorted(existing)
 
 
 def build_run_context(orguser: OrgUser) -> RunContext:
@@ -92,17 +72,6 @@ def build_run_context(orguser: OrgUser) -> RunContext:
     else:
         allowed_schemas = derive_allowed_schemas(warehouse, dialect)
 
-    granted = granted_permission_slugs(
-        orguser,
-        [
-            "can_create_charts",
-            "can_create_dashboards",
-            "can_edit_dashboards",
-            "can_create_metrics",
-            "can_create_kpis",
-        ],
-    )
-
     return RunContext(
         org_id=org.id,
         org_slug=org.slug,
@@ -112,10 +81,5 @@ def build_run_context(orguser: OrgUser) -> RunContext:
         query_timeout_s=config.query_timeout_s if config else DEFAULT_QUERY_TIMEOUT_S,
         warehouse=warehouse,
         orguser_id=orguser.id,
-        can_create_charts="can_create_charts" in granted,
-        can_create_dashboards="can_create_dashboards" in granted,
-        can_edit_dashboards="can_edit_dashboards" in granted,
-        can_create_metrics="can_create_metrics" in granted,
-        can_create_kpis="can_create_kpis" in granted,
         org_memory=memory.text if memory else "",
     )
