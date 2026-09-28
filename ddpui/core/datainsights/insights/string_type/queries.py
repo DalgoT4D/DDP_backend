@@ -55,17 +55,17 @@ class DistributionChart(ColInsight):
             .subquery()
         )
 
+        category_expr = case(
+            [(string_col.in_(select([subquery.c.category])), string_col)],
+            else_=literal_column("'other'"),
+        )
+
         query = (
             self.builder.reset()
-            .add_column(
-                case(
-                    [(string_col.in_(select([subquery.c.category])), string_col)],
-                    else_=literal_column("'other'"),
-                ).label("category"),
-            )
+            .add_column(category_expr.label("category"))
             .add_column(func.count().label("count"))
             .fetch_from(self.db_table, self.db_schema)
-            .group_cols_by("category")
+            .group_cols_by(category_expr)
             .order_cols_by([("count", "desc")])
             .build()
         )
@@ -167,7 +167,7 @@ class StringLengthStats(ColInsight):
             .add_column(func.count().label("count"))
             .where_clause(length_col.isnot(None))
             .fetch_from(self.db_table, self.db_schema)
-            .group_cols_by(f"{col.name}_len")
+            .group_cols_by(length_col)
             .having_clause(func.count() > 1)
             .order_cols_by([("count", "desc"), (f"{col.name}_len", "desc")])
             .limit_rows(5)
