@@ -17,8 +17,6 @@ from langchain.tools import tool
 
 from ddpui.core.ai.tools.registry import register_tool
 
-HANDOFF_TOOL = "handoff_to_platform_guide"
-
 
 @register_tool
 @tool

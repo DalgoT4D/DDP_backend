@@ -23,28 +23,10 @@ from langchain_core.runnables.config import var_child_runnable_config
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.guards import pii_rewrite, sql_guard
 from ddpui.core.ai.tools import catalog
+from ddpui.core.ai.toolsets import PII_REVIEW_TOOLS, QUESTION_TOOL
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.chat_with_data")
-
-# Tool calls that pause for user approval before executing. The two warehouse
-# tools that return real VALUES are gated so the user can mark PII columns first;
-# pure metadata lookups (list_schemas, list_tables, get_table_details) are not —
-# gating them would cost several clicks before any question could be answered.
-APPROVAL_TOOLS = (
-    "execute_sql",
-    "profile_column",
-    "create_chart",
-    "create_dashboard",
-    "add_charts_to_dashboard",
-)
-
-# The clarification tool: respond-only, the human's answer IS the tool result
-QUESTION_TOOL = "ask_user"
-
-# Tools whose card carries a PII checkbox list: the only two that return real
-# warehouse values to the model.
-PII_REVIEW_TOOLS = ("execute_sql", "profile_column")
 
 
 class _SyncHumanInTheLoopMiddleware(HumanInTheLoopMiddleware):
@@ -70,9 +52,7 @@ class _SyncHumanInTheLoopMiddleware(HumanInTheLoopMiddleware):
                 var_child_runnable_config.reset(token)
 
 
-def build_hitl_middleware(
-    approval_tools: tuple[str, ...] = APPROVAL_TOOLS,
-) -> HumanInTheLoopMiddleware:
+def build_hitl_middleware(approval_tools: tuple[str, ...]) -> HumanInTheLoopMiddleware:
     """One middleware gating the approval tools and the ask_user tool.
 
     Each agent passes its own `approval_tools` set (the SQL agent gates

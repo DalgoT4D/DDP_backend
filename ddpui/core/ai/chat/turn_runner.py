@@ -31,11 +31,11 @@ from langgraph.types import Command
 
 from ddpui.core.ai.agent.base import resolve_model_name
 from ddpui.core.ai.agent.hitl import input_required_event
-from ddpui.core.ai.agent.chat_data_agent import DEFAULT_MODEL, MODEL_ENV_VAR, RECURSION_LIMIT
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.llm_calls.router import casual_reply, route_question
 from ddpui.core.ai.llm_calls.turn_audit import audit_turn
 from ddpui.core.ai.chat.turn_graph import build_turn_graph
+from ddpui.core.ai.constants import DEFAULT_MODEL, MODEL_ENV_VAR, RECURSION_LIMIT
 from ddpui.core.ai.messages.artifacts import (
     creation_chip,
     is_creation_artifact,
@@ -44,6 +44,7 @@ from ddpui.core.ai.messages.artifacts import (
     tool_artifact,
 )
 from ddpui.core.ai.messages.content import extract_text
+from ddpui.core.ai.toolsets import GENERIC_TOOL_LABEL, TOOL_LABELS
 from ddpui.core.ai.tracing import (
     reset_current_turn_handler,
     set_current_turn_handler,
@@ -54,30 +55,6 @@ from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
-
-# Plain-language activity labels shown to non-technical users while tools run
-TOOL_LABELS = {
-    "list_schemas": "Looking at your data…",
-    "list_tables": "Looking at your tables…",
-    "get_table_details": "Reading table structure…",
-    "profile_column": "Checking data values…",
-    "execute_sql": "Running query…",
-    "create_chart": "Creating chart…",
-    "list_dashboards": "Checking your dashboards…",
-    "create_dashboard": "Creating dashboard…",
-    "add_charts_to_dashboard": "Adding to dashboard…",
-    "ask_user": "Asking you a question…",
-    "get_dalgo_help": "Reading the Dalgo guide…",
-    "list_metrics": "Checking your metrics…",
-    "list_kpis": "Checking your KPIs…",
-    "list_charts": "Checking your charts…",
-    "list_reports": "Checking your reports…",
-    "create_metric": "Creating metric…",
-    "create_kpi": "Creating KPI…",
-    "create_report": "Creating report…",
-    "handoff_to_platform_guide": "Bringing in the platform guide…",
-}
-GENERIC_TOOL_LABEL = "Working…"
 
 USER_FACING_ERROR = (
     "Something went wrong while answering this. Please try again — "

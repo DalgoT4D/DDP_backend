@@ -25,6 +25,13 @@ and agents read first.
 | `messages/` | Reading LangChain messages: text, artifacts, conversation views | `artifacts.py` |
 | `evals/` | Golden-set eval runner + scorers; datasets as JSONL in git | `README.md` |
 | `tracing.py` | Langfuse tracing — one trace per question, off unless keys are set | — |
+| `prompts.py` | Every prompt sent to a model: both agents' system prompts, router, reflection, audit, title, eval judges | — |
+| `toolsets.py` | Tool-name groups: each agent's toolbox, approval gates, `ask_user`/PII/handoff names, UI labels | — |
+| `constants.py` | Shared settings: model ids, token limits, loop budgets, feature flag, org-memory cap | — |
+
+Tool *descriptions* are not in `prompts.py` — LangChain reads them from each
+tool's docstring, so they stay beside the tool in `tools/*_tools.py`. Values
+only one module uses (chart grid size, render caps) stay in that module.
 
 ## The journey of one question
 
@@ -158,7 +165,7 @@ that, and `RECURSION_LIMIT` (160 graph steps) is the runaway backstop.
 - **Org memory is reference, not instructions.** Admin-curated facts
   (`ChatWithDataOrgMemory`, ≤5,000 chars) render into both system prompts
   inside an `<org_memory>` tag with an explicit injection disclaimer
-  (`agent/org_memory.py`).
+  (`org_memory_section` in `prompts.py`; the cap is in `constants.py`).
 
 ## Availability, settings, sessions
 
@@ -179,14 +186,17 @@ a session.
 ## How to extend
 
 **Add a tool** (e.g. `export_csv`): one new module in `tools/`, decorated with
-`@register_tool`, plus an entry in `registry.py`'s `_TOOL_MODULES` and the
-owning agent's tool-name tuple (unknown names fail at build, not runtime).
+`@register_tool`, plus an entry in `registry.py`'s `_TOOL_MODULES`, the
+owning agent's tuple in `toolsets.py` (and its approval tuple if it should
+pause), and a label in `TOOL_LABELS`. `test_toolsets.py` fails if any name is
+unknown or a tool has no label.
 The agent graph does not change. Follow `tools/chart_tools.py` as the template.
 
 **Add an agent** (e.g. a data-quality summarizer): one new module in `agent/`,
 built from `agent/base.py`'s model factory and the shared middleware stack.
 `agent/platform_guide_agent.py` is the reference — same `create_agent`
-assembly, its own tool tuple, approval tuple, and dynamic prompt.
+assembly; its tool and approval tuples go in `toolsets.py`, its prompt in
+`prompts.py`.
 
 ## Models and configuration
 
@@ -195,13 +205,13 @@ Every job picks its model with an env var and a default, through
 `claude-*` builds an Anthropic client (needs `ANTHROPIC_API_KEY`), `gpt-*`
 builds an OpenAI client (needs `OPENAI_API_KEY`), and `openai:gpt-5.5` style
 prefixes work for anything ambiguous. Users can also pick the chat model per
-turn in the UI — from `chat_data_agent.MODEL_OPTIONS`, filtered to providers
+turn in the UI — from `constants.MODEL_OPTIONS`, filtered to providers
 whose key is set, never trusting the client's string.
 
 | Env var | Used by | Default |
 |---|---|---|
 | `CHAT_WITH_DATA_MODEL` | both chat agents | `claude-sonnet-5` |
-| `CHAT_WITH_DATA_ROUTER_MODEL` | router + casual replies | `claude-haiku-4-5` |
+| `CHAT_WITH_DATA_ROUTER_MODEL` | router + casual replies | `claude-haiku-4-5` (`FAST_MODEL`) |
 | `CHAT_WITH_DATA_VALIDATOR_MODEL` | turn audit | `claude-haiku-4-5` |
 | `CHAT_WITH_DATA_REFLECTION_MODEL` | SQL reflection | `claude-haiku-4-5` |
 | `CHAT_WITH_DATA_TITLE_MODEL` | session titles | `claude-haiku-4-5` |

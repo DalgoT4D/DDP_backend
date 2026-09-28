@@ -1,9 +1,9 @@
 """Service for the Copilot settings surface: the org's CHAT_WITH_DATA feature
 flag (enable/disable Copilot) and its org memory (admin-curated facts injected
-into the agents' system prompts — see core/ai/agent/org_memory.py).
+into the agents' system prompts — see org_memory_section in core/ai/prompts.py).
 """
 
-from ddpui.core.ai.agent.org_memory import MAX_ORG_MEMORY_CHARS
+from ddpui.core.ai.constants import CHAT_WITH_DATA_FLAG, MAX_ORG_MEMORY_CHARS
 from ddpui.models.chat_with_data import ChatWithDataOrgMemory
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.feature_flags import (
@@ -11,8 +11,6 @@ from ddpui.utils.feature_flags import (
     enable_feature_flag,
     is_feature_flag_enabled,
 )
-
-CHAT_WITH_DATA_FLAG = "CHAT_WITH_DATA"
 
 
 class MemoryTooLong(Exception):
@@ -49,9 +47,7 @@ def update_settings(orguser: OrgUser, enabled: bool | None, text: str | None) ->
     if text is not None:
         text = text.strip()
         if len(text) > MAX_ORG_MEMORY_CHARS:
-            raise MemoryTooLong(
-                f"context must be at most {MAX_ORG_MEMORY_CHARS} characters"
-            )
+            raise MemoryTooLong(f"context must be at most {MAX_ORG_MEMORY_CHARS} characters")
         ChatWithDataOrgMemory.objects.update_or_create(
             org=org, defaults={"text": text, "updated_by": orguser}
         )

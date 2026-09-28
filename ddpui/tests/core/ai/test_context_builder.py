@@ -17,7 +17,7 @@ from ddpui.core.ai.agent.context_builder import (
     build_run_context,
     derive_allowed_schemas,
 )
-from ddpui.core.ai.agent.org_memory import MAX_ORG_MEMORY_CHARS
+from ddpui.core.ai.constants import MAX_ORG_MEMORY_CHARS
 from ddpui.models.chat_with_data import (
     ChatWithDataOrgConfig,
     ChatWithDataOrgMemory,

@@ -1,13 +1,12 @@
 """Service layer for Chat with Data sessions and status."""
 
 from ddpui.core.ai.agent.chat_data_agent import available_models, default_model_id
+from ddpui.core.ai.constants import CHAT_WITH_DATA_FLAG
 from ddpui.models.chat_with_data import ChatWithDataSession
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chat_with_data_schemas import StatusResponse
 from ddpui.utils.feature_flags import is_feature_flag_enabled
-
-CHAT_WITH_DATA_FLAG = "CHAT_WITH_DATA"
 
 
 class SessionNotFound(Exception):

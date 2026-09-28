@@ -38,7 +38,8 @@ from langgraph.runtime import Runtime
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.messages.artifacts import extract_turn_results
 from ddpui.core.ai.messages.conversation import history_lines, turn_segment
-from ddpui.core.ai.tools.clarify_tools import HANDOFF_TOOL
+from ddpui.core.ai.prompts import DATA_RESPONDER_LINE, GUIDE_RESPONDER_LINE
+from ddpui.core.ai.toolsets import HANDOFF_TOOL
 
 
 def turn_handed_off(messages: list[AnyMessage]) -> bool:
@@ -50,16 +51,6 @@ def turn_handed_off(messages: list[AnyMessage]) -> bool:
     )
 
 
-_GUIDE_RESPONDER_LINE = (
-    "(The last answer above was written by the PLATFORM GUIDE assistant — it "
-    "creates charts, dashboards, KPIs, metrics, and reports.)"
-)
-_DATA_RESPONDER_LINE = (
-    "(The last answer above was written by the DATA ASSISTANT — it answers "
-    "questions by querying the warehouse.)"
-)
-
-
 def last_responder_line(state: "TurnState") -> str | None:
     """Which agent produced the previous turn's answer, as an annotation line
     appended to the router's history. Short follow-ups ("yes", "make it
@@ -69,12 +60,12 @@ def last_responder_line(state: "TurnState") -> str | None:
     if not turn_segment(prior):
         return None
     if turn_handed_off(prior):
-        return _GUIDE_RESPONDER_LINE
+        return GUIDE_RESPONDER_LINE
     intent = (state.get("route") or {}).get("intent")
     if intent == "platform_help":
-        return _GUIDE_RESPONDER_LINE
+        return GUIDE_RESPONDER_LINE
     if intent == "data_question":
-        return _DATA_RESPONDER_LINE
+        return DATA_RESPONDER_LINE
     return None
 
 

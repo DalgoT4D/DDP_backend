@@ -17,12 +17,10 @@ django.setup()
 
 from langchain_core.messages import AIMessage
 
-from ddpui.core.ai.agent.platform_guide_agent import (
-    GUIDE_AGENT_TOOLS,
-    build_guide_agent,
-    build_guide_system_prompt,
-)
-from ddpui.core.ai.agent.chat_data_agent import SQL_AGENT_TOOLS, build_agent
+from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
+from ddpui.core.ai.agent.chat_data_agent import build_agent
+from ddpui.core.ai.prompts import build_guide_system_prompt
+from ddpui.core.ai.toolsets import GUIDE_AGENT_TOOLS, SQL_AGENT_TOOLS
 from ddpui.core.ai.tools import docs_tools
 from ddpui.core.ai.tools.registry import get_tools
 from ddpui.tests.core.ai.test_agent_loop import ScriptedChatModel, make_context

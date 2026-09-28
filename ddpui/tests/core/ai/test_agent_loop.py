@@ -12,8 +12,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from ddpui.core.ai.agent.chat_data_agent import build_agent
-from ddpui.core.ai.agent.middleware import MAX_SQL_ATTEMPTS
 from ddpui.core.ai.agent.run_context import RunContext
+from ddpui.core.ai.constants import MAX_SQL_ATTEMPTS, RECURSION_LIMIT
 from ddpui.tests.core.ai.test_tools import FakeWarehouse
 
 
@@ -74,8 +74,6 @@ def test_realistic_discovery_turn_fits_in_the_recursion_limit():
     landed while RECURSION_LIMIT was still 25."""
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.types import Command
-
-    from ddpui.core.ai.agent.chat_data_agent import RECURSION_LIMIT
 
     def tool_call(name, args, call_id):
         return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": call_id}])

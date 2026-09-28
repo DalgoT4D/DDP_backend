@@ -10,7 +10,7 @@ from django.core.validators import MaxLengthValidator
 from django.db import models
 from django.utils import timezone
 
-from ddpui.core.ai.agent.org_memory import MAX_ORG_MEMORY_CHARS
+from ddpui.core.ai.constants import MAX_ORG_MEMORY_CHARS
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 

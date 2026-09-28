@@ -14,20 +14,12 @@ from langchain.agents.middleware import (
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately, trim_messages
 
-# Failed execute_sql calls allowed per user question before the loop is stopped;
-# the system prompt tells the model the same number so it stops gracefully first.
-# 5 (was 3): real warehouses with case-sensitive Airbyte tables and non-obvious
-# join paths burn 2-3 attempts on discovery before the query that works.
-MAX_SQL_ATTEMPTS = 5
-
-# Token budget for the model request; old turns beyond this are trimmed from the
-# request (NOT from the checkpointed conversation, which the UI renders in full)
-HISTORY_TOKEN_BUDGET = 60_000
-
-# Clear bulky old query results from the request once total context passes this
-TOOL_RESULT_CLEAR_TRIGGER_TOKENS = 40_000
-# ...but always keep the most recent tool results intact
-TOOL_RESULTS_KEPT = 5
+from ddpui.core.ai.constants import (
+    HISTORY_TOKEN_BUDGET,
+    MAX_SQL_ATTEMPTS,
+    TOOL_RESULT_CLEAR_TRIGGER_TOKENS,
+    TOOL_RESULTS_KEPT,
+)
 
 _FAILURE_PREFIXES = ("Query failed:", "SQL rejected:")
 

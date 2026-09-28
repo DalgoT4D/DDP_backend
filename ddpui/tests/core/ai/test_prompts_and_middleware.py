@@ -3,10 +3,9 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ddpui.core.ai.agent.middleware import count_failed_sql_attempts
-from ddpui.core.ai.agent.chat_data_agent import build_system_prompt
-from ddpui.core.ai.agent.org_memory import MAX_ORG_MEMORY_CHARS
-from ddpui.core.ai.agent.platform_guide_agent import build_guide_system_prompt
 from ddpui.core.ai.agent.run_context import RunContext
+from ddpui.core.ai.constants import MAX_ORG_MEMORY_CHARS
+from ddpui.core.ai.prompts import build_guide_system_prompt, build_system_prompt
 
 
 def failed_tool_msg(text="Query failed: boom"):

@@ -17,27 +17,18 @@ from dataclasses import dataclass, field
 
 from langgraph.checkpoint.memory import InMemorySaver
 
-from ddpui.core.ai.agent.chat_data_agent import RECURSION_LIMIT, build_agent
+from ddpui.core.ai.agent.chat_data_agent import build_agent
+from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
 from ddpui.core.ai.chat.turn_graph import build_turn_graph
+from ddpui.core.ai.constants import RECURSION_LIMIT
 from ddpui.core.ai.evals.sql_compare import answer_contains_value, gold_satisfied
 from ddpui.core.ai.llm_calls.router import casual_reply, route_question
 from ddpui.core.ai.messages.artifacts import extract_turn_results
 from ddpui.core.ai.messages.conversation import turn_segment
+from ddpui.core.ai.prompts import EXPECTATIONS_CRITERIA, FAITHFULNESS_CRITERIA
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
-
-FAITHFULNESS_CRITERIA = (
-    "The submission's numbers and named entities are all supported by this "
-    "query result table. Numbers derived from the table by simple arithmetic "
-    "(sums, differences, percentage shares, rounding) count as supported. "
-    "Only a claim that cannot be derived from the table is a failure:\n{table}"
-)
-
-EXPECTATIONS_CRITERIA = (
-    "The submission satisfies this expectation of a correct answer "
-    "(judge the substance, not the wording): {expectations}"
-)
 
 
 @dataclass
@@ -141,8 +132,6 @@ async def run_item(item: dict, *, context, model=None, judge=True) -> ItemResult
     """One golden item through a fresh TurnGraph (in-memory checkpointer)."""
     result = ItemResult(question=item["question"])
     saver = InMemorySaver()
-    from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
-
     graph = build_turn_graph(
         # no human answers evals — ask_user falls back, gated tools auto-run
         build_agent(checkpointer=saver, model=model, human_in_the_loop=False),

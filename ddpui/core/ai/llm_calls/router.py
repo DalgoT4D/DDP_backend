@@ -16,61 +16,16 @@ from dataclasses import dataclass, field
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from ddpui.core.ai.agent.base import build_model
+from ddpui.core.ai.constants import FAST_MODEL, ROUTER_MAX_TOKENS, ROUTER_MODEL_ENV_VAR
 from ddpui.core.ai.llm_calls.parsing import parse_json_reply
 from ddpui.core.ai.messages.content import extract_text
+from ddpui.core.ai.prompts import ROUTER_PROMPT, SMALL_TALK_PROMPT
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
 
-DEFAULT_ROUTER_MODEL = "claude-haiku-4-5"
-ROUTER_MAX_TOKENS = 300
-
 INTENTS = {"data_question", "platform_help", "small_talk", "needs_clarification"}
 COMPLEXITIES = {"simple", "complex"}
-
-_PROMPT = """Classify one message sent to a data-analysis chat for an NGO.
-{history_block}
-Message: {question}
-
-Return ONLY JSON:
-{{"intent": "data_question" | "platform_help" | "small_talk" | "needs_clarification",
- "complexity": "simple" | "complex",
- "entities": [strings — metrics, filter values, time ranges mentioned],
- "clarification": string or null}}
-
-Rules:
-- data_question: asks for numbers, facts, or analysis FROM the org's data
-  ("how many surveys in MH?", "top districts by enrollment"). When unsure
-  between data_question and platform_help, choose data_question.
-- platform_help: asks to CREATE or set up a platform object — chart,
-  dashboard, KPI, metric, report — or asks HOW to use a Dalgo feature.
-  Examples: "make me a chart of surveys by state", "create a KPI for
-  survey completion", "how do I share a report?", "what is a metric?".
-- small_talk: greetings, thanks, chit-chat with no request at all.
-- needs_clarification: ONLY when the question is so ambiguous no reasonable
-  query exists (e.g. "compare them" with no referent). Set "clarification"
-  to one short, friendly question to ask back.
-- IMPORTANT: an explicit creation request ("create/make/build a chart,
-  KPI, dashboard, metric, report") is ALWAYS platform_help — even in the
-  middle of a data conversation. The guide sees the full conversation, so
-  "create a chart of this" works.
-- IMPORTANT: if the assistant's latest message OFFERED to create charts,
-  KPIs, metrics, dashboards, or reports, and the user's message agrees
-  ("yes", "go ahead", "all of them", "do it"), that is platform_help — the
-  user is accepting a creation offer, not asking a data question.
-- IMPORTANT: for OTHER follow-ups that refer to the recent conversation
-  ("this", "that", "the above", a short answer to the assistant's last
-  question), keep the SAME intent as that conversation: a follow-up in a
-  creation/how-to exchange is platform_help; a follow-up in a data
-  exchange is data_question. Never ask to re-state context that already
-  appears in the conversation.
-- The conversation may end with a note saying which assistant wrote the
-  last answer (PLATFORM GUIDE or DATA ASSISTANT). Route short follow-ups,
-  agreements, and tweaks ("make it monthly") to match that assistant —
-  platform guide → platform_help, data assistant → data_question — unless
-  the new message clearly changes topic.
-- complexity "complex": needs multiple tables, comparisons across groups or
-  time periods, or "top N by X" ranking. Otherwise "simple"."""
 
 
 @dataclass(frozen=True)
@@ -109,15 +64,8 @@ def _apply_platform_help_backstop(question: str, route: RouteResult) -> RouteRes
 
 
 def get_router_model() -> BaseChatModel:
-    return build_model("CHAT_WITH_DATA_ROUTER_MODEL", DEFAULT_ROUTER_MODEL, ROUTER_MAX_TOKENS)
+    return build_model(ROUTER_MODEL_ENV_VAR, FAST_MODEL, ROUTER_MAX_TOKENS)
 
-
-_SMALL_TALK_PROMPT = """You are Dalgo's data assistant. The user sent a casual \
-message (a greeting, thanks, or chit-chat), not a data question. Reply in one or \
-two friendly plain-text sentences. If natural, remind them they can ask about \
-their data.
-
-User message: {question}"""
 
 FALLBACK_REPLY = "Happy to help! Ask me anything about your organization's data."
 
@@ -126,7 +74,7 @@ async def casual_reply(question: str, model: BaseChatModel | None = None) -> str
     """A short friendly reply for small talk. Falls back to a canned line."""
     try:
         model = model or get_router_model()
-        response = await model.ainvoke(_SMALL_TALK_PROMPT.format(question=question[:500]))
+        response = await model.ainvoke(SMALL_TALK_PROMPT.format(question=question[:500]))
         return extract_text(response.content).strip() or FALLBACK_REPLY
     except Exception:  # pylint: disable=broad-except
         logger.exception("chat_with_data: casual reply failed; using fallback")
@@ -150,7 +98,7 @@ async def route_question(
         else:
             history_block = ""
         response = await model.ainvoke(
-            _PROMPT.format(question=question[:1000], history_block=history_block)
+            ROUTER_PROMPT.format(question=question[:1000], history_block=history_block)
         )
         data = parse_json_reply(extract_text(response.content))
 

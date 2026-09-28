@@ -21,7 +21,7 @@ from ddpui.api.chat_with_data_api import (
     rename_session,
     update_settings,
 )
-from ddpui.core.ai.agent.org_memory import MAX_ORG_MEMORY_CHARS
+from ddpui.core.ai.constants import MAX_ORG_MEMORY_CHARS
 from ddpui.models.chat_with_data import ChatWithDataOrgMemory, ChatWithDataSession
 from ddpui.schemas.chat_with_data_schemas import CopilotSettingsUpdate, SessionRename
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
