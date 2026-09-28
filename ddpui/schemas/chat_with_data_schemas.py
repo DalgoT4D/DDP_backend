@@ -1,7 +1,7 @@
 """Pydantic schemas for Chat with Data REST endpoints."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from ninja import Schema
 
@@ -73,11 +73,32 @@ class SqlAttachment(Schema):
     rows: Optional[list[list[str]]] = None
 
 
+ArtifactType = Literal["chart", "dashboard", "metric", "kpi", "report"]
+
+
+class CreatedArtifact(Schema):
+    """A Dalgo object a creation tool saved — stored as the ToolMessage
+    artifact and sent to the UI as a link chip."""
+
+    type: ArtifactType
+    object_id: int
+    title: str
+    url_path: str
+
+
+class RejectedArtifact(Schema):
+    """A creation tool's refusal — never shown as a chip."""
+
+    type: ArtifactType
+    status: Literal["rejected"] = "rejected"
+    error: str
+
+
 class MessageOut(Schema):
     """One chat bubble: user question or assistant answer (+ its queries)."""
 
     role: str  # "user" | "assistant"
     content: str
     sql_attachments: list[SqlAttachment] = []
-    # charts the agent created in this turn: {chart_id, title, url_path}
-    charts: list[dict] = []
+    # Dalgo objects the agent created in this turn
+    artifacts: list[CreatedArtifact] = []

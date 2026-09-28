@@ -365,8 +365,8 @@ def test_run_turn_attaches_created_charts_via_guide_agent(orguser, session, monk
 
     complete = events[-1]
     assert complete["type"] == "message_complete"
-    assert complete["charts"] == [
-        {"chart_id": 42, "title": "Surveys by district", "url_path": "/charts/42"}
+    assert complete["artifacts"] == [
+        {"type": "chart", "object_id": 42, "title": "Surveys by district", "url_path": "/charts/42"}
     ]
     # the guide path never emits a validation event (validator is a SQL audit)
     assert not any(e["type"] == "validation" for e in events)

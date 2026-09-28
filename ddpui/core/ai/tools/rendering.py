@@ -1,4 +1,8 @@
-"""Rendering tool replies for the LLM: result rows and refusals."""
+"""Rendering tool replies for the LLM: result rows, creations and refusals."""
+
+from pydantic import ValidationError
+
+from ddpui.schemas.chat_with_data_schemas import CreatedArtifact, RejectedArtifact
 
 # Cap on characters per cell when rendering results/samples for the LLM
 MAX_CELL_CHARS = 120
@@ -26,10 +30,20 @@ def render_rows(rows: list[dict], max_rows: int) -> str:
 
 
 def rejection(artifact_type: str, message: str, reason: str) -> tuple[str, dict]:
-    """A creation tool's refusal: LLM-readable text + the rejected artifact
-    (same shape for charts and dashboards, so the artifact contract holds)."""
-    return f"{message}: {reason}", {
-        "type": artifact_type,
-        "status": "rejected",
-        "error": reason,
-    }
+    """A creation tool's refusal: LLM-readable text + the rejected artifact."""
+    return f"{message}: {reason}", RejectedArtifact(type=artifact_type, error=reason).model_dump()
+
+
+def created(artifact: CreatedArtifact, content: str) -> tuple[str, dict]:
+    """A creation tool's success: LLM-readable text + the created artifact."""
+    return content, artifact.model_dump()
+
+
+def error_reason(err: Exception) -> str:
+    """First line of a service/validation error, short enough for the LLM."""
+    if isinstance(err, ValidationError):
+        return "; ".join(
+            f"{'.'.join(str(part) for part in e['loc'])}: {e['msg']}" if e["loc"] else e["msg"]
+            for e in err.errors()
+        )[:300]
+    return str(getattr(err, "message", None) or err).split("\n", maxsplit=1)[0][:300]

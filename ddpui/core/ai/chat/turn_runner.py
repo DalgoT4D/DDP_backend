@@ -9,7 +9,7 @@ forwards these events verbatim. Event shapes are the WS protocol from plan §4.4
     {"type": "tool_start", "tool": str, "label": str, "sql": str|None}
     {"type": "tool_end", "tool": str, "status": "success"|"error"}
     {"type": "message_complete", "message": str, "result_table": dict|None,
-     "charts": list, "usage": {"input_tokens": int, "output_tokens": int}}
+     "artifacts": list[CreatedArtifact], "usage": {"input_tokens": int, "output_tokens": int}}
     {"type": "validation", "verdict": "ok"|"warn", "assumptions": list,
      "caveat": str|None}   — post-execution audit, arrives after message_complete
     {"type": "input_required", "kind": "approval"|"question", "requests": list,
@@ -160,7 +160,7 @@ async def run_turn(
     handed_off = False  # sql_agent yielded the turn to the guide agent
     responding_agent = None  # which lane answered — stamped on the trace at finish
     last_result_table: dict | None = None
-    # created charts AND dashboards — "charts" is the wire-protocol key
+    # Dalgo objects created this turn (CreatedArtifact dicts)
     created_artifacts: list[dict] = []
     status = "completed"
 
@@ -169,7 +169,7 @@ async def run_turn(
             "type": "message_complete",
             "message": final_message,
             "result_table": last_result_table,
-            "charts": created_artifacts,
+            "artifacts": created_artifacts,
             "usage": usage,
         }
 
@@ -247,7 +247,7 @@ async def run_turn(
                                 else "success"
                             )
                             if artifact is not None and is_creation_artifact(artifact):
-                                # created-artifact chip (saved chart or dashboard), or a rejection
+                                # created-artifact chip, or None for a rejection
                                 chip = creation_chip(artifact)
                                 if chip:
                                     created_artifacts.append(chip)

@@ -91,7 +91,7 @@ def test_create_dashboard_with_charts(monkeypatch):
     )
     assert artifact == {
         "type": "dashboard",
-        "dashboard_id": 42,
+        "object_id": 42,
         "title": "Donor Overview",
         "url_path": "/dashboards/42",
     }
@@ -135,13 +135,13 @@ def test_add_charts_to_existing_dashboard(monkeypatch):
         chart_ids=[10],
     )
     assert artifact["type"] == "dashboard"
-    assert artifact["dashboard_id"] == 3
+    assert artifact["object_id"] == 3
     assert calls == {"dashboard_id": 3, "chart_ids": [10]}
 
 
 def test_add_charts_reports_missing_dashboard(monkeypatch):
     def fake_add(ctx, dashboard_id, chart_ids):
-        raise dashboard_tools.DashboardNotFound()
+        raise dashboard_tools.DashboardNotFoundError(1)
 
     monkeypatch.setattr(dashboard_tools, "_add_charts", fake_add)
     monkeypatch.setattr(dashboard_tools, "_org_chart_ids", lambda ctx, ids: set(ids))

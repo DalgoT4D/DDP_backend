@@ -9,13 +9,28 @@ Like create_chart, these write Dalgo METADATA only — the warehouse stays
 read-only. Component/layout shapes mirror exactly what the dashboard builder
 UI stores: components {"chart-<id>": {"type": "chart", "config": {"chartId": id}}}
 and react-grid-layout entries {i, x, y, w, h} on a 12-column grid.
+
+Both writes go through DashboardService (create_dashboard / update_dashboard),
+the same calls the Dashboards API makes — so lock rules, tab validation,
+sharing cascade and the audit log are identical to the builder UI.
 """
 
 from langchain.tools import ToolRuntime, tool
 
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import register_tool
-from ddpui.core.ai.tools.rendering import rejection
+from ddpui.core.ai.tools.rendering import created, error_reason, rejection
+from ddpui.models.dashboard import Dashboard
+from ddpui.models.org_user import OrgUser
+from ddpui.models.visualization import Chart
+from ddpui.schemas.chat_with_data_schemas import CreatedArtifact
+from ddpui.schemas.dashboard_schema import DashboardTabSchema, DashboardUpdate
+from ddpui.services.dashboard_service import (
+    DashboardData,
+    DashboardLockedError,
+    DashboardNotFoundError,
+    DashboardService,
+)
 
 # Grid placement: 12-column grid, three 4-wide × 3-tall charts per row —
 # the same footprint the dashboard builder uses for chart components
@@ -27,18 +42,6 @@ _PER_ROW = GRID_COLUMNS // CHART_W
 
 def _rejected(reason: str) -> tuple[str, dict]:
     return rejection("dashboard", "Dashboard action not done", reason)
-
-
-class DashboardNotFound(Exception):
-    """Dashboard missing or not in this org."""
-
-
-class DashboardLocked(Exception):
-    """Dashboard is being edited by someone else (active DashboardLock)."""
-
-    def __init__(self, locked_by_email: str):
-        super().__init__(locked_by_email)
-        self.locked_by_email = locked_by_email
 
 
 def place_charts(existing_layout: list[dict], chart_ids: list[int]) -> tuple[list[dict], dict]:
@@ -66,8 +69,6 @@ def place_charts(existing_layout: list[dict], chart_ids: list[int]) -> tuple[lis
 
 
 def _load_dashboards(ctx: RunContext) -> list[tuple[int, str, bool]]:
-    from ddpui.models.dashboard import Dashboard
-
     return [
         (d.id, d.title, d.is_published)
         for d in Dashboard.objects.filter(org_id=ctx.org_id, dashboard_type="native").order_by(
@@ -77,71 +78,64 @@ def _load_dashboards(ctx: RunContext) -> list[tuple[int, str, bool]]:
 
 
 def _org_chart_ids(ctx: RunContext, chart_ids: list[int]) -> set[int]:
-    from ddpui.models.visualization import Chart
-
     return set(
         Chart.objects.filter(org_id=ctx.org_id, id__in=chart_ids).values_list("id", flat=True)
     )
 
 
-def _create_dashboard(ctx: RunContext, title: str, description: str | None, chart_ids: list[int]):
-    from ddpui.models.org_user import OrgUser
-    from ddpui.services.dashboard_service import DashboardData, DashboardService
+def _load_orguser(ctx: RunContext) -> OrgUser:
+    return OrgUser.objects.select_related("org").get(id=ctx.orguser_id)
 
-    orguser = OrgUser.objects.select_related("org").get(id=ctx.orguser_id)
+
+def _create_dashboard(ctx: RunContext, title: str, description: str | None, chart_ids: list[int]):
+    orguser = _load_orguser(ctx)
     dashboard = DashboardService.create_dashboard(
         DashboardData(title=title, description=description, grid_columns=GRID_COLUMNS), orguser
     )
-    if chart_ids:
-        tab = dashboard.tabs[0]
-        layout, components = place_charts(tab.get("layout_config", []), chart_ids)
-        tab["layout_config"] = tab.get("layout_config", []) + layout
-        tab["components"] = {**tab.get("components", {}), **components}
-        dashboard.tabs = [tab] + dashboard.tabs[1:]
-        dashboard.save(update_fields=["tabs"])
-    return dashboard
+    return _place_on_first_tab(dashboard, chart_ids, orguser)
 
 
 def _add_charts(ctx: RunContext, dashboard_id: int, chart_ids: list[int]):
-    from ddpui.models.dashboard import Dashboard
-    from ddpui.models.org_user import OrgUser
+    orguser = _load_orguser(ctx)
+    dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    return _place_on_first_tab(dashboard, chart_ids, orguser)
 
-    dashboard = Dashboard.objects.filter(org_id=ctx.org_id, id=dashboard_id).first()
-    if dashboard is None:
-        raise DashboardNotFound()
-    # same lock rule as DashboardService.update_dashboard: an unexpired lock
-    # held by ANOTHER user blocks the edit
-    orguser = OrgUser.objects.get(id=ctx.orguser_id)
-    lock = getattr(dashboard, "lock", None)
-    if lock and not lock.is_expired() and lock.locked_by != orguser:
-        raise DashboardLocked(lock.locked_by.user.email)
-    tabs = dashboard.tabs or []
-    if not tabs:
-        tabs = [{"id": "tab-1", "title": "Untitled Tab 1", "layout_config": [], "components": {}}]
-    tab = tabs[0]  # v1: charts land on the first tab
-    already = set(tab.get("components", {}).keys())
-    new_ids = [cid for cid in chart_ids if f"chart-{cid}" not in already]
+
+def _place_on_first_tab(dashboard, chart_ids: list[int], orguser: OrgUser):
+    """Append the charts not already on the first tab (v1: charts land there),
+    saved through update_dashboard like a builder save."""
+    tabs = dashboard.tabs or [
+        {"id": "tab-1", "title": "Untitled Tab 1", "layout_config": [], "components": {}}
+    ]
+    tab = tabs[0]
+    new_ids = [cid for cid in chart_ids if f"chart-{cid}" not in tab.get("components", {})]
+    if not new_ids:
+        return dashboard
     layout, components = place_charts(tab.get("layout_config", []), new_ids)
-    tab["layout_config"] = tab.get("layout_config", []) + layout
-    tab["components"] = {**tab.get("components", {}), **components}
-    dashboard.tabs = [tab] + tabs[1:]
-    dashboard.last_modified_by = orguser
-    dashboard.save(update_fields=["tabs", "last_modified_by", "updated_at"])
-    return dashboard
+    first_tab = {
+        **tab,
+        "layout_config": tab.get("layout_config", []) + layout,
+        "components": {**tab.get("components", {}), **components},
+    }
+    return DashboardService.update_dashboard(
+        dashboard_id=dashboard.id,
+        org=orguser.org,
+        orguser=orguser,
+        data=DashboardUpdate(
+            tabs=[DashboardTabSchema(**t) for t in [first_tab] + tabs[1:]],
+        ),
+    )
 
 
 def _dashboard_artifact(dashboard) -> tuple[str, dict]:
     url_path = f"/dashboards/{dashboard.id}"
-    content = (
+    return created(
+        CreatedArtifact(
+            type="dashboard", object_id=dashboard.id, title=dashboard.title, url_path=url_path
+        ),
         f"Done — dashboard '{dashboard.title}' (id {dashboard.id}). "
-        f"The user can open it at {url_path}."
+        f"The user can open it at {url_path}.",
     )
-    return content, {
-        "type": "dashboard",
-        "dashboard_id": dashboard.id,
-        "title": dashboard.title,
-        "url_path": url_path,
-    }
 
 
 # ── tools ───────────────────────────────────────────────────────────────────
@@ -188,7 +182,7 @@ def create_dashboard(
     try:
         dashboard = _create_dashboard(ctx, title, description, chart_ids)
     except Exception as err:  # pylint: disable=broad-except
-        return _rejected(f"saving failed ({str(err).splitlines()[0][:300]})")
+        return _rejected(f"saving failed ({error_reason(err)})")
     return _dashboard_artifact(dashboard)
 
 
@@ -212,12 +206,10 @@ def add_charts_to_dashboard(
 
     try:
         dashboard = _add_charts(ctx, dashboard_id, chart_ids)
-    except DashboardNotFound:
+    except DashboardNotFoundError:
         return _rejected(f"dashboard {dashboard_id} not found — use list_dashboards for valid ids")
-    except DashboardLocked as err:
-        return _rejected(
-            f"this dashboard is currently being edited by {err.locked_by_email} — try again later"
-        )
+    except DashboardLockedError as err:
+        return _rejected(f"{err.message} — try again later")
     except Exception as err:  # pylint: disable=broad-except
-        return _rejected(f"saving failed ({str(err).splitlines()[0][:300]})")
+        return _rejected(f"saving failed ({error_reason(err)})")
     return _dashboard_artifact(dashboard)

@@ -127,11 +127,20 @@ that, and `RECURSION_LIMIT` (160 graph steps) is the runaway backstop.
   allowlist is every non-system schema, the prompt steers the agent to
   `ask_user` rather than comb every schema;
   an admin can pin the list via `ChatWithDataOrgConfig.allowed_schemas`.
-- **The warehouse is read-only.** Creation tools write Dalgo metadata only,
-  through the same services the REST API uses (identical validation).
+- **The warehouse is read-only.** Creation tools write Dalgo metadata only.
   `execute_sql` is the single path to the warehouse.
-- **One artifact contract.** Tools attach structured results to their messages;
-  `messages/artifacts.py` is the only interpreter. The live stream, the audit,
+- **A creation tool is the REST endpoint minus HTTP.** It builds the API's own
+  request schema (`ChartCreate`, `DashboardUpdate`, `KPICreate`,
+  `SnapshotCreate`) and calls the same service method. Anything that must
+  happen on every create/update — audit log, dashboard sharing cascade,
+  org-default dashboard — lives in that service method, never in the API
+  endpoint or the tool. Tool argument types reuse the schemas and service
+  constants (e.g. `list[ChartMetric]`, `Literal[VALID_TIME_GRAINS]`) so the
+  model sees the same allowed values the service enforces; no copied enums.
+- **One artifact contract.** Tools attach structured results to their messages
+  (creations: `CreatedArtifact` / `RejectedArtifact` in
+  `schemas/chat_with_data_schemas.py`); `messages/artifacts.py` is the only
+  interpreter. The live stream, the audit,
   and history replay all read through it so they can never disagree.
 - **The user marks PII, we hash it.** There is no PII detection — column names in
   NGO warehouses are too vague for a regex or a model to judge, and the PII that

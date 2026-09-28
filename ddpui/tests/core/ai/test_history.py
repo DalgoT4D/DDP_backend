@@ -66,9 +66,9 @@ def test_block_list_content_renders_only_text():
     ]
 
 
-def test_created_dashboards_replay_on_the_answer():
-    """Dashboards created in chat must reappear as chips on reload, exactly
-    like the live turn showed them (same chip shape, url_path picks the icon)."""
+def test_legacy_dashboard_artifacts_replay_on_the_answer():
+    """Checkpoints written before CreatedArtifact keyed the id as dashboard_id;
+    reloading those sessions must still show the chip."""
     messages = [
         HumanMessage("put it on a new dashboard"),
         AIMessage("", tool_calls=[{"name": "create_dashboard", "args": {}, "id": "d1"}]),
@@ -86,7 +86,9 @@ def test_created_dashboards_replay_on_the_answer():
         AIMessage("Created the Field Ops dashboard."),
     ]
     out = map_messages(messages)
-    assert out[1].charts == [{"chart_id": 7, "title": "Field Ops", "url_path": "/dashboards/7"}]
+    assert [a.model_dump() for a in out[1].artifacts] == [
+        {"type": "dashboard", "object_id": 7, "title": "Field Ops", "url_path": "/dashboards/7"}
+    ]
 
 
 def test_rejected_creations_do_not_replay_as_chips():
@@ -102,10 +104,10 @@ def test_rejected_creations_do_not_replay_as_chips():
         AIMessage("I couldn't create the chart."),
     ]
     out = map_messages(messages)
-    assert out[1].charts == []
+    assert out[1].artifacts == []
 
 
-def test_created_charts_replay_on_the_answer():
+def test_legacy_chart_artifacts_replay_on_the_answer():
     messages = [
         HumanMessage("chart surveys by district"),
         AIMessage("", tool_calls=[{"name": "create_chart", "args": {}, "id": "c1"}]),
@@ -123,6 +125,30 @@ def test_created_charts_replay_on_the_answer():
         AIMessage("Done — it's in your Charts page."),
     ]
     out = map_messages(messages)
-    assert out[1].charts == [
-        {"chart_id": 42, "title": "Surveys by district", "url_path": "/charts/42"}
+    assert [a.model_dump() for a in out[1].artifacts] == [
+        {"type": "chart", "object_id": 42, "title": "Surveys by district", "url_path": "/charts/42"}
+    ]
+
+
+def test_created_metrics_replay_with_their_type():
+    """The chip carries the object type, so the UI never guesses from url_path."""
+    messages = [
+        HumanMessage("make a metric for total surveys"),
+        AIMessage("", tool_calls=[{"name": "create_metric", "args": {}, "id": "m1"}]),
+        ToolMessage(
+            content="Done — metric 'Total surveys' (id 5).",
+            name="create_metric",
+            tool_call_id="m1",
+            artifact={
+                "type": "metric",
+                "object_id": 5,
+                "title": "Total surveys",
+                "url_path": "/metrics",
+            },
+        ),
+        AIMessage("Created the metric."),
+    ]
+    out = map_messages(messages)
+    assert [a.model_dump() for a in out[1].artifacts] == [
+        {"type": "metric", "object_id": 5, "title": "Total surveys", "url_path": "/metrics"}
     ]

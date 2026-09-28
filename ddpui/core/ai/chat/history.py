@@ -24,7 +24,7 @@ def map_messages(messages: list[BaseMessage]) -> list[MessageOut]:
     other tool chatter is hidden."""
     out: list[MessageOut] = []
     pending_sql: list[SqlAttachment] = []
-    pending_charts: list[dict] = []
+    pending_artifacts: list[dict] = []
 
     for message in messages:
         if isinstance(message, HumanMessage):
@@ -36,7 +36,7 @@ def map_messages(messages: list[BaseMessage]) -> list[MessageOut]:
             if is_creation_artifact(artifact):
                 chip = creation_chip(artifact)
                 if chip:
-                    pending_charts.append(chip)
+                    pending_artifacts.append(chip)
             elif artifact.get("sql"):
                 pending_sql.append(
                     SqlAttachment(
@@ -56,11 +56,11 @@ def map_messages(messages: list[BaseMessage]) -> list[MessageOut]:
                     role="assistant",
                     content=text,
                     sql_attachments=pending_sql,
-                    charts=pending_charts,
+                    artifacts=pending_artifacts,
                 )
             )
             pending_sql = []
-            pending_charts = []
+            pending_artifacts = []
 
     return out
 

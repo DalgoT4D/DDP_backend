@@ -60,7 +60,7 @@ def test_creates_bar_chart_with_metric(saved):
     assert "Surveys by district" in content
     assert artifact == {
         "type": "chart",
-        "chart_id": 42,
+        "object_id": 42,
         "title": "Surveys by district",
         "url_path": "/charts/42",
     }
@@ -70,9 +70,24 @@ def test_creates_bar_chart_with_metric(saved):
     # x_axis_column is ignored by the query builder (blank-chart regression)
     assert data.extra_config["dimension_column"] == "district"
     assert "x_axis_column" not in data.extra_config
-    assert data.extra_config["metrics"] == [
-        {"column": None, "aggregation": "count", "alias": "count"}
+    assert [(m["column"], m["aggregation"], m["alias"]) for m in data.extra_config["metrics"]] == [
+        (None, "count", "count")
     ]
+
+
+def test_stored_extra_config_matches_the_charts_api_shape(saved):
+    """Same ChartCreate dump the Charts API stores — incl. the defaulted keys."""
+    run_tool(
+        make_chart_context(),
+        title="t",
+        chart_type="bar",
+        schema_name="prod",
+        table_name="surveys",
+        dimension_column="district",
+    )
+    extra_config = saved["data"].extra_config
+    for key in ("customizations", "filters", "pagination", "sort", "extra_dimension_column"):
+        assert key in extra_config
 
 
 def test_bar_chart_accepts_multiple_metrics(saved):
@@ -91,9 +106,11 @@ def test_bar_chart_accepts_multiple_metrics(saved):
         ],
     )
     assert artifact["type"] == "chart"
-    assert saved["data"].extra_config["metrics"] == [
-        {"column": "silt_target", "aggregation": "sum", "alias": "Silt target"},
-        {"column": "silt_achieved", "aggregation": "sum", "alias": "sum_silt_achieved"},
+    assert [
+        (m["column"], m["aggregation"], m["alias"]) for m in saved["data"].extra_config["metrics"]
+    ] == [
+        ("silt_target", "sum", "Silt target"),
+        ("silt_achieved", "sum", "sum_silt_achieved"),
     ]
 
 

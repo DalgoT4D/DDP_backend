@@ -1,9 +1,9 @@
 """Report creation tool for the platform guide agent.
 
-A report is a frozen snapshot of an EXISTING dashboard, so the agent's flow
-is: list_dashboards → ask the user which one → create_report. Delegates to
-ReportService.create_snapshot — the same path the Reports page uses, so the
-freeze/validation logic is identical.
+A report is a frozen snapshot of a dashboard. The payload goes through
+SnapshotCreate — the Reports API's own request schema — and then
+ReportService.create_snapshot, the same path the Reports page uses, so the
+frozen configs, date filtering and audit log are identical.
 """
 
 from datetime import date
@@ -12,7 +12,15 @@ from langchain.tools import ToolRuntime, tool
 
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import register_tool
-from ddpui.core.ai.tools.rendering import rejection
+from ddpui.core.ai.tools.rendering import created, error_reason, rejection
+from ddpui.core.reports.report_service import ReportService
+from ddpui.models.org_user import OrgUser
+from ddpui.schemas.chat_with_data_schemas import CreatedArtifact
+from ddpui.schemas.report_schema import DateColumnSchema, SnapshotCreate
+
+
+def _rejected(reason: str) -> tuple[str, dict]:
+    return rejection("report", "Report not created", reason)
 
 
 @register_tool
@@ -21,43 +29,45 @@ def create_report(
     title: str,
     dashboard_id: int,
     runtime: ToolRuntime[RunContext],
-    period_start: str | None = None,
-    period_end: str | None = None,
+    date_column: DateColumnSchema | None = None,
+    period_start: date | None = None,
+    period_end: date | None = None,
 ) -> tuple[str, dict]:
     """Create a report: a frozen snapshot of an existing dashboard. Get the
     dashboard_id from list_dashboards and confirm the choice with the user
-    first. Optional period_start/period_end (YYYY-MM-DD) limit the report to
-    a date range when the dashboard has a date filter."""
+    first. To limit the report to a date range, pass period_start/period_end
+    (YYYY-MM-DD) together with date_column — the datetime column
+    {schema_name, table_name, column_name} the dates filter on."""
     ctx = runtime.context
     try:
-        start = date.fromisoformat(period_start) if period_start else None
-        end = date.fromisoformat(period_end) if period_end else None
-    except ValueError:
-        return rejection("report", "Report not created", "dates must be YYYY-MM-DD")
-
-    from ddpui.core.reports.report_service import ReportService
-    from ddpui.models.org_user import OrgUser
+        payload = SnapshotCreate(
+            title=title,
+            dashboard_id=dashboard_id,
+            date_column=date_column,
+            period_start=period_start,
+            period_end=period_end,
+        )
+    except ValueError as err:  # pydantic ValidationError is a ValueError
+        return _rejected(error_reason(err))
 
     try:
         orguser = OrgUser.objects.select_related("org").get(id=ctx.orguser_id)
         snapshot = ReportService.create_snapshot(
-            title=title,
-            dashboard_id=dashboard_id,
+            title=payload.title,
+            dashboard_id=payload.dashboard_id,
             orguser=orguser,
-            period_start=start,
-            period_end=end,
+            date_column=payload.date_column.model_dump() if payload.date_column else {},
+            period_end=payload.period_end,
+            period_start=payload.period_start,
         )
     except Exception as err:  # pylint: disable=broad-except
-        return rejection("report", "Report not created", str(err).splitlines()[0][:300])
+        return _rejected(error_reason(err))
 
     url_path = f"/reports/{snapshot.id}"
-    content = (
+    return created(
+        CreatedArtifact(
+            type="report", object_id=snapshot.id, title=snapshot.title, url_path=url_path
+        ),
         f"Done — report '{snapshot.title}' (id {snapshot.id}) is saved. "
-        f"The user can open it at {url_path}."
+        f"The user can open it at {url_path}.",
     )
-    return content, {
-        "type": "report",
-        "object_id": snapshot.id,
-        "title": snapshot.title,
-        "url_path": url_path,
-    }
