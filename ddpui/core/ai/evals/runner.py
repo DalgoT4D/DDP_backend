@@ -26,6 +26,7 @@ from ddpui.core.ai.llm_calls.router import casual_reply, route_question
 from ddpui.core.ai.messages.artifacts import extract_turn_results
 from ddpui.core.ai.messages.conversation import turn_segment
 from ddpui.core.ai.prompts import EXPECTATIONS_CRITERIA, FAITHFULNESS_CRITERIA
+from ddpui.schemas.chat_with_data_schemas import EvalItem
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -128,9 +129,9 @@ def judge_faithfulness(question: str, answer: str, result_table: dict | None) ->
         return None
 
 
-async def run_item(item: dict, *, context, model=None, judge=True) -> ItemResult:
+async def run_item(item: EvalItem, *, context, model=None, judge=True) -> ItemResult:
     """One golden item through a fresh TurnGraph (in-memory checkpointer)."""
-    result = ItemResult(question=item["question"])
+    result = ItemResult(question=item.question)
     saver = InMemorySaver()
     graph = build_turn_graph(
         # no human answers evals — ask_user falls back, gated tools auto-run
@@ -143,7 +144,7 @@ async def run_item(item: dict, *, context, model=None, judge=True) -> ItemResult
     )
     try:
         state = await graph.ainvoke(
-            {"messages": [("user", item["question"])], "question": item["question"]},
+            {"messages": [("user", item.question)], "question": item.question},
             config={
                 "configurable": {"thread_id": str(uuid.uuid4())},
                 "recursion_limit": RECURSION_LIMIT,
@@ -155,15 +156,15 @@ async def run_item(item: dict, *, context, model=None, judge=True) -> ItemResult
         return result
 
     result.intent = (state.get("route") or {}).get("intent", "")
-    if item.get("expected_intent"):
-        result.routing_ok = result.intent == item["expected_intent"]
+    if item.expected_intent:
+        result.routing_ok = result.intent == item.expected_intent
 
     sql_queries, result_table, answer = extract_turn_results(turn_segment(state["messages"]))
     result.answer = answer
 
-    if item.get("gold_sql"):
+    if item.gold_sql:
         try:
-            gold_rows = context.warehouse.execute(item["gold_sql"])
+            gold_rows = context.warehouse.execute(item.gold_sql)
             result.gold_rows = list(gold_rows)
             result.agent_sql = (sql_queries[-1].get("sql") or "") if sql_queries else ""
             result.agent_rows = result_table.get("rows", []) if result_table else []
@@ -172,19 +173,17 @@ async def run_item(item: dict, *, context, model=None, judge=True) -> ItemResult
             )
         except Exception as err:  # pylint: disable=broad-except
             result.error = f"gold SQL failed: {err}"
-    elif item.get("expected_value"):
-        result.sql_ok = answer_contains_value(answer, item["expected_value"])
+    elif item.expected_value:
+        result.sql_ok = answer_contains_value(answer, item.expected_value)
 
     if judge and result.routing_ok is not False:
-        result.faithful = judge_faithfulness(item["question"], answer, result_table)
-        if item.get("answer_expectations"):
+        result.faithful = judge_faithfulness(item.question, answer, result_table)
+        if item.answer_expectations:
             result.expectations = judge_expectations(
-                item["question"], answer, item["answer_expectations"]
+                item.question, answer, item.answer_expectations
             )
-        if item.get("gold_sql") and result.agent_sql:
-            result.sql_judge = judge_sql_equivalence(
-                item["question"], result.agent_sql, item["gold_sql"]
-            )
+        if item.gold_sql and result.agent_sql:
+            result.sql_judge = judge_sql_equivalence(item.question, result.agent_sql, item.gold_sql)
     return result
 
 
@@ -225,7 +224,7 @@ def judge_expectations(question: str, answer: str, expectations: str) -> float |
 
 
 async def run_items(
-    items: list[dict],
+    items: list[EvalItem],
     *,
     context,
     run_name: str,
@@ -246,7 +245,7 @@ async def run_items(
     for item in items:
         result = await run_item(item, context=context, model=model, judge=judge)
         summary.results.append(result)
-        logger.info(f"eval item done hard_pass={result.hard_pass} q={item['question'][:60]}")
+        logger.info(f"eval item done hard_pass={result.hard_pass} q={item.question[:60]}")
         if langfuse_client is not None:
             _record(langfuse_client, dataset_items, item, result, run_name)
     if langfuse_client is not None:
@@ -257,12 +256,12 @@ async def run_items(
     return summary
 
 
-def _record(client, dataset_items, item, result: ItemResult, run_name: str) -> None:
+def _record(client, dataset_items, item: EvalItem, result: ItemResult, run_name: str) -> None:
     """One trace per item, scores attached, linked to the dataset item."""
     try:
         trace = client.trace(
             name="chat_eval_turn",
-            input=item["question"],
+            input=item.question,
             output=result.answer[:4000],
             tags=["eval"],
             metadata={"run_name": run_name, "error": result.error},
@@ -277,7 +276,7 @@ def _record(client, dataset_items, item, result: ItemResult, run_name: str) -> N
             trace.score(name="eval_expectations", value=result.expectations)
         if result.sql_judge is not None:
             trace.score(name="eval_sql_judge", value=result.sql_judge)
-        dataset_item = dataset_items.get(item["question"])
+        dataset_item = dataset_items.get(item.question)
         if dataset_item is not None:
             dataset_item.link(trace, run_name)
     except Exception:  # pylint: disable=broad-except

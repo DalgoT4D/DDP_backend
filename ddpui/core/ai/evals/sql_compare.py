@@ -145,7 +145,7 @@ def _render(value) -> str:
     return str(value)
 
 
-def answer_contains_value(answer: str, expected_value: str) -> bool:
+def answer_contains_value(answer: str, expected_value: str | int | float) -> bool:
     """Fallback metric when gold SQL is overkill: the expected value (e.g.
     "1,284" or "Pune") must appear in the answer text, ignoring thousands
     separators and case."""

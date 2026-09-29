@@ -10,17 +10,18 @@ Non-fatal everywhere: any failure returns None and the turn proceeds unmarked.
 """
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from pydantic import ValidationError
 
 from ddpui.core.ai.agent.base import build_model
 from ddpui.core.ai.constants import FAST_MODEL, VALIDATOR_MAX_TOKENS, VALIDATOR_MODEL_ENV_VAR
 from ddpui.core.ai.llm_calls.parsing import parse_json_reply
 from ddpui.core.ai.messages.content import extract_text
 from ddpui.core.ai.prompts import TURN_AUDIT_PROMPT
+from ddpui.schemas.chat_with_data_schemas import TurnAuditReply
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
 
-VERDICTS = {"ok", "warn"}
 
 # keep the judge's inputs bounded
 MAX_ANSWER_CHARS = 2000
@@ -71,16 +72,11 @@ async def audit_turn(
             answer=answer[:MAX_ANSWER_CHARS],
         )
         response = await model.ainvoke(prompt)
-        data = parse_json_reply(extract_text(response.content))
-
-        verdict = data.get("verdict")
-        if verdict not in VERDICTS:
-            return None
-        return {
-            "verdict": verdict,
-            "assumptions": [str(a) for a in data.get("assumptions") or []],
-            "caveat": str(data["caveat"]) if data.get("caveat") else None,
-        }
+        reply = TurnAuditReply.model_validate(parse_json_reply(extract_text(response.content)))
+        return reply.model_dump()
+    except ValidationError as err:
+        logger.warning(f"chat_with_data: turn audit reply rejected (non-fatal): {err}")
+        return None
     except Exception:  # pylint: disable=broad-except
         logger.exception("chat_with_data: result validation failed (non-fatal)")
         return None

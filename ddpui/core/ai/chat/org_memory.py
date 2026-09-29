@@ -6,6 +6,7 @@ into the agents' system prompts — see org_memory_section in core/ai/prompts.py
 from ddpui.core.ai.constants import CHAT_WITH_DATA_FLAG, MAX_ORG_MEMORY_CHARS
 from ddpui.models.chat_with_data import ChatWithDataOrgMemory
 from ddpui.models.org_user import OrgUser
+from ddpui.schemas.chat_with_data_schemas import CopilotSettingsOut, CopilotSettingsUpdate
 from ddpui.utils.feature_flags import (
     disable_feature_flag,
     enable_feature_flag,
@@ -17,27 +18,26 @@ class MemoryTooLong(Exception):
     """Memory text exceeds MAX_ORG_MEMORY_CHARS."""
 
 
-def get_settings(orguser: OrgUser) -> dict:
+def get_settings(orguser: OrgUser) -> CopilotSettingsOut:
     """Current Copilot settings for the org. Never 404s: no memory row reads
     as empty text, no flag row reads as disabled."""
     org = orguser.org
     memory = ChatWithDataOrgMemory.objects.filter(org=org).first()
-    return {
-        "enabled": bool(is_feature_flag_enabled(CHAT_WITH_DATA_FLAG, org)),
-        "text": memory.text if memory else "",
-        "updated_at": memory.updated_at.isoformat() if memory else None,
-        "updated_by_email": (
-            memory.updated_by.user.email if memory and memory.updated_by else None
-        ),
-        "max_chars": MAX_ORG_MEMORY_CHARS,
-    }
+    return CopilotSettingsOut(
+        enabled=bool(is_feature_flag_enabled(CHAT_WITH_DATA_FLAG, org)),
+        text=memory.text if memory else "",
+        updated_at=memory.updated_at.isoformat() if memory else None,
+        updated_by_email=(memory.updated_by.user.email if memory and memory.updated_by else None),
+        max_chars=MAX_ORG_MEMORY_CHARS,
+    )
 
 
-def update_settings(orguser: OrgUser, enabled: bool | None, text: str | None) -> dict:
+def update_settings(orguser: OrgUser, payload: CopilotSettingsUpdate) -> CopilotSettingsOut:
     """Partial update: each field only changes when supplied. `enabled` writes
     the org's CHAT_WITH_DATA flag row (org row beats a global one); `text`
     upserts the memory row — empty string is a valid clear."""
     org = orguser.org
+    enabled, text = payload.enabled, payload.text
 
     if enabled is True:
         enable_feature_flag(CHAT_WITH_DATA_FLAG, org)

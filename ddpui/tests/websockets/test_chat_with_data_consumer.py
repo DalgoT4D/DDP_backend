@@ -28,6 +28,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from django.core.management import call_command
 
+from ddpui.schemas.chat_with_data_schemas import ResumeApprovalAction
 from ddpui.websockets.chat_with_data_consumer import ChatWithDataConsumer, _allowed_pii_columns
 from ddpui.websockets.schemas import WebsocketCloseCodes
 
@@ -352,6 +353,34 @@ def test_unsupported_action_yields_error_event(orguser, scripted_turn):
     run(scenario())
 
 
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ('{"action": "nonsense"}', "Unsupported action"),
+        ("{}", "Unsupported action"),
+        ("not json", "Invalid message format"),
+        ("[1, 2]", "Invalid message format"),
+        ('{"action": "resume_approval", "approve": "maybe"}', "Invalid message format"),
+    ],
+)
+def test_malformed_client_messages_get_a_specific_error(orguser, scripted_turn, raw, expected):
+    """Unknown actions and malformed payloads are told apart; a non-object
+    payload used to crash receive() with AttributeError."""
+    session = scripted_turn
+
+    async def scenario():
+        communicator = make_communicator(
+            session_id=session.id, token=token_for(orguser), orgslug=orguser.org.slug
+        )
+        await communicator.connect()
+        await communicator.send_to(text_data=raw)
+        event = await communicator.receive_json_from(timeout=5)
+        assert event == {"type": "error", "message": expected}
+        await communicator.disconnect()
+
+    run(scenario())
+
+
 def test_second_message_rejected_while_turn_in_flight(orguser, scripted_turn):
     from ddpui.websockets import chat_with_data_consumer as consumer_module
 
@@ -407,8 +436,9 @@ def test_a_card_with_no_columns_accepts_nothing():
 
 
 def test_a_non_list_payload_is_ignored():
+    message = ResumeApprovalAction(action="resume_approval", pii_columns="prod.b.phone")
     pending = _pending([{"schema": "prod", "table": "b", "column": "phone"}])
-    assert _allowed_pii_columns(pending, "prod.b.phone") == set()
+    assert _allowed_pii_columns(pending, message.pii_columns) == set()
 
 
 def test_mixed_card_offers_only_the_reviewable_requests_columns():

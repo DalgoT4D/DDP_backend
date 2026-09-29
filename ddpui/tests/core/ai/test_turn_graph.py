@@ -141,7 +141,7 @@ def test_thread_continuity_with_checkpointer_on_parent_only():
     agent = build_agent(checkpointer=None, model=model)
 
     async def fake_route(question, model=None, history=None):
-        return RouteResult()  # data_question
+        return RouteResult(intent="data_question")
 
     async def fake_reply(question, model=None):
         return "hi"
@@ -160,7 +160,7 @@ def test_thread_continuity_with_checkpointer_on_parent_only():
 
 
 async def _data_route(question, model=None, history=None):
-    return RouteResult()  # data_question / simple
+    return RouteResult(intent="data_question")  # simple
 
 
 async def _canned_reply(question, model=None):
@@ -421,11 +421,15 @@ def test_route_fn_receives_the_responder_annotation_on_the_second_turn():
     async def fake_reply(question, model=None):
         return "hello"
 
-    graph = build_turn_graph(agent, route_fn=fake_route, casual_reply_fn=fake_reply, checkpointer=saver)
+    graph = build_turn_graph(
+        agent, route_fn=fake_route, casual_reply_fn=fake_reply, checkpointer=saver
+    )
     run_graph(graph, "how many students?", thread_id="resp1")
     run_graph(graph, "and in Moga?", thread_id="resp1")
 
     assert captured[0] == []  # first turn: no history, no annotation
     assert any("DATA ASSISTANT" in line for line in captured[1])
-    assert "DATA ASSISTANT" not in (captured[1][0] if captured[1] else "")  # annotation is appended last
+    assert "DATA ASSISTANT" not in (
+        captured[1][0] if captured[1] else ""
+    )  # annotation is appended last
     assert "DATA ASSISTANT" in captured[1][-1]

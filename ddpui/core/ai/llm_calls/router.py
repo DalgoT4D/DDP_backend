@@ -9,34 +9,22 @@ data_question/simple — the v1 behavior. The router may only ever divert
 obviously-non-data turns; it must never block a real question.
 """
 
-import dataclasses
 import re
-from dataclasses import dataclass, field
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from pydantic import ValidationError
 
 from ddpui.core.ai.agent.base import build_model
 from ddpui.core.ai.constants import FAST_MODEL, ROUTER_MAX_TOKENS, ROUTER_MODEL_ENV_VAR
 from ddpui.core.ai.llm_calls.parsing import parse_json_reply
 from ddpui.core.ai.messages.content import extract_text
 from ddpui.core.ai.prompts import ROUTER_PROMPT, SMALL_TALK_PROMPT
+from ddpui.schemas.chat_with_data_schemas import RouteResult
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
 
-INTENTS = {"data_question", "platform_help", "small_talk", "needs_clarification"}
-COMPLEXITIES = {"simple", "complex"}
-
-
-@dataclass(frozen=True)
-class RouteResult:
-    intent: str = "data_question"
-    complexity: str = "simple"
-    entities: list[str] = field(default_factory=list)
-    clarification: str | None = None
-
-
-FAIL_OPEN = RouteResult()
+FAIL_OPEN = RouteResult(intent="data_question")
 
 # Deterministic backstop: an explicit creation request must reach the guide
 # agent even when the model misroutes it (e.g. follow-up stickiness in a data
@@ -59,7 +47,7 @@ def _apply_platform_help_backstop(question: str, route: RouteResult) -> RouteRes
     if route.intent == "platform_help":
         return route
     if _CREATION_REQUEST.search(question) or _VISUALIZE_REFERENCE.search(question):
-        return dataclasses.replace(route, intent="platform_help", clarification=None)
+        return route.model_copy(update={"intent": "platform_help", "clarification": None})
     return route
 
 
@@ -100,26 +88,12 @@ async def route_question(
         response = await model.ainvoke(
             ROUTER_PROMPT.format(question=question[:1000], history_block=history_block)
         )
-        data = parse_json_reply(extract_text(response.content))
-
-        intent = data.get("intent")
-        if intent not in INTENTS:
-            return _apply_platform_help_backstop(question, FAIL_OPEN)
-        complexity = data.get("complexity")
-        if complexity not in COMPLEXITIES:
-            complexity = "simple"
-
-        entities = [str(e) for e in data.get("entities") or [] if isinstance(e, (str, int))]
-        clarification = data.get("clarification")
-        return _apply_platform_help_backstop(
-            question,
-            RouteResult(
-                intent=intent,
-                complexity=complexity,
-                entities=entities,
-                clarification=str(clarification) if clarification else None,
-            ),
-        )
+        route = RouteResult.model_validate(parse_json_reply(extract_text(response.content)))
+        return _apply_platform_help_backstop(question, route)
+    except ValidationError as err:
+        # no usable intent in the reply — the model's JSON was valid, just wrong
+        logger.warning(f"chat_with_data: router reply rejected; failing open: {err}")
+        return _apply_platform_help_backstop(question, FAIL_OPEN)
     except Exception:  # pylint: disable=broad-except
         logger.exception("chat_with_data: router failed; failing open to data_question")
         return _apply_platform_help_backstop(question, FAIL_OPEN)

@@ -12,7 +12,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from ddpui.core.ai.evals import runner as eval_runner
-from ddpui.core.ai.llm_calls.router import RouteResult
+from ddpui.schemas.chat_with_data_schemas import EvalItem, RouteResult
 from ddpui.tests.core.ai.test_agent_loop import ScriptedChatModel, make_context, sql_call
 from ddpui.tests.core.ai.test_tools import FakeWarehouse
 
@@ -38,7 +38,9 @@ def run(item, *, script, warehouse=None, intent=None, routed=None):
         routed["intent"] = intent
     model = ScriptedChatModel(script=script)
     context = make_context(warehouse or FakeWarehouse(rows=[{"n": 171}]))
-    return asyncio.run(eval_runner.run_item(item, context=context, model=model, judge=False))
+    return asyncio.run(
+        eval_runner.run_item(EvalItem(**item), context=context, model=model, judge=False)
+    )
 
 
 def test_gold_sql_match_passes(routed_as):
@@ -170,11 +172,11 @@ def test_run_items_pushes_scores_and_links(routed_as):
     dataset = type("DS", (), {"items": [ds_item]})()
 
     items = [
-        {
-            "question": "how many beneficiaries enrolled?",
-            "expected_intent": "data_question",
-            "gold_sql": "SELECT 1",
-        }
+        EvalItem(
+            question="how many beneficiaries enrolled?",
+            expected_intent="data_question",
+            gold_sql="SELECT 1",
+        )
     ]
     model = ScriptedChatModel(
         script=[sql_call("SELECT 1", "c1"), AIMessage(content="**171** enrolled.")]

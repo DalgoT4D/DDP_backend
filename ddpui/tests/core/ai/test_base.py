@@ -59,7 +59,7 @@ def test_available_models_filters_by_provider_key(monkeypatch):
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    offered = [m["id"] for m in cda.available_models()]
+    offered = [m.id for m in cda.available_models()]
     assert "claude-sonnet-5" in offered
     assert "gpt-5.5" not in offered
 

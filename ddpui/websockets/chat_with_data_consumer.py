@@ -9,8 +9,9 @@ Per-message protocol (in):
     {"action": "send_message", "message": "<question>", "model": str?}
         — starts a turn; if the agent is waiting on an ask_user question,
           the message is that question's answer and resumes the paused turn
-    {"action": "resume_approval", "approve": true|false}
+    {"action": "resume_approval", "approve": true|false, "pii_columns": [str]?}
         — answers a pending approval card (approve/cancel all pending calls)
+Parsed as ChatClientMessage (schemas/chat_with_data_schemas.py).
 Events (out): see ddpui/core/ai/chat/turn_runner.py, plus
               {"type": "title_updated", "title": str}.
 
@@ -26,6 +27,7 @@ from urllib.parse import parse_qs
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth.models import User
+from pydantic import TypeAdapter, ValidationError
 from rest_framework_simplejwt.tokens import AccessToken
 
 from ddpui.core.ai.chat import sessions as service
@@ -43,6 +45,10 @@ from ddpui.core.ai.llm_calls.session_title import generate_session_title
 from ddpui.auth import orguser_has_permission
 from ddpui.models.chat_with_data import ChatWithDataSession
 from ddpui.models.org_user import OrgUser
+from ddpui.schemas.chat_with_data_schemas import (
+    ChatClientMessage,
+    SendMessageAction,
+)
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
 from ddpui.websockets.schemas import WebsocketCloseCodes
@@ -61,21 +67,25 @@ PENDING_INPUT_TTL_S = 24 * 60 * 60
 
 DEFAULT_SESSION_TITLE = "New chat"
 
+_CLIENT_MESSAGE = TypeAdapter(ChatClientMessage)
 
-def _allowed_pii_columns(pending: dict, requested) -> set[str]:
+# ValidationError types meaning "no known action", as opposed to a known
+# action with malformed fields
+_UNKNOWN_ACTION_ERRORS = {"union_tag_invalid", "union_tag_not_found"}
+
+
+def _allowed_pii_columns(pending: dict, requested: list[str]) -> set[str]:
     """The client's ticked columns, narrowed to what the pending card offered.
 
     The browser is the only store of these ticks, so the list arrives from the
     client — but it may only name columns this card actually listed. Anything else
     is dropped and logged rather than trusted."""
-    if not isinstance(requested, list):
-        return set()
     offered = {
         f"{column['schema']}.{column['table']}.{column['column']}"
         for request in pending.get("event", {}).get("requests", [])
         for column in (request.get("columns") or [])
     }
-    asked = {str(entry) for entry in requested}
+    asked = set(requested)
     rejected = asked - offered
     if rejected:
         logger.error(f"dropping pii_columns not offered by the card: {sorted(rejected)}")
@@ -124,19 +134,20 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
 
     async def receive(self, text_data=None, bytes_data=None):
         try:
-            payload = json.loads(text_data or "{}")
-        except json.JSONDecodeError:
-            await self._send_event({"type": "error", "message": "Invalid message format"})
+            message = _CLIENT_MESSAGE.validate_json(text_data or "{}")
+        except ValidationError as err:
+            unknown_action = any(e["type"] in _UNKNOWN_ACTION_ERRORS for e in err.errors())
+            error = "Unsupported action" if unknown_action else "Invalid message format"
+            await self._send_event({"type": "error", "message": error})
             return
 
-        action = payload.get("action")
         pending = self._get_pending_input()
         resume_payload: dict | None = None
         resume_trace_id: str | None = None
         pii_columns: set[str] = set()
 
-        if action == "send_message":
-            question = str(payload.get("message", "")).strip()
+        if isinstance(message, SendMessageAction):
+            question = message.message.strip()
             if not question:
                 await self._send_event({"type": "error", "message": "Unsupported action"})
                 return
@@ -159,14 +170,14 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             else:
                 # user's model pick for this turn; anything not on the allowlist
                 # (or absent) silently falls back to the default — never trust the client
-                model_id = resolve_selected_model(payload.get("model"))
-        elif action == "resume_approval":
+                model_id = resolve_selected_model(message.model)
+        else:  # ResumeApprovalAction — the union has no other member
             if not pending or pending.get("kind") != "approval":
                 await self._send_event(
                     {"type": "error", "message": "There is nothing waiting for your approval."}
                 )
                 return
-            approve = bool(payload.get("approve"))
+            approve = message.approve
             # server-side enforcement of the fail-closed card: `columns: None` means
             # the card could not be reviewed for PII, so approval must be refused
             # here even if some other client skipped the browser's own disabled-button
@@ -184,16 +195,13 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
                     }
                 )
                 return
-            pii_columns = _allowed_pii_columns(pending, payload.get("pii_columns"))
+            pii_columns = _allowed_pii_columns(pending, message.pii_columns)
             question = "[user approved the action]" if approve else "[user cancelled the action]"
             model_id = resolve_selected_model(pending.get("model"))
             resume_payload = build_resume_payload(
                 pending["event"].get("requests", []), approve=approve
             )
             resume_trace_id = pending.get("trace_id")
-        else:
-            await self._send_event({"type": "error", "message": "Unsupported action"})
-            return
 
         if not self._acquire_turn_lock():
             await self._send_event(

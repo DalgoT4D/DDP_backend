@@ -10,12 +10,14 @@ in a worker thread. FAIL-OPEN: any error means "no issue found".
 """
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from pydantic import ValidationError
 
 from ddpui.core.ai.agent.base import build_model
 from ddpui.core.ai.constants import FAST_MODEL, REFLECTION_MAX_TOKENS, REFLECTION_MODEL_ENV_VAR
 from ddpui.core.ai.llm_calls.parsing import parse_json_reply
 from ddpui.core.ai.messages.content import extract_text
 from ddpui.core.ai.prompts import SQL_REFLECTION_PROMPT
+from ddpui.schemas.chat_with_data_schemas import SqlReflectionReply
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -34,9 +36,12 @@ def find_sql_issue(
         response = model.invoke(
             SQL_REFLECTION_PROMPT.format(question=question[:1000], sql=sql[:4000], dialect=dialect)
         )
-        data = parse_json_reply(extract_text(response.content))
-        if data.get("ok") is False and data.get("issue"):
-            return str(data["issue"])
+        reply = SqlReflectionReply.model_validate(parse_json_reply(extract_text(response.content)))
+        if reply.ok is False and reply.issue:
+            return reply.issue
+        return None
+    except ValidationError as err:
+        logger.warning(f"chat_with_data: reflection reply rejected (failing open): {err}")
         return None
     except Exception:  # pylint: disable=broad-except
         logger.exception("chat_with_data: reflection failed (failing open)")

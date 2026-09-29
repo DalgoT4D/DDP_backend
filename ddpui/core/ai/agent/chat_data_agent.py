@@ -28,12 +28,13 @@ from ddpui.core.ai.constants import DEFAULT_MODEL, MODEL_ENV_VAR, MODEL_MAX_TOKE
 from ddpui.core.ai.prompts import build_system_prompt
 from ddpui.core.ai.tools.registry import get_tools
 from ddpui.core.ai.toolsets import SQL_AGENT_TOOLS, SQL_APPROVAL_TOOLS
+from ddpui.schemas.chat_with_data_schemas import ModelOption
 
 
-def available_models() -> list[dict]:
-    """User-selectable models whose provider credentials exist, as {id, label}."""
+def available_models() -> list[ModelOption]:
+    """User-selectable models whose provider credentials exist."""
     return [
-        {"id": option["id"], "label": option["label"]}
+        ModelOption(id=option["id"], label=option["label"])
         for option in MODEL_OPTIONS
         if os.getenv(option["key_env"])
     ]
@@ -43,7 +44,7 @@ def default_model_id() -> str:
     """The model used when the user picks nothing: the env override if it is
     offerable, else the first available option, else the hard default."""
     configured = resolve_model_name(MODEL_ENV_VAR, DEFAULT_MODEL)
-    offered = [m["id"] for m in available_models()]
+    offered = [m.id for m in available_models()]
     if configured in offered or not offered:
         return configured
     return offered[0]
@@ -52,7 +53,7 @@ def default_model_id() -> str:
 def resolve_selected_model(model_id: str | None) -> str:
     """Validate a user-supplied model id against the allowlist; None or an
     unknown/unavailable id falls back to the default. Never trusts the client."""
-    if model_id and any(m["id"] == model_id for m in available_models()):
+    if model_id and any(m.id == model_id for m in available_models()):
         return model_id
     return default_model_id()
 

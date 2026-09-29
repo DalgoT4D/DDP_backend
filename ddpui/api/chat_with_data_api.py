@@ -15,7 +15,6 @@ from ddpui.core.ai.chat.org_memory import MemoryTooLong
 from ddpui.core.ai.chat.sessions import SessionNotFound
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chat_with_data_schemas import (
-    CopilotSettingsOut,
     CopilotSettingsUpdate,
     SessionOut,
     SessionRename,
@@ -42,7 +41,7 @@ def get_settings(request):
     """Copilot settings: the org's enable flag + its org memory. Admin-only —
     the memory may describe the org's data layout."""
     orguser: OrgUser = request.orguser
-    data = CopilotSettingsOut(**settings_service.get_settings(orguser))
+    data = settings_service.get_settings(orguser)
     return api_response(success=True, data=data.model_dump())
 
 
@@ -52,10 +51,10 @@ def update_settings(request, payload: CopilotSettingsUpdate):
     """Partial update of Copilot settings; omitted fields stay unchanged."""
     orguser: OrgUser = request.orguser
     try:
-        data = settings_service.update_settings(orguser, payload.enabled, payload.text)
+        data = settings_service.update_settings(orguser, payload)
     except MemoryTooLong as err:
         raise HttpError(400, str(err)) from err
-    return api_response(success=True, data=CopilotSettingsOut(**data).model_dump())
+    return api_response(success=True, data=data.model_dump())
 
 
 @chat_with_data_router.post("/sessions/")

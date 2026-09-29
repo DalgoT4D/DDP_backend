@@ -26,7 +26,6 @@ pass its own module globals, keeping them patchable per-turn and avoiding a
 circular import with turn_runner.py.
 """
 
-import dataclasses
 from typing import Annotated, Any, Optional, TypedDict
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
@@ -109,7 +108,7 @@ def build_turn_graph(
         if runtime.context is not None:
             runtime.context.question = question
             runtime.context.complexity = route.complexity
-        return {"route": dataclasses.asdict(route), "has_history": bool(history)}
+        return {"route": route.model_dump(), "has_history": bool(history)}
 
     async def casual_reply_node(state: TurnState) -> dict:
         reply = await casual_reply_fn(state["question"])
