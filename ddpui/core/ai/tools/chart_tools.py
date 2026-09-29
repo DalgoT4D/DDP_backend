@@ -22,12 +22,13 @@ from ddpui.models.visualization import Chart
 from ddpui.schemas.chart_schemas import ChartCreate, ChartMetric
 from ddpui.schemas.chat_with_data_schemas import CreatedArtifact
 from ddpui.services.chart_service import ChartData, ChartService
+from ddpui.core.ai.typed_dicts import CreationArtifact
 
 # Offered to the agent in v1 — map/table/pivot_table need config it can't build
 AgentChartType = Literal["bar", "line", "pie", "number"]
 
 
-def _rejected(reason: str) -> tuple[str, dict]:
+def _rejected(reason: str) -> tuple[str, CreationArtifact]:
     return rejection("chart", "Chart not created", reason)
 
 
@@ -60,7 +61,7 @@ def create_chart(
     dimension_column: str | None = None,
     metrics: list[ChartMetric] | None = None,
     description: str | None = None,
-) -> tuple[str, dict]:
+) -> tuple[str, CreationArtifact]:
     """Create a saved chart in the organization's chart library from ONE table.
 
     dimension_column: the column to group by — REQUIRED for bar/line (x-axis)

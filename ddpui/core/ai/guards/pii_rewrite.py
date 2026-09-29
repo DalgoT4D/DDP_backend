@@ -28,6 +28,9 @@ from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import traverse_scope
 from sqlglot.schema import MappingSchema
 
+# sqlglot's schema mapping: {schema: {table: {column: type}}}
+SchemaMap = dict[str, dict[str, dict[str, str]]]
+
 # Predicates whose literal operand puts a real value into the SQL text itself.
 # That text is persisted in the tool artifact, the checkpoint and the trace, so
 # the card warns about it even though we never rewrite it.
@@ -65,7 +68,7 @@ class ProjectedColumn:
         return f"{self.schema}.{self.table}.{self.column}"
 
 
-def resolve_projection(sql: str, dialect: str, schema_map: dict) -> list[ProjectedColumn]:
+def resolve_projection(sql: str, dialect: str, schema_map: SchemaMap) -> list[ProjectedColumn]:
     """Every physical column selected anywhere in the tree, sorted by key.
 
     May over-list: a column a CTE selects but the outer query drops still appears.
@@ -87,7 +90,7 @@ def resolve_projection(sql: str, dialect: str, schema_map: dict) -> list[Project
     return [found[key] for key in sorted(found)]
 
 
-def _qualified_tree(sql: str, dialect: str, schema_map: dict) -> exp.Expression:
+def _qualified_tree(sql: str, dialect: str, schema_map: SchemaMap) -> exp.Expression:
     try:
         tree = sqlglot.parse_one(sql, dialect=dialect)
     except ParseError as err:
@@ -174,7 +177,7 @@ def _physical_source(scope, column: exp.Column) -> tuple[str, str, str] | None:
 _HASH_CAST_TYPE = {"postgres": "text", "bigquery": "string"}
 
 
-def hash_projection(sql: str, dialect: str, schema_map: dict, pii_columns: set[str]) -> str:
+def hash_projection(sql: str, dialect: str, schema_map: SchemaMap, pii_columns: set[str]) -> str:
     """Wrap each ticked column in the warehouse's hash function wherever it is
     projected. Returns `sql` untouched when nothing is ticked, so the no-PII path
     costs no reserialization."""

@@ -2,7 +2,8 @@
 
 from pydantic import ValidationError
 
-from ddpui.schemas.chat_with_data_schemas import CreatedArtifact, RejectedArtifact
+from ddpui.schemas.chat_with_data_schemas import ArtifactType, CreatedArtifact, RejectedArtifact
+from ddpui.core.ai.typed_dicts import CreationArtifact
 
 # Cap on characters per cell when rendering results/samples for the LLM
 MAX_CELL_CHARS = 120
@@ -29,12 +30,14 @@ def render_rows(rows: list[dict], max_rows: int) -> str:
     return "\n".join(lines)
 
 
-def rejection(artifact_type: str, message: str, reason: str) -> tuple[str, dict]:
+def rejection(
+    artifact_type: ArtifactType, message: str, reason: str
+) -> tuple[str, CreationArtifact]:
     """A creation tool's refusal: LLM-readable text + the rejected artifact."""
     return f"{message}: {reason}", RejectedArtifact(type=artifact_type, error=reason).model_dump()
 
 
-def created(artifact: CreatedArtifact, content: str) -> tuple[str, dict]:
+def created(artifact: CreatedArtifact, content: str) -> tuple[str, CreationArtifact]:
     """A creation tool's success: LLM-readable text + the created artifact."""
     return content, artifact.model_dump()
 

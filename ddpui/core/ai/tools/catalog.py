@@ -7,6 +7,7 @@ query string.
 """
 
 from ddpui.core.ai.agent.run_context import RunContext
+from ddpui.core.ai.guards.pii_rewrite import SchemaMap
 
 
 class ToolInputError(Exception):
@@ -54,11 +55,11 @@ def qualified(dialect: str, schema: str, table: str) -> str:
     return f'"{schema}"."{table}"'
 
 
-def schema_map_for(ctx: RunContext, tables: set[str]) -> dict:
+def schema_map_for(ctx: RunContext, tables: set[str]) -> SchemaMap:
     """The schema input sqlglot's qualify() needs, so it can resolve aliases and
     expand SELECT *: {schema: {table: {column: type}}}. One catalog round-trip per
     table — keep the caller's table set small."""
-    mapping: dict[str, dict[str, dict[str, str]]] = {}
+    mapping: SchemaMap = {}
     for ref in tables:
         if "." not in ref:
             continue  # unqualified names are the guard's error to raise, not ours

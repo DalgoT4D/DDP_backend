@@ -19,6 +19,7 @@ from ddpui.core.ai.messages.content import extract_text
 from ddpui.core.ai.prompts import TURN_AUDIT_PROMPT
 from ddpui.schemas.chat_with_data_schemas import TurnAuditReply
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.core.ai.typed_dicts import ResultTable, SqlQueryEntry, TurnValidation
 
 logger = CustomLogger("ddpui")
 
@@ -32,7 +33,7 @@ def get_validator_model() -> BaseChatModel:
     return build_model(VALIDATOR_MODEL_ENV_VAR, FAST_MODEL, VALIDATOR_MAX_TOKENS)
 
 
-def _render_sql(sql_queries: list[dict]) -> str:
+def _render_sql(sql_queries: list[SqlQueryEntry]) -> str:
     lines = []
     for entry in sql_queries:
         status = entry.get("status", "?")
@@ -42,7 +43,7 @@ def _render_sql(sql_queries: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _render_result(result_table: dict | None) -> str:
+def _render_result(result_table: ResultTable | None) -> str:
     if not result_table or not result_table.get("columns"):
         return "(no result table)"
     lines = [" | ".join(result_table["columns"])]
@@ -54,11 +55,11 @@ def _render_result(result_table: dict | None) -> str:
 async def audit_turn(
     *,
     question: str,
-    sql_queries: list[dict],
-    result_table: dict | None,
+    sql_queries: list[SqlQueryEntry],
+    result_table: ResultTable | None,
     answer: str,
     model: BaseChatModel | None = None,
-) -> dict | None:
+) -> TurnValidation | None:
     """{verdict, assumptions, caveat} — or None when there is nothing to
     validate or validation itself failed."""
     if not sql_queries:
@@ -73,7 +74,9 @@ async def audit_turn(
         )
         response = await model.ainvoke(prompt)
         reply = TurnAuditReply.model_validate(parse_json_reply(extract_text(response.content)))
-        return reply.model_dump()
+        return TurnValidation(
+            verdict=reply.verdict, assumptions=reply.assumptions, caveat=reply.caveat
+        )
     except ValidationError as err:
         logger.warning(f"chat_with_data: turn audit reply rejected (non-fatal): {err}")
         return None

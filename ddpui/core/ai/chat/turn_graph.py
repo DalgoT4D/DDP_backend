@@ -39,6 +39,7 @@ from ddpui.core.ai.messages.artifacts import extract_turn_results
 from ddpui.core.ai.messages.conversation import history_lines, turn_segment
 from ddpui.core.ai.prompts import DATA_RESPONDER_LINE, GUIDE_RESPONDER_LINE
 from ddpui.core.ai.toolsets import HANDOFF_TOOL
+from ddpui.core.ai.typed_dicts import RouteState, TurnValidation
 
 
 def turn_handed_off(messages: list[AnyMessage]) -> bool:
@@ -74,9 +75,9 @@ class TurnState(TypedDict):
 
     messages: Annotated[list[AnyMessage], add_messages]
     question: str
-    route: dict
+    route: RouteState
     has_history: bool
-    validation: Optional[dict]
+    validation: Optional[TurnValidation]
 
 
 def build_turn_graph(

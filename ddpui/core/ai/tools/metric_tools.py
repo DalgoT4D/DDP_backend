@@ -23,6 +23,7 @@ from ddpui.core.metric.metric_service import VALID_AGGREGATIONS, MetricService
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chat_with_data_schemas import CreatedArtifact
 from ddpui.schemas.kpi_schema import KPICreate, KPIExtraConfig
+from ddpui.core.ai.typed_dicts import CreationArtifact
 
 Aggregation = Literal[tuple(VALID_AGGREGATIONS)]
 Direction = Literal[tuple(VALID_DIRECTIONS)]
@@ -44,7 +45,7 @@ def create_metric(
     aggregation: Aggregation | None = None,
     column_expression: str | None = None,
     description: str | None = None,
-) -> tuple[str, dict]:
+) -> tuple[str, CreationArtifact]:
     """Create a reusable metric: a named aggregation over one warehouse table.
     Either pass column + aggregation for a simple metric, OR column_expression
     for a calculated one (e.g. "SUM(achieved) / SUM(target)"). Verify real
@@ -82,7 +83,7 @@ def create_kpi(
     name: str | None = None,
     target_value: float | None = None,
     time_dimension_column: str | None = None,
-) -> tuple[str, dict]:
+) -> tuple[str, CreationArtifact]:
     """Create a KPI on top of an EXISTING metric (get metric_id from
     list_metrics or create_metric). direction: is higher better ("increase")
     or lower ("decrease")? Name defaults to the metric's name."""

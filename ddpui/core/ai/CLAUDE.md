@@ -28,6 +28,14 @@ and agents read first.
 | `prompts.py` | Every prompt sent to a model: both agents' system prompts, router, reflection, audit, title, eval judges | — |
 | `toolsets.py` | Tool-name groups: each agent's toolbox, approval gates, `ask_user`/PII/handoff names, UI labels | — |
 | `constants.py` | Shared settings: model ids, token limits, loop budgets, feature flag, org-memory cap | — |
+| `typed_dicts.py` | TypedDicts for the dicts a turn builds: tool artifacts, result table, graph state, HITL cards, WS events | — |
+
+**Types rule.** Data arriving from outside (browser, LLM reply, Redis, eval
+files) is parsed with Pydantic schemas (`ddpui/schemas/chat_with_data_schemas.py`,
+`ddpui/websockets/schemas.py`). Data we build that LangGraph checkpoints or
+that goes straight to `json.dumps` stays a plain dict, typed in
+`typed_dicts.py` — a Pydantic object in a checkpoint pins its import path into
+every saved thread. HITL payloads use LangChain's own TypedDicts.
 
 Tool *descriptions* are not in `prompts.py` — LangChain reads them from each
 tool's docstring, so they stay beside the tool in `tools/*_tools.py`. Values

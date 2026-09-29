@@ -17,9 +17,10 @@ from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chat_with_data_schemas import CreatedArtifact
 from ddpui.schemas.report_schema import DateColumnSchema, SnapshotCreate
+from ddpui.core.ai.typed_dicts import CreationArtifact
 
 
-def _rejected(reason: str) -> tuple[str, dict]:
+def _rejected(reason: str) -> tuple[str, CreationArtifact]:
     return rejection("report", "Report not created", reason)
 
 
@@ -32,7 +33,7 @@ def create_report(
     date_column: DateColumnSchema | None = None,
     period_start: date | None = None,
     period_end: date | None = None,
-) -> tuple[str, dict]:
+) -> tuple[str, CreationArtifact]:
     """Create a report: a frozen snapshot of an existing dashboard. Get the
     dashboard_id from list_dashboards and confirm the choice with the user
     first. To limit the report to a date range, pass period_start/period_end

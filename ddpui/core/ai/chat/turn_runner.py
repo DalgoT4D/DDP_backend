@@ -17,16 +17,17 @@ forwards these events verbatim. Event shapes are the WS protocol from plan §4.4
                              consumer resumes it with run_turn(resume_payload=...)
     {"type": "error", "message": str}
 
-After the stream ends a ChatWithDataTurnAudit row is written (spec §7 layer 5).
+Each event is typed in typed_dicts.py (TurnEvent). After the stream ends a ChatWithDataTurnAudit row is written (spec §7 layer 5).
 """
 
 import asyncio
 import time
 import uuid
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 
 from asgiref.sync import sync_to_async
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain.agents.middleware.human_in_the_loop import HITLResponse
 from langgraph.types import Command
 
 from ddpui.core.ai.agent.base import resolve_model_name
@@ -53,6 +54,16 @@ from ddpui.core.ai.tracing import (
 from ddpui.models.chat_with_data import ChatWithDataSession, ChatWithDataTurnAudit
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.core.ai.typed_dicts import (
+    CreatedArtifactChip,
+    MessageCompleteEvent,
+    ResultTable,
+    RouteState,
+    SqlQueryEntry,
+    TokenUsage,
+    TurnEvent,
+    TurnValidation,
+)
 
 logger = CustomLogger("ddpui")
 
@@ -72,10 +83,10 @@ async def run_turn(
     question: str,
     context: RunContext,
     model_name: str | None = None,
-    resume_payload: dict | None = None,
+    resume_payload: HITLResponse | None = None,
     resume_trace_id: str | None = None,
     guide_agent=None,
-) -> AsyncIterator[dict]:
+) -> AsyncIterator[TurnEvent]:
     """Stream one turn of the TurnGraph. Always ends with message_complete,
     input_required (the turn paused for the user), or error, and always writes
     the audit row.
@@ -129,19 +140,19 @@ async def run_turn(
         trace_ctx_token = set_current_turn_handler(trace_handler)
 
     final_message = ""
-    route_dict: dict | None = None
-    validation: dict | None = None
-    usage = {"input_tokens": 0, "output_tokens": 0}
-    sql_queries: list[dict] = []
+    route_dict: RouteState | None = None
+    validation: TurnValidation | None = None
+    usage: TokenUsage = {"input_tokens": 0, "output_tokens": 0}
+    sql_queries: list[SqlQueryEntry] = []
     tools_called: list[str] = []
     handed_off = False  # sql_agent yielded the turn to the guide agent
     responding_agent = None  # which lane answered — stamped on the trace at finish
-    last_result_table: dict | None = None
-    # Dalgo objects created this turn (CreatedArtifact dicts)
-    created_artifacts: list[dict] = []
+    last_result_table: ResultTable | None = None
+    # Dalgo objects created this turn
+    created_artifacts: list[CreatedArtifactChip] = []
     status = "completed"
 
-    def _message_complete() -> dict:
+    def _message_complete() -> MessageCompleteEvent:
         return {
             "type": "message_complete",
             "message": final_message,
@@ -218,7 +229,7 @@ async def run_turn(
                             artifact = tool_artifact(message)
                             # a rejected/errored tool call carries status="error"
                             # (e.g. the user cancelled it at the approval card)
-                            tool_status = (
+                            tool_status: Literal["success", "error"] = (
                                 "error"
                                 if getattr(message, "status", None) == "error"
                                 else "success"
@@ -232,7 +243,7 @@ async def run_turn(
                                     tool_status = "error"
                             elif artifact is not None:
                                 # execute_sql artifact — query + result table
-                                tool_status = (
+                                tool_status: Literal["success", "error"] = (
                                     "success" if artifact.get("status") == "success" else "error"
                                 )
                                 sql_queries.append(sql_query_entry(artifact))
@@ -274,7 +285,12 @@ async def run_turn(
                 elif node == "validate_node":
                     validation = (update or {}).get("validation")
                     if validation is not None:
-                        yield {"type": "validation", **validation}
+                        yield {
+                            "type": "validation",
+                            "verdict": validation["verdict"],
+                            "assumptions": validation["assumptions"],
+                            "caveat": validation["caveat"],
+                        }
                         if trace_handler is not None:
                             trace_handler.score(
                                 name="result_validation",

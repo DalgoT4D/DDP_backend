@@ -31,6 +31,7 @@ from ddpui.services.dashboard_service import (
     DashboardNotFoundError,
     DashboardService,
 )
+from ddpui.core.ai.typed_dicts import CreationArtifact
 
 # Grid placement: 12-column grid, three 4-wide × 3-tall charts per row —
 # the same footprint the dashboard builder uses for chart components
@@ -40,7 +41,7 @@ GRID_COLUMNS = 12
 _PER_ROW = GRID_COLUMNS // CHART_W
 
 
-def _rejected(reason: str) -> tuple[str, dict]:
+def _rejected(reason: str) -> tuple[str, CreationArtifact]:
     return rejection("dashboard", "Dashboard action not done", reason)
 
 
@@ -127,7 +128,7 @@ def _place_on_first_tab(dashboard, chart_ids: list[int], orguser: OrgUser):
     )
 
 
-def _dashboard_artifact(dashboard) -> tuple[str, dict]:
+def _dashboard_artifact(dashboard) -> tuple[str, CreationArtifact]:
     url_path = f"/dashboards/{dashboard.id}"
     return created(
         CreatedArtifact(
@@ -165,7 +166,7 @@ def create_dashboard(
     chart_ids: list[int],
     runtime: ToolRuntime[RunContext],
     description: str | None = None,
-) -> tuple[str, dict]:
+) -> tuple[str, CreationArtifact]:
     """Create a NEW dashboard containing the given charts (use the chart ids
     returned by create_chart or named by the user). Only call this after the
     user has chosen to create a new dashboard rather than add to an existing
@@ -192,7 +193,7 @@ def add_charts_to_dashboard(
     dashboard_id: int,
     chart_ids: list[int],
     runtime: ToolRuntime[RunContext],
-) -> tuple[str, dict]:
+) -> tuple[str, CreationArtifact]:
     """Add charts to an EXISTING dashboard (first tab). Get the dashboard_id
     from list_dashboards and confirm the choice with the user first."""
     ctx = runtime.context

@@ -17,11 +17,12 @@ from ddpui.core.ai.llm_calls.sql_reflection import find_sql_issue
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools import catalog, rendering
 from ddpui.core.ai.tools.registry import register_tool
+from ddpui.core.ai.typed_dicts import SqlArtifact
 
 
 @register_tool
 @tool(response_format="content_and_artifact")
-def execute_sql(sql: str, runtime: ToolRuntime[RunContext]) -> tuple[str, dict]:
+def execute_sql(sql: str, runtime: ToolRuntime[RunContext]) -> tuple[str, SqlArtifact]:
     """Run ONE read-only SELECT against the warehouse. Table names must be
     schema-qualified (schema.table). If this returns an error, read it carefully,
     fix the SQL (re-check table details if needed), and try again."""
@@ -64,7 +65,7 @@ def execute_sql(sql: str, runtime: ToolRuntime[RunContext]) -> tuple[str, dict]:
             {"sql": guarded.sql, "status": "error", "error": message},
         )
 
-    artifact = {
+    artifact: SqlArtifact = {
         "sql": guarded.sql,
         "status": "success",
         "row_count": len(rows),

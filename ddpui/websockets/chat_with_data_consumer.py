@@ -27,6 +27,7 @@ from urllib.parse import parse_qs
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth.models import User
+from langchain.agents.middleware.human_in_the_loop import HITLResponse
 from pydantic import TypeAdapter, ValidationError
 from rest_framework_simplejwt.tokens import AccessToken
 
@@ -42,6 +43,7 @@ from ddpui.core.ai.agent.checkpointer import get_checkpointer
 from ddpui.core.ai.agent.context_builder import ChatWithDataNotReady, build_run_context
 from ddpui.core.ai.chat.turn_runner import run_turn
 from ddpui.core.ai.llm_calls.session_title import generate_session_title
+from ddpui.core.ai.typed_dicts import ChatEvent, InputRequiredEvent
 from ddpui.auth import orguser_has_permission
 from ddpui.models.chat_with_data import ChatWithDataSession
 from ddpui.models.org_user import OrgUser
@@ -51,7 +53,7 @@ from ddpui.schemas.chat_with_data_schemas import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
-from ddpui.websockets.schemas import WebsocketCloseCodes
+from ddpui.websockets.schemas import PendingInput, WebsocketCloseCodes
 
 logger = CustomLogger("ddpui")
 
@@ -74,7 +76,7 @@ _CLIENT_MESSAGE = TypeAdapter(ChatClientMessage)
 _UNKNOWN_ACTION_ERRORS = {"union_tag_invalid", "union_tag_not_found"}
 
 
-def _allowed_pii_columns(pending: dict, requested: list[str]) -> set[str]:
+def _allowed_pii_columns(pending: PendingInput, requested: list[str]) -> set[str]:
     """The client's ticked columns, narrowed to what the pending card offered.
 
     The browser is the only store of these ticks, so the list arrives from the
@@ -82,7 +84,7 @@ def _allowed_pii_columns(pending: dict, requested: list[str]) -> set[str]:
     is dropped and logged rather than trusted."""
     offered = {
         f"{column['schema']}.{column['table']}.{column['column']}"
-        for request in pending.get("event", {}).get("requests", [])
+        for request in pending.event["requests"]
         for column in (request.get("columns") or [])
     }
     asked = set(requested)
@@ -130,7 +132,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
         # user can still approve/answer it on this fresh connection
         pending = self._get_pending_input()
         if pending:
-            await self._send_event(pending["event"])
+            await self._send_event(pending.event)
 
     async def receive(self, text_data=None, bytes_data=None):
         try:
@@ -142,7 +144,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             return
 
         pending = self._get_pending_input()
-        resume_payload: dict | None = None
+        resume_payload: HITLResponse | None = None
         resume_trace_id: str | None = None
         pii_columns: set[str] = set()
 
@@ -151,7 +153,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             if not question:
                 await self._send_event({"type": "error", "message": "Unsupported action"})
                 return
-            if pending and pending.get("kind") == "approval":
+            if pending and pending.kind == "approval":
                 await self._send_event(
                     {
                         "type": "error",
@@ -162,17 +164,17 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             if pending:
                 # the agent asked a question (ask_user) — this message answers it
                 # and resumes the paused turn on the model that started it
-                model_id = resolve_selected_model(pending.get("model"))
+                model_id = resolve_selected_model(pending.model)
                 resume_payload = build_resume_payload(
-                    pending["event"].get("requests", []), approve=True, answer=question
+                    pending.event["requests"], approve=True, answer=question
                 )
-                resume_trace_id = pending.get("trace_id")
+                resume_trace_id = pending.trace_id
             else:
                 # user's model pick for this turn; anything not on the allowlist
                 # (or absent) silently falls back to the default — never trust the client
                 model_id = resolve_selected_model(message.model)
         else:  # ResumeApprovalAction — the union has no other member
-            if not pending or pending.get("kind") != "approval":
+            if not pending or pending.kind != "approval":
                 await self._send_event(
                     {"type": "error", "message": "There is nothing waiting for your approval."}
                 )
@@ -184,8 +186,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             # check. `.get("columns", False)` distinguishes "key absent" (a non-PII
             # tool like create_chart, which is fine) from "explicitly None".
             if approve and any(
-                request.get("columns", False) is None
-                for request in pending["event"].get("requests", [])
+                request.get("columns", False) is None for request in pending.event["requests"]
             ):
                 await self._send_event(
                     {
@@ -197,11 +198,9 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
                 return
             pii_columns = _allowed_pii_columns(pending, message.pii_columns)
             question = "[user approved the action]" if approve else "[user cancelled the action]"
-            model_id = resolve_selected_model(pending.get("model"))
-            resume_payload = build_resume_payload(
-                pending["event"].get("requests", []), approve=approve
-            )
-            resume_trace_id = pending.get("trace_id")
+            model_id = resolve_selected_model(pending.model)
+            resume_payload = build_resume_payload(pending.event["requests"], approve=approve)
+            resume_trace_id = pending.trace_id
 
         if not self._acquire_turn_lock():
             await self._send_event(
@@ -229,7 +228,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
         self,
         question: str,
         model_id: str,
-        resume_payload: dict | None = None,
+        resume_payload: HITLResponse | None = None,
         resume_trace_id: str | None = None,
         pii_columns: set[str] | None = None,
     ):
@@ -320,7 +319,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
 
     # ── plumbing ────────────────────────────────────────────────────────────
 
-    async def _send_event(self, event: dict):
+    async def _send_event(self, event: ChatEvent):
         await self.send(text_data=json.dumps(event))
 
     def _get_cookie(self, name: str) -> str | None:
@@ -341,29 +340,26 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
     def _pending_key(self) -> str:
         return f"chat_with_data:pending_input:{self.session.id}"
 
-    def _get_pending_input(self) -> dict | None:
+    def _get_pending_input(self) -> PendingInput | None:
         """The session's unanswered approval/question card, if any."""
         raw = RedisClient.get_instance().get(self._pending_key())
         if not raw:
             return None
         try:
-            return json.loads(raw)
-        except (TypeError, ValueError):
+            return PendingInput.model_validate_json(raw)
+        except ValidationError as err:
+            logger.warning(f"chat_with_data: unreadable pending card ignored: {err}")
             return None
 
-    def _store_pending_input(self, event: dict, model_id: str):
+    def _store_pending_input(self, event: InputRequiredEvent, model_id: str):
+        pending = PendingInput(
+            kind=event["kind"],
+            model=model_id,
+            trace_id=event.get("trace_id"),
+            event=event,
+        )
         RedisClient.get_instance().set(
-            self._pending_key(),
-            json.dumps(
-                {
-                    "kind": event.get("kind"),
-                    "model": model_id,
-                    # keeps every run of one question on one Langfuse trace
-                    "trace_id": event.get("trace_id"),
-                    "event": event,
-                }
-            ),
-            ex=PENDING_INPUT_TTL_S,
+            self._pending_key(), pending.model_dump_json(), ex=PENDING_INPUT_TTL_S
         )
 
     def _clear_pending_input(self):

@@ -30,7 +30,7 @@ from django.core.management import call_command
 
 from ddpui.schemas.chat_with_data_schemas import ResumeApprovalAction
 from ddpui.websockets.chat_with_data_consumer import ChatWithDataConsumer, _allowed_pii_columns
-from ddpui.websockets.schemas import WebsocketCloseCodes
+from ddpui.websockets.schemas import PendingInput, WebsocketCloseCodes
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -416,28 +416,40 @@ def test_connect_without_token_is_closed(seed_db):
     run(scenario())
 
 
-def _pending(columns):
-    return {"event": {"requests": [{"tool": "execute_sql", "columns": columns}]}}
+def _request(tool, columns):
+    columns = [{**column, "has_literal": False} for column in columns] if columns else columns
+    return {"tool": tool, "args": {}, "description": "", "sql": None, "columns": columns}
+
+
+def _pending(*requests):
+    event = {"type": "input_required", "kind": "approval", "requests": list(requests)}
+    return PendingInput(kind="approval", event=event)
 
 
 def test_only_columns_the_card_offered_are_accepted():
     pending = _pending(
-        [
-            {"schema": "prod", "table": "beneficiaries", "column": "phone"},
-            {"schema": "prod", "table": "beneficiaries", "column": "district"},
-        ]
+        _request(
+            "execute_sql",
+            [
+                {"schema": "prod", "table": "beneficiaries", "column": "phone"},
+                {"schema": "prod", "table": "beneficiaries", "column": "district"},
+            ],
+        )
     )
     allowed = _allowed_pii_columns(pending, ["prod.beneficiaries.phone", "prod.other.secret"])
     assert allowed == {"prod.beneficiaries.phone"}
 
 
 def test_a_card_with_no_columns_accepts_nothing():
-    assert _allowed_pii_columns(_pending(None), ["prod.beneficiaries.phone"]) == set()
+    pending = _pending(_request("execute_sql", None))
+    assert _allowed_pii_columns(pending, ["prod.beneficiaries.phone"]) == set()
 
 
 def test_a_non_list_payload_is_ignored():
     message = ResumeApprovalAction(action="resume_approval", pii_columns="prod.b.phone")
-    pending = _pending([{"schema": "prod", "table": "b", "column": "phone"}])
+    pending = _pending(
+        _request("execute_sql", [{"schema": "prod", "table": "b", "column": "phone"}])
+    )
     assert _allowed_pii_columns(pending, message.pii_columns) == set()
 
 
@@ -446,16 +458,29 @@ def test_mixed_card_offers_only_the_reviewable_requests_columns():
     could — _allowed_pii_columns itself only ever offers what was reviewable;
     the None request contributes nothing, whether or not it is refused
     upstream (that refusal is the consumer's job, see Fix 3)."""
-    pending = {
-        "event": {
-            "requests": [
-                {"tool": "execute_sql", "columns": None},
-                {
-                    "tool": "profile_column",
-                    "columns": [{"schema": "prod", "table": "beneficiaries", "column": "phone"}],
-                },
-            ]
-        }
-    }
+    pending = _pending(
+        _request("execute_sql", None),
+        _request(
+            "profile_column", [{"schema": "prod", "table": "beneficiaries", "column": "phone"}]
+        ),
+    )
     allowed = _allowed_pii_columns(pending, ["prod.beneficiaries.phone"])
     assert allowed == {"prod.beneficiaries.phone"}
+
+
+def test_pending_card_round_trips_through_redis_unchanged():
+    """The stored card is re-sent to the browser on reconnect, so the round trip
+    must keep `columns: None` (fail-closed), an absent `columns` (non-PII tool)
+    and any key InputRequiredEvent does not declare yet."""
+    event = {
+        "type": "input_required",
+        "kind": "approval",
+        "trace_id": "t1",
+        "not_yet_declared": 1,
+        "requests": [
+            {**_request("execute_sql", None), "columns_error": "unresolvable"},
+            {"tool": "create_chart", "args": {}, "description": "", "sql": None},
+        ],
+    }
+    stored = PendingInput(kind="approval", model="m", trace_id="t1", event=event)
+    assert PendingInput.model_validate_json(stored.model_dump_json()).event == event

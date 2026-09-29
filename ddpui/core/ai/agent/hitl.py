@@ -16,6 +16,13 @@ This module owns both directions of the translation:
 
 import sqlglot
 from langchain.agents.middleware import HumanInTheLoopMiddleware
+from langchain.agents.middleware.human_in_the_loop import (
+    ActionRequest,
+    Decision,
+    HITLRequest,
+    HITLResponse,
+    InterruptOnConfig,
+)
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables.config import var_child_runnable_config
@@ -25,6 +32,7 @@ from ddpui.core.ai.guards import pii_rewrite, sql_guard
 from ddpui.core.ai.tools import catalog
 from ddpui.core.ai.toolsets import PII_REVIEW_TOOLS, QUESTION_TOOL
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.core.ai.typed_dicts import CardRequest, InputRequiredEvent, PiiColumn
 
 logger = CustomLogger("ddpui.chat_with_data")
 
@@ -57,7 +65,7 @@ def build_hitl_middleware(approval_tools: tuple[str, ...]) -> HumanInTheLoopMidd
 
     Each agent passes its own `approval_tools` set (the SQL agent gates
     execute_sql; the platform guide agent gates its creation tools)."""
-    interrupt_on: dict = {
+    interrupt_on: dict[str, bool | InterruptOnConfig] = {
         name: {"allowed_decisions": ["approve", "reject"]} for name in approval_tools
     }
     interrupt_on[QUESTION_TOOL] = {"allowed_decisions": ["respond"]}
@@ -67,7 +75,7 @@ def build_hitl_middleware(approval_tools: tuple[str, ...]) -> HumanInTheLoopMidd
     )
 
 
-def _card_columns(sql: str, ctx: RunContext) -> tuple[list[dict] | None, str]:
+def _card_columns(sql: str, ctx: RunContext) -> tuple[list[PiiColumn] | None, str]:
     """The card's checkbox list, or (None, reason) when it cannot be built.
 
     Fail-closed on purpose: the tool builds its own schema map when it runs, so a
@@ -91,7 +99,7 @@ def _card_columns(sql: str, ctx: RunContext) -> tuple[list[dict] | None, str]:
     ], ""
 
 
-def _reviewable_sql(request: dict, ctx: RunContext) -> str:
+def _reviewable_sql(request: ActionRequest, ctx: RunContext) -> str:
     """The SQL whose columns the card reviews. execute_sql carries it as an
     argument; profile_column names a single column, so synthesize the
     equivalent SELECT rather than duplicating the tool's query-building."""
@@ -104,17 +112,17 @@ def _reviewable_sql(request: dict, ctx: RunContext) -> str:
     return f"SELECT {quoted} FROM {qualified}"
 
 
-def input_required_event(interrupt_value: dict, ctx: RunContext) -> dict:
+def input_required_event(interrupt_value: HITLRequest, ctx: RunContext) -> InputRequiredEvent:
     """Translate a HITLRequest interrupt payload into the WS event the UI renders.
 
     kind="question" when the pause is a lone ask_user call (the UI shows the
     question as a normal assistant message and the composer answers it);
     kind="approval" otherwise (the UI shows approve/cancel cards). Requests for a
     value-returning tool also carry the PII checkbox list."""
-    requests = []
+    requests: list[CardRequest] = []
     for request in interrupt_value.get("action_requests", []):
         sql = request.get("args", {}).get("sql")
-        entry = {
+        entry: CardRequest = {
             "tool": request["name"],
             "args": request.get("args", {}),
             "description": request.get("description", ""),
@@ -137,11 +145,13 @@ def input_required_event(interrupt_value: dict, ctx: RunContext) -> dict:
     return {"type": "input_required", "kind": "approval", "requests": requests}
 
 
-def build_resume_payload(requests: list[dict], approve: bool, answer: str | None = None) -> dict:
+def build_resume_payload(
+    requests: list[CardRequest], approve: bool, answer: str | None = None
+) -> HITLResponse:
     """The HITLResponse for Command(resume=...): one decision per pending request,
     in order. ask_user requests always get a respond decision (their only allowed
     one); everything else gets approve/reject."""
-    decisions = []
+    decisions: list[Decision] = []
     for request in requests:
         if request.get("tool") == QUESTION_TOOL:
             decisions.append({"type": "respond", "message": answer or "(the user did not answer)"})

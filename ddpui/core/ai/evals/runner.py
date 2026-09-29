@@ -28,6 +28,7 @@ from ddpui.core.ai.messages.conversation import turn_segment
 from ddpui.core.ai.prompts import EXPECTATIONS_CRITERIA, FAITHFULNESS_CRITERIA
 from ddpui.schemas.chat_with_data_schemas import EvalItem
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.core.ai.typed_dicts import ResultTable
 
 logger = CustomLogger("ddpui")
 
@@ -104,7 +105,9 @@ class RunSummary:
         return lines
 
 
-def judge_faithfulness(question: str, answer: str, result_table: dict | None) -> float | None:
+def judge_faithfulness(
+    question: str, answer: str, result_table: ResultTable | None
+) -> float | None:
     """autoevals ClosedQA judge (OpenAI family — deliberately not the agent's
     family, plan §9 blind-spot risk). Fail-open: any error returns None.
 

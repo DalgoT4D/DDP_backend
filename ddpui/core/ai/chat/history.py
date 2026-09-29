@@ -16,6 +16,7 @@ from ddpui.core.ai.messages.artifacts import (
 )
 from ddpui.core.ai.messages.content import extract_text
 from ddpui.schemas.chat_with_data_schemas import MessageOut, SqlAttachment
+from ddpui.core.ai.typed_dicts import CreatedArtifactChip
 
 
 def map_messages(messages: list[BaseMessage]) -> list[MessageOut]:
@@ -24,7 +25,7 @@ def map_messages(messages: list[BaseMessage]) -> list[MessageOut]:
     other tool chatter is hidden."""
     out: list[MessageOut] = []
     pending_sql: list[SqlAttachment] = []
-    pending_artifacts: list[dict] = []
+    pending_artifacts: list[CreatedArtifactChip] = []
 
     for message in messages:
         if isinstance(message, HumanMessage):
