@@ -145,18 +145,47 @@ def input_required_event(interrupt_value: HITLRequest, ctx: RunContext) -> Input
     return {"type": "input_required", "kind": "approval", "requests": requests}
 
 
+# Leads the rejection a pending step gets when the user types a new message
+# instead of approving it. History replay keys on it to show that message as the
+# user's own bubble (the checkpoint only holds it inside the ToolMessage).
+REDIRECT_PREFIX = "The user cancelled this step without running it and said instead: "
+
+
+# The ask_user tool result when a pause resumes without any reply from the user
+NO_ANSWER = "(the user did not answer)"
+
+
+def redirect_text(content: str) -> str | None:
+    """The user's message from a redirect rejection, or None for any other tool result."""
+    if content.startswith(REDIRECT_PREFIX):
+        return content[len(REDIRECT_PREFIX) :]
+    return None
+
+
 def build_resume_payload(
-    requests: list[CardRequest], approve: bool, answer: str | None = None
+    requests: list[CardRequest],
+    approve: bool,
+    answer: str | None = None,
+    redirect: str | None = None,
 ) -> HITLResponse:
     """The HITLResponse for Command(resume=...): one decision per pending request,
     in order. ask_user requests always get a respond decision (their only allowed
-    one); everything else gets approve/reject."""
+    one); everything else gets approve/reject.
+
+    `redirect` is a message the user typed instead of deciding: every gated call
+    is rejected, and the first rejection carries the message so the model follows
+    it (once — repeating it per call would replay as several user bubbles)."""
     decisions: list[Decision] = []
+    redirect_sent = False
     for request in requests:
         if request.get("tool") == QUESTION_TOOL:
-            decisions.append({"type": "respond", "message": answer or "(the user did not answer)"})
+            reply = answer or redirect or NO_ANSWER
+            decisions.append({"type": "respond", "message": reply})
         elif approve:
             decisions.append({"type": "approve"})
+        elif redirect and not redirect_sent:
+            decisions.append({"type": "reject", "message": f"{REDIRECT_PREFIX}{redirect}"})
+            redirect_sent = True
         else:
             decisions.append({"type": "reject"})
     return {"decisions": decisions}

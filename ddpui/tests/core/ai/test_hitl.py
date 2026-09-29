@@ -146,6 +146,22 @@ def test_build_resume_payload_matches_request_order_and_kinds():
     assert [d["type"] for d in rejected["decisions"]] == ["reject", "respond", "reject"]
 
 
+def test_redirect_rejects_every_call_and_tells_the_model_once():
+    from ddpui.core.ai.agent.hitl import REDIRECT_PREFIX, redirect_text
+
+    requests = [
+        {"tool": "create_chart", "args": {"title": "A"}},
+        {"tool": "create_chart", "args": {"title": "B"}},
+    ]
+    payload = build_resume_payload(requests, approve=False, redirect="use a pie chart")
+
+    assert [d["type"] for d in payload["decisions"]] == ["reject", "reject"]
+    assert payload["decisions"][0]["message"] == f"{REDIRECT_PREFIX}use a pie chart"
+    assert "message" not in payload["decisions"][1]
+    assert redirect_text(payload["decisions"][0]["message"]) == "use a pie chart"
+    assert redirect_text("Query returned 3 rows.") is None
+
+
 def test_ask_user_without_middleware_falls_back_to_its_body():
     """Evals and the REPL run with human_in_the_loop=False — ask_user must not
     hang them; its body tells the model to proceed on an assumption."""

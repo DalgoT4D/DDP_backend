@@ -154,14 +154,14 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
                 await self._send_event({"type": "error", "message": "Unsupported action"})
                 return
             if pending and pending.kind == "approval":
-                await self._send_event(
-                    {
-                        "type": "error",
-                        "message": "Please approve or cancel the pending action first.",
-                    }
+                # the user typed instead of deciding — cancel the pending step
+                # and hand the model their message, so they are never stuck
+                model_id = resolve_selected_model(pending.model)
+                resume_payload = build_resume_payload(
+                    pending.event["requests"], approve=False, redirect=question
                 )
-                return
-            if pending:
+                resume_trace_id = pending.trace_id
+            elif pending:
                 # the agent asked a question (ask_user) — this message answers it
                 # and resumes the paused turn on the model that started it
                 model_id = resolve_selected_model(pending.model)

@@ -337,6 +337,50 @@ def test_resume_approval_refuses_a_card_that_could_not_be_checked_for_pii(orguse
     run(scenario())
 
 
+def test_typing_while_an_approval_is_pending_cancels_it_and_carries_on(orguser, scripted_turn):
+    """A message sent instead of approve/cancel rejects the pending step with the
+    user's text as the reason, and the paused turn resumes — nobody is stuck."""
+    session = scripted_turn
+
+    async def scenario():
+        communicator = make_communicator(
+            session_id=session.id, token=token_for(orguser), orgslug=orguser.org.slug
+        )
+        connected, _ = await communicator.connect()
+        assert connected
+
+        await communicator.send_json_to({"action": "send_message", "message": "how many?"})
+        while True:
+            event = await communicator.receive_json_from(timeout=10)
+            if event["type"] == "input_required":
+                break
+
+        await communicator.send_json_to({"action": "send_message", "message": "no, skip that"})
+        events = []
+        while True:
+            event = await communicator.receive_json_from(timeout=10)
+            events.append(event)
+            if event["type"] in ("title_updated", "error"):
+                break
+
+        types = [e["type"] for e in events]
+        assert "error" not in types
+        assert "message_complete" in types
+        # the query was never run: its call closes as rejected, with no result
+        tool_end = events[types.index("tool_end")]
+        assert tool_end == {"type": "tool_end", "tool": "execute_sql", "status": "error"}
+        assert events[types.index("message_complete")]["result_table"] is None
+
+        from ddpui.websockets import chat_with_data_consumer as consumer_module
+
+        redis = consumer_module.RedisClient.get_instance()
+        assert redis.get(f"chat_with_data:pending_input:{session.id}") is None
+
+        await communicator.disconnect()
+
+    run(scenario())
+
+
 def test_unsupported_action_yields_error_event(orguser, scripted_turn):
     session = scripted_turn
 

@@ -152,3 +152,88 @@ def test_created_metrics_replay_with_their_type():
     assert [a.model_dump() for a in out[1].artifacts] == [
         {"type": "metric", "object_id": 5, "title": "Total surveys", "url_path": "/metrics"}
     ]
+
+
+def test_a_message_typed_instead_of_approving_replays_as_the_users_bubble():
+    from ddpui.core.ai.agent.hitl import REDIRECT_PREFIX
+
+    messages = [
+        HumanMessage("all districts in maharashtra"),
+        AIMessage("", tool_calls=[{"name": "execute_sql", "args": {}, "id": "c1"}]),
+        ToolMessage(
+            content=f"{REDIRECT_PREFIX}no, only Pune",
+            name="execute_sql",
+            tool_call_id="c1",
+            status="error",
+        ),
+        AIMessage("Here is Pune."),
+    ]
+
+    out = map_messages(messages)
+
+    assert [(m.role, m.content) for m in out] == [
+        ("user", "all districts in maharashtra"),
+        ("user", "no, only Pune"),
+        ("assistant", "Here is Pune."),
+    ]
+
+
+def _ask(call_id: str, question: str) -> AIMessage:
+    return AIMessage(
+        "", tool_calls=[{"name": "ask_user", "args": {"question": question}, "id": call_id}]
+    )
+
+
+def test_an_ask_user_exchange_replays_as_question_and_answer():
+    messages = [
+        HumanMessage("how many enrollments?"),
+        _ask("q1", "Which program do you mean?"),
+        ToolMessage(content="Girls' Education", name="ask_user", tool_call_id="q1"),
+        AIMessage("For Girls' Education: 312 enrollments."),
+    ]
+
+    assert [(m.role, m.content) for m in map_messages(messages)] == [
+        ("user", "how many enrollments?"),
+        ("assistant", "Which program do you mean?"),
+        ("user", "Girls' Education"),
+        ("assistant", "For Girls' Education: 312 enrollments."),
+    ]
+
+
+def test_an_unanswered_question_shows_no_placeholder_reply():
+    from ddpui.core.ai.agent.hitl import NO_ANSWER
+
+    messages = [
+        HumanMessage("q"),
+        _ask("q1", "Which program?"),
+        ToolMessage(content=NO_ANSWER, name="ask_user", tool_call_id="q1"),
+        AIMessage("Here are all programs."),
+    ]
+
+    assert [m.role for m in map_messages(messages)] == ["user", "assistant", "assistant"]
+
+
+def test_one_message_resolving_a_question_and_a_step_replays_once():
+    from ddpui.core.ai.agent.hitl import REDIRECT_PREFIX
+
+    messages = [
+        HumanMessage("q"),
+        AIMessage(
+            "",
+            tool_calls=[
+                {"name": "ask_user", "args": {"question": "Which month?"}, "id": "q1"},
+                {"name": "execute_sql", "args": {}, "id": "c1"},
+            ],
+        ),
+        ToolMessage(content="June only", name="ask_user", tool_call_id="q1"),
+        ToolMessage(
+            content=f"{REDIRECT_PREFIX}June only",
+            name="execute_sql",
+            tool_call_id="c1",
+            status="error",
+        ),
+        AIMessage("June: 40."),
+    ]
+
+    replies = [m.content for m in map_messages(messages) if m.role == "user"]
+    assert replies == ["q", "June only"]
