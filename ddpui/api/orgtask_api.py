@@ -138,10 +138,6 @@ def post_system_transformation_tasks(request):
         raise HttpError(400, "need to set up a warehouse first")
     credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
 
-    if org.dbt.dbt_venv is None:
-        org.dbt.dbt_venv = DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH
-        org.dbt.save()
-
     # create a secret block to save the github endpoint url along with token
     try:
         gitrepo_access_token = None
