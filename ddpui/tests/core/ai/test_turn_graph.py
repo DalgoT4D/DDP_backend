@@ -7,12 +7,13 @@ with no API key and no Django models — pure graph behavior.
 
 import asyncio
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from ddpui.core.ai.agent.chat_data_agent import build_agent
+from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
 from ddpui.core.ai.llm_calls.router import RouteResult
-from ddpui.core.ai.chat.turn_graph import build_turn_graph
+from ddpui.core.ai.chat.turn_graph import build_turn_graph, last_responder_line
 from ddpui.tests.core.ai.test_agent_loop import (
     ScriptedChatModel,
     make_context,
@@ -23,7 +24,12 @@ from ddpui.tests.core.ai.test_tools import FakeWarehouse
 
 class MustNotRun(ScriptedChatModel):
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
-        raise AssertionError("the SQL agent must not run on this path")
+        raise AssertionError("this agent must not run on this path")
+
+
+def idle_guide_agent():
+    """A guide agent for tests whose route never reaches platform_help."""
+    return build_guide_agent(model=MustNotRun(script=[]), human_in_the_loop=False)
 
 
 def run_graph(graph, question: str, thread_id: str = "t1", context=None):
@@ -48,7 +54,9 @@ def test_small_talk_ends_at_casual_reply_without_the_agent():
     async def fake_reply(question, model=None):
         return "You're welcome! Ask me anything about your data."
 
-    graph = build_turn_graph(agent, route_fn=fake_route, casual_reply_fn=fake_reply)
+    graph = build_turn_graph(
+        agent, idle_guide_agent(), route_fn=fake_route, casual_reply_fn=fake_reply
+    )
     result = run_graph(graph, "thanks!")
 
     final = result["messages"][-1]
@@ -66,7 +74,9 @@ def test_first_turn_clarification_ends_at_clarify_node():
     async def must_not_reply(question, model=None):
         raise AssertionError("casual_reply must not run when a clarification exists")
 
-    graph = build_turn_graph(agent, route_fn=fake_route, casual_reply_fn=must_not_reply)
+    graph = build_turn_graph(
+        agent, idle_guide_agent(), route_fn=fake_route, casual_reply_fn=must_not_reply
+    )
     result = run_graph(graph, "compare them")
 
     assert result["messages"][-1].content == "Compare what to what?"
@@ -91,7 +101,11 @@ def test_clarification_with_history_falls_through_to_the_agent():
 
     checkpointer = InMemorySaver()
     graph = build_turn_graph(
-        agent, route_fn=fake_route, casual_reply_fn=fake_reply, checkpointer=checkpointer
+        agent,
+        idle_guide_agent(),
+        route_fn=fake_route,
+        casual_reply_fn=fake_reply,
+        checkpointer=checkpointer,
     )
 
     async def _run():
@@ -147,7 +161,11 @@ def test_thread_continuity_with_checkpointer_on_parent_only():
         return "hi"
 
     graph = build_turn_graph(
-        agent, route_fn=fake_route, casual_reply_fn=fake_reply, checkpointer=InMemorySaver()
+        agent,
+        idle_guide_agent(),
+        route_fn=fake_route,
+        casual_reply_fn=fake_reply,
+        checkpointer=InMemorySaver(),
     )
 
     run_graph(graph, "how many surveys?", thread_id="t-cont")
@@ -187,6 +205,7 @@ def test_validate_node_writes_validation_into_state():
 
     graph = build_turn_graph(
         agent,
+        idle_guide_agent(),
         route_fn=_data_route,
         casual_reply_fn=_canned_reply,
         validate_fn=fake_validate,
@@ -206,7 +225,9 @@ def test_graph_shape_matches_the_approach_2_diagram():
     is route → retrieve_context → sql_agent → validate. M5 fills the retrieve
     node with BM25 table cards; until then it is a no-op placeholder."""
     agent = build_agent(model=ScriptedChatModel(script=[]))
-    graph = build_turn_graph(agent, route_fn=_data_route, casual_reply_fn=_canned_reply)
+    graph = build_turn_graph(
+        agent, idle_guide_agent(), route_fn=_data_route, casual_reply_fn=_canned_reply
+    )
     drawable = graph.get_graph()
 
     assert {
@@ -224,6 +245,9 @@ def test_graph_shape_matches_the_approach_2_diagram():
     assert ("retrieve_context_node", "sql_agent") in edges
     assert ("sql_agent", "validate_node") in edges
     assert ("validate_node", "__end__") in edges
+    assert ("route_node", "guide_agent") in edges  # conditional: platform_help
+    assert ("sql_agent", "guide_agent") in edges  # conditional: mid-turn handoff
+    assert ("guide_agent", "__end__") in edges
     assert ("casual_reply_node", "__end__") in edges
     assert ("clarify_node", "__end__") in edges
 
@@ -231,8 +255,6 @@ def test_graph_shape_matches_the_approach_2_diagram():
 def test_platform_help_routes_to_guide_agent_and_skips_validation():
     """platform_help runs the guide agent and ends the turn — the SQL agent
     and the text-to-SQL validator must never fire."""
-    from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
-
     saver = InMemorySaver()
     sql_agent = build_agent(checkpointer=saver, model=MustNotRun(script=[]))
     guide_agent = build_guide_agent(
@@ -264,30 +286,10 @@ def test_platform_help_routes_to_guide_agent_and_skips_validation():
     assert validations == []  # guide path ends at END, not validate_node
 
 
-def test_platform_help_without_guide_agent_falls_through_to_sql_agent():
-    """Older callers (and focused tests) that pass no guide agent keep the v1
-    behavior: platform_help degrades to the data path instead of crashing."""
-    agent = build_agent(
-        checkpointer=InMemorySaver(),
-        model=ScriptedChatModel(script=[AIMessage(content="I can look at your data.")]),
-        human_in_the_loop=False,
-    )
-
-    async def help_route(question, model=None, history=None):
-        return RouteResult(intent="platform_help")
-
-    graph = build_turn_graph(agent, route_fn=help_route, casual_reply_fn=_canned_reply)
-    result = run_graph(graph, "how do I create a KPI?")
-
-    assert result["messages"][-1].content == "I can look at your data."
-
-
 def test_sql_agent_hands_off_creation_to_the_guide_agent_mid_turn():
     """The 'go ahead' scenario: a creation confirmation lands on the SQL agent
     (router stickiness), it calls handoff_to_platform_guide, and the SAME turn
     continues in the guide agent — the user never re-asks."""
-    from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
-
     saver = InMemorySaver()
     # ONE scripted reply: handoff_to_platform_guide is return_direct, so the
     # SQL agent's loop must exit at the tool result WITHOUT calling the model
@@ -337,8 +339,6 @@ def test_sql_agent_hands_off_creation_to_the_guide_agent_mid_turn():
     assert validations == []  # handed-off turns skip the text-to-SQL validator
     # the message BEFORE the guide's answer is the handoff ToolMessage — the
     # SQL agent produced no assistant text after the tool (return_direct)
-    from langchain_core.messages import ToolMessage
-
     assert isinstance(result["messages"][-2], ToolMessage)
     assert result["messages"][-2].name == "handoff_to_platform_guide"
 
@@ -347,14 +347,10 @@ def test_sql_agent_hands_off_creation_to_the_guide_agent_mid_turn():
 
 
 def test_last_responder_is_none_on_the_first_turn():
-    from ddpui.core.ai.chat.turn_graph import last_responder_line
-
     assert last_responder_line({"messages": [HumanMessage("hi")], "route": {}}) is None
 
 
 def test_last_responder_after_a_data_turn_names_the_data_assistant():
-    from ddpui.core.ai.chat.turn_graph import last_responder_line
-
     state = {
         "messages": [
             HumanMessage("how many students?"),
@@ -367,8 +363,6 @@ def test_last_responder_after_a_data_turn_names_the_data_assistant():
 
 
 def test_last_responder_after_a_guide_turn_names_the_platform_guide():
-    from ddpui.core.ai.chat.turn_graph import last_responder_line
-
     state = {
         "messages": [
             HumanMessage("make a KPI for enrollment"),
@@ -383,10 +377,6 @@ def test_last_responder_after_a_guide_turn_names_the_platform_guide():
 def test_last_responder_after_a_midturn_handoff_names_the_guide_despite_data_route():
     """A data_question turn that handed off ended with the GUIDE answering —
     the handoff marker must win over the recorded intent."""
-    from langchain_core.messages import ToolMessage
-
-    from ddpui.core.ai.chat.turn_graph import last_responder_line
-
     state = {
         "messages": [
             HumanMessage("go ahead"),
@@ -422,7 +412,11 @@ def test_route_fn_receives_the_responder_annotation_on_the_second_turn():
         return "hello"
 
     graph = build_turn_graph(
-        agent, route_fn=fake_route, casual_reply_fn=fake_reply, checkpointer=saver
+        agent,
+        idle_guide_agent(),
+        route_fn=fake_route,
+        casual_reply_fn=fake_reply,
+        checkpointer=saver,
     )
     run_graph(graph, "how many students?", thread_id="resp1")
     run_graph(graph, "and in Moga?", thread_id="resp1")

@@ -26,20 +26,27 @@ pass its own module globals, keeping them patchable per-turn and avoiding a
 circular import with turn_runner.py.
 """
 
-from typing import Annotated, Any, Optional, TypedDict
+from typing import Annotated, Any, Literal, Optional, Protocol, TypedDict
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
+from langgraph.types import Checkpointer
 
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.messages.artifacts import extract_turn_results
 from ddpui.core.ai.messages.conversation import history_lines, turn_segment
 from ddpui.core.ai.prompts import DATA_RESPONDER_LINE, GUIDE_RESPONDER_LINE
 from ddpui.core.ai.toolsets import HANDOFF_TOOL
-from ddpui.core.ai.typed_dicts import RouteState, TurnValidation
+from ddpui.core.ai.typed_dicts import (
+    ResultTable,
+    RouteState,
+    SqlQueryEntry,
+    TurnValidation,
+)
+from ddpui.schemas.chat_with_data_schemas import RouteResult
 
 
 def turn_handed_off(messages: list[AnyMessage]) -> bool:
@@ -80,21 +87,60 @@ class TurnState(TypedDict):
     validation: Optional[TurnValidation]
 
 
+class RouteFn(Protocol):
+    """Shape of llm_calls/router.route_question (and its test fakes)."""
+
+    async def __call__(self, question: str, *, history: list[str] | None = None) -> RouteResult:
+        ...
+
+
+class CasualReplyFn(Protocol):
+    """Shape of llm_calls/router.casual_reply (and its test fakes)."""
+
+    async def __call__(self, question: str) -> str:
+        ...
+
+
+class ValidateFn(Protocol):
+    """Shape of llm_calls/turn_audit.audit_turn (and its test fakes)."""
+
+    async def __call__(
+        self,
+        *,
+        question: str,
+        sql_queries: list[SqlQueryEntry],
+        result_table: ResultTable | None,
+        answer: str,
+    ) -> TurnValidation | None:
+        ...
+
+
+# A compiled create_agent graph (state/input/output types vary per agent;
+# the run context is always ours)
+AgentGraph = CompiledStateGraph[Any, RunContext, Any, Any]
+
+RouteDestination = Literal[
+    "casual_reply_node", "clarify_node", "guide_agent", "retrieve_context_node"
+]
+
+
 def build_turn_graph(
-    agent: Any,
-    guide_agent: Any = None,
+    agent: AgentGraph,
+    guide_agent: AgentGraph,
     *,
-    route_fn,
-    casual_reply_fn,
-    validate_fn=None,
-    checkpointer: BaseCheckpointSaver | None = None,
-):
+    route_fn: RouteFn,
+    casual_reply_fn: CasualReplyFn,
+    validate_fn: ValidateFn | None = None,
+    checkpointer: Checkpointer = None,
+) -> "CompiledStateGraph[TurnState, RunContext, TurnState, TurnState]":
     """Assemble and compile the TurnGraph around the compiled agents.
 
-    `agent` is the SQL agent's create_agent graph, mounted as a subgraph node —
-    only the parent is compiled with a checkpointer (subgraphs inherit it).
-    `guide_agent` is the platform guide agent; when None (older callers,
-    focused tests), platform_help routes fall through to the SQL agent."""
+    `agent` (SQL) and `guide_agent` are create_agent graphs mounted as subgraph
+    nodes — only the parent is compiled with a checkpointer (subgraphs inherit
+    it). `validate_fn=None` skips the audit (evals score answers themselves).
+
+    Actual state is TurnState class above, the nodes only update a part of the state. hence return dict and not state.
+    """
 
     async def route_node(state: TurnState, runtime: Runtime[RunContext]) -> dict:
         question = state["question"]
@@ -118,7 +164,7 @@ def build_turn_graph(
     async def clarify_node(state: TurnState) -> dict:
         return {"messages": [AIMessage(content=state["route"]["clarification"])]}
 
-    async def retrieve_context_node(_state: TurnState) -> dict:
+    async def retrieve_context_node(state: TurnState) -> dict:  # pylint: disable=unused-argument
         # M5 fills this: BM25 over table cards → system-prompt context block.
         # A named no-op until then, so the pipeline shape is already the
         # approach-2 diagram and cards plug in without rewiring.
@@ -136,7 +182,7 @@ def build_turn_graph(
         )
         return {"validation": validation}
 
-    def route_decision(state: TurnState) -> str:
+    def route_decision(state: TurnState) -> RouteDestination:
         route = state["route"]
         if route["intent"] == "small_talk":
             return "casual_reply_node"
@@ -144,9 +190,15 @@ def build_turn_graph(
         # agent (which holds the full conversation) handles ambiguity itself
         if route["intent"] == "needs_clarification" and not state["has_history"]:
             return "clarify_node" if route.get("clarification") else "casual_reply_node"
-        if route["intent"] == "platform_help" and guide_agent is not None:
+        if route["intent"] == "platform_help":
             return "guide_agent"
         return "retrieve_context_node"
+
+    # mid-turn handoff: a creation request that landed on the SQL agent
+    # anyway (e.g. a "go ahead" confirming a creation offer) continues in
+    # the guide agent instead of dead-ending in an "I can't do that" reply
+    def after_sql_agent(state: TurnState) -> Literal["guide_agent", "validate_node"]:
+        return "guide_agent" if turn_handed_off(state["messages"]) else "validate_node"
 
     graph = StateGraph(TurnState, context_schema=RunContext)
     graph.add_node("route_node", route_node)
@@ -154,30 +206,20 @@ def build_turn_graph(
     graph.add_node("clarify_node", clarify_node)
     graph.add_node("retrieve_context_node", retrieve_context_node)
     graph.add_node("sql_agent", agent)
+    graph.add_node("guide_agent", guide_agent)
     graph.add_node("validate_node", validate_node)
 
-    destinations = ["casual_reply_node", "clarify_node", "retrieve_context_node"]
-    if guide_agent is not None:
-        graph.add_node("guide_agent", guide_agent)
-        graph.add_edge("guide_agent", END)
-        destinations.append("guide_agent")
-
     graph.add_edge(START, "route_node")
-    graph.add_conditional_edges("route_node", route_decision, destinations)
+    graph.add_conditional_edges(
+        "route_node",
+        route_decision,
+        ["casual_reply_node", "clarify_node", "guide_agent", "retrieve_context_node"],
+    )
     graph.add_edge("retrieve_context_node", "sql_agent")
+    graph.add_conditional_edges("sql_agent", after_sql_agent, ["guide_agent", "validate_node"])
     graph.add_edge("casual_reply_node", END)
     graph.add_edge("clarify_node", END)
-
-    if guide_agent is not None:
-        # mid-turn handoff: a creation request that landed on the SQL agent
-        # anyway (e.g. a "go ahead" confirming a creation offer) continues in
-        # the guide agent instead of dead-ending in an "I can't do that" reply
-        def after_sql_agent(state: TurnState) -> str:
-            return "guide_agent" if turn_handed_off(state["messages"]) else "validate_node"
-
-        graph.add_conditional_edges("sql_agent", after_sql_agent, ["guide_agent", "validate_node"])
-    else:
-        graph.add_edge("sql_agent", "validate_node")
+    graph.add_edge("guide_agent", END)
     graph.add_edge("validate_node", END)
 
     return graph.compile(checkpointer=checkpointer)

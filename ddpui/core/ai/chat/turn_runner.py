@@ -35,7 +35,7 @@ from ddpui.core.ai.agent.hitl import input_required_event
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.llm_calls.router import casual_reply, route_question
 from ddpui.core.ai.llm_calls.turn_audit import audit_turn
-from ddpui.core.ai.chat.turn_graph import build_turn_graph
+from ddpui.core.ai.chat.turn_graph import AgentGraph, build_turn_graph
 from ddpui.core.ai.constants import DEFAULT_MODEL, MODEL_ENV_VAR, RECURSION_LIMIT
 from ddpui.core.ai.messages.artifacts import (
     creation_chip,
@@ -77,7 +77,8 @@ _SHORT_CIRCUIT_NODES = ("casual_reply_node", "clarify_node")
 
 
 async def run_turn(
-    agent,
+    agent: AgentGraph,
+    guide_agent: AgentGraph,
     session: ChatWithDataSession,
     orguser: OrgUser,
     question: str,
@@ -85,7 +86,6 @@ async def run_turn(
     model_name: str | None = None,
     resume_payload: HITLResponse | None = None,
     resume_trace_id: str | None = None,
-    guide_agent=None,
 ) -> AsyncIterator[TurnEvent]:
     """Stream one turn of the TurnGraph. Always ends with message_complete,
     input_required (the turn paused for the user), or error, and always writes

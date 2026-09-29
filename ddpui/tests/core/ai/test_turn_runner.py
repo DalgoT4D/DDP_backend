@@ -20,6 +20,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.ai.agent.chat_data_agent import build_agent
+from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
 from ddpui.core.ai.chat.turn_runner import run_turn
 from ddpui.models.chat_with_data import ChatWithDataSession, ChatWithDataTurnAudit
 from ddpui.models.org import Org
@@ -32,6 +33,7 @@ from ddpui.tests.core.ai.test_agent_loop import (
     sql_call,
 )
 from ddpui.tests.core.ai.test_tools import FakeWarehouse
+from ddpui.tests.core.ai.test_turn_graph import MustNotRun
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -72,19 +74,23 @@ def collect_events(
     agent, session, orguser, question, context, resume_payload=None, guide_agent=None
 ):
     """Drive the async runner from sync tests (pytest-asyncio is inert on this
-    pytest version — it needs pytest>=8)."""
+    pytest version — it needs pytest>=8). Without a `guide_agent`, one that
+    must never run stands in — the test's route keeps off platform_help."""
+    guide_agent = guide_agent or build_guide_agent(
+        checkpointer=agent.checkpointer, model=MustNotRun(script=[]), human_in_the_loop=False
+    )
 
     async def _collect():
         return [
             event
             async for event in run_turn(
                 agent=agent,
+                guide_agent=guide_agent,
                 session=session,
                 orguser=orguser,
                 question=question,
                 context=context,
                 resume_payload=resume_payload,
-                guide_agent=guide_agent,
             )
         ]
 
@@ -312,7 +318,6 @@ def test_run_turn_attaches_created_charts_via_guide_agent(orguser, session, monk
     """Creation lives on the guide agent now: a platform_help route runs the
     guide subgraph, and its create_chart call surfaces the chart chip on
     message_complete — same wire shape as before the split."""
-    from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
     from ddpui.core.ai.chat import turn_runner as runner_module
     from ddpui.core.ai.llm_calls.router import RouteResult
     from ddpui.core.ai.tools import chart_tools

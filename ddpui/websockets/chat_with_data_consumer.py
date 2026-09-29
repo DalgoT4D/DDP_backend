@@ -254,6 +254,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
         final_answer = ""
         async for event in run_turn(
             agent=agent,
+            guide_agent=guide_agent,
             session=self.session,
             orguser=self.orguser,
             question=question,
@@ -261,7 +262,6 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             model_name=model_id,
             resume_payload=resume_payload,
             resume_trace_id=resume_trace_id,
-            guide_agent=guide_agent,
         ):
             if event["type"] == "message_complete":
                 final_answer = event.get("message", "")
