@@ -6,28 +6,35 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('ddpui', '0183_copilot_permissions'),
+        ("ddpui", "0183_copilot_permissions"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='chatwithdataorgconfig',
-            name='memory_text',
-            field=models.TextField(blank=True, default='', validators=[django.core.validators.MaxLengthValidator(5000)]),
+            model_name="chatwithdataorgconfig",
+            name="memory_text",
+            field=models.TextField(
+                blank=True, default="", validators=[django.core.validators.MaxLengthValidator(5000)]
+            ),
         ),
         migrations.AddField(
-            model_name='chatwithdataorgconfig',
-            name='memory_updated_at',
+            model_name="chatwithdataorgconfig",
+            name="memory_updated_at",
             field=models.DateTimeField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='chatwithdataorgconfig',
-            name='memory_updated_by',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to='ddpui.orguser'),
+            model_name="chatwithdataorgconfig",
+            name="memory_updated_by",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="+",
+                to="ddpui.orguser",
+            ),
         ),
         migrations.DeleteModel(
-            name='ChatWithDataOrgMemory',
+            name="ChatWithDataOrgMemory",
         ),
     ]

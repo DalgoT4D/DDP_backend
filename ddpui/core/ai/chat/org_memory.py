@@ -28,11 +28,11 @@ def get_settings(orguser: OrgUser) -> CopilotSettingsOut:
     return CopilotSettingsOut(
         enabled=bool(is_feature_flag_enabled(CHAT_WITH_DATA_FLAG, org)),
         text=config.memory_text if config else "",
-        updated_at=config.memory_updated_at.isoformat() if config and config.memory_updated_at else None,
+        updated_at=config.memory_updated_at.isoformat()
+        if config and config.memory_updated_at
+        else None,
         updated_by_email=(
-            config.memory_updated_by.user.email
-            if config and config.memory_updated_by
-            else None
+            config.memory_updated_by.user.email if config and config.memory_updated_by else None
         ),
         max_chars=MAX_ORG_MEMORY_CHARS,
     )
