@@ -345,7 +345,6 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
         if not orgdbt:
             dbt = OrgDbt(
                 project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir),
-                dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
                 target_type=warehouse.wtype,
                 default_schema=default_schema,
                 transform_type=TransformType.GIT,  # Set to GIT instead of UI
