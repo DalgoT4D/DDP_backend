@@ -8,11 +8,11 @@ from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 
 class WarehouseFactory:
     @classmethod
-    def connect(cls, creds: dict, wtype: str) -> Warehouse:
+    def connect(cls, creds: dict, wtype: str, location: str = None) -> Warehouse:
         if wtype == WarehouseType.POSTGRES:
             return PostgresClient(creds)
         elif wtype == WarehouseType.BIGQUERY:
-            return BigqueryClient(creds)
+            return BigqueryClient(creds, location=location)
         else:
             raise ValueError("Column type not supported for insights generation")
 
@@ -25,4 +25,4 @@ class WarehouseFactory:
         if not creds:
             raise ValueError("Warehouse credentials not found")
 
-        return cls.connect(creds, org_warehouse.wtype)
+        return cls.connect(creds, org_warehouse.wtype, location=org_warehouse.bq_location)
