@@ -9,8 +9,8 @@ warehouse are `n_processes * (POOL_SIZE + POOL_MAX_OVERFLOW)`.
 Postgres only: BigQuery connections are REST clients, so there is no connection
 limit to protect and nothing to retire.
 
-TODO: add an LRU cap if cached engines ever approach the process fd limit; the idle
-TTL is currently the only bound on how many warehouses one process caches.
+TODO: add an LRU cap if cached engines ever approach the process fd limit. Idle
+engines are disposed (sockets closed) but their entries are never removed.
 """
 
 import hashlib
@@ -39,7 +39,7 @@ SWEEP_INTERVAL_SECONDS = 300
 
 
 @dataclass
-class EngineEntry:
+class CachedEngine:
     """A cached engine plus what is needed to retire and observe it."""
 
     engine: Engine
@@ -56,9 +56,24 @@ class EngineEntry:
             # Never let pool introspection stop a sweep; assume idle.
             return False
 
+    def has_open_connections(self) -> bool:
+        """
+        Whether the pool holds idle sockets. A disposed pool has none, so the sweeper
+        skips it instead of disposing it again every sweep.
+        """
+        try:
+            return self.engine.pool.checkedin() > 0
+        except Exception:  # skipcq: PYL-W0703
+            # Can't tell; dispose to be safe -- it is harmless on an empty pool.
+            return True
 
-_engines: dict[str, EngineEntry] = {}
-_lock = threading.RLock()
+
+# Entries are never removed, only disposed, so this dict only ever grows.
+_engines: dict[str, CachedEngine] = {}
+# One lock per cache_key, so one org never builds two engines and orgs never wait on each other.
+_engine_locks: dict[str, threading.Lock] = {}
+# Guards creating a per-key lock and starting the sweeper; never held while building an engine.
+_all_lock = threading.Lock()
 # Set once this process's sweeper thread is running.
 _sweeper_started = threading.Event()
 
@@ -89,43 +104,47 @@ def fingerprint(wtype: str, creds: dict) -> str:
     return f"{wtype}:{digest}"
 
 
-def _dispose(entries: list[EngineEntry]) -> None:
-    """
-    Close the pools of engines already removed from the registry. Called with the lock
-    released: dispose() closes sockets, and holding the lock would stall every thread
-    waiting for an engine. Checked-out connections close when returned.
-    """
-    for entry in entries:
-        try:
-            entry.engine.dispose()
-        except Exception:  # skipcq: PYL-W0703
-            # Discarding a pool that fails to close must not fail a request.
-            logger.warning("failed to dispose warehouse engine")
-
-
 def _sweep() -> int:
-    """Retire every engine past the idle TTL. Returns how many were retired."""
+    """
+    Dispose every engine past the idle TTL. Returns how many were disposed. The engine
+    stays in the registry: dispose() swaps in a fresh empty pool, so the same engine
+    opens new connections on its next checkout.
+    """
     now = time.time()
-    detached = []
+    disposed_count = 0
 
-    with _lock:
-        for key in list(_engines):
-            entry = _engines[key]
-            if now - entry.last_used_at <= ENGINE_IDLE_TTL_SECONDS:
+    # list(): new orgs may still add keys while we iterate
+    for cache_key, cached in list(_engines.items()):
+        with _all_lock:
+            if cache_key not in _engine_locks:
+                _engine_locks[cache_key] = threading.Lock()
+
+        engine_lock = _engine_locks[cache_key]
+
+        # same lock as get_or_create_engine: a request either stamps last_used_at
+        # before this check, or gets the engine after dispose() swapped in a fresh pool
+        with engine_lock:
+            if now - cached.last_used_at <= ENGINE_IDLE_TTL_SECONDS:
                 continue
-            if entry.in_use():
+            if cached.in_use():
                 # Long query on a quiet warehouse: count the checkout as activity.
-                entry.last_used_at = now
+                cached.last_used_at = now
                 continue
-            detached.append(_engines.pop(key))
+            if not cached.has_open_connections():
+                continue
+            try:
+                cached.engine.dispose()
+            except Exception:  # skipcq: PYL-W0703
+                # Discarding a pool that fails to close must not fail the sweep.
+                logger.warning("failed to dispose warehouse engine")
+            disposed_count += 1
 
-    _dispose(detached)
-    if detached:
+    if disposed_count:
         logger.info(
             "retired idle warehouse engines",
-            extra={"count": len(detached), **registry_stats()},
+            extra={"count": disposed_count, **registry_stats()},
         )
-    return len(detached)
+    return disposed_count
 
 
 def _sweep_loop() -> None:
@@ -148,7 +167,7 @@ def _ensure_sweeper() -> None:
     """
     if _sweeper_started.is_set():
         return
-    with _lock:  # thread lock
+    with _all_lock:  # thread lock
         if _sweeper_started.is_set():
             return
         threading.Thread(target=_sweep_loop, name="warehouse-engine-sweeper", daemon=True).start()
@@ -165,20 +184,27 @@ def _ensure_sweeper() -> None:
 def get_or_create_engine(cache_key: str, create) -> Engine:
     """
     Return the cached engine for `cache_key`, building it via `create` on a miss.
-    `create` runs under the lock: create_engine() opens no connection, so it is short.
+    Only this key's lock is held while building, so other orgs never wait.
     """
     _ensure_sweeper()
 
     now = time.time()
 
-    with _lock:
-        entry = _engines.get(cache_key)
-        if entry is not None:
-            entry.last_used_at = now
-            return entry.engine
+    # get or create this key's lock; _all_lock makes the check-and-set atomic
+    with _all_lock:
+        if cache_key not in _engine_locks:
+            _engine_locks[cache_key] = threading.Lock()
+
+    engine_lock = _engine_locks[cache_key]
+
+    with engine_lock:
+        cached = _engines.get(cache_key)
+        if cached is not None:
+            cached.last_used_at = now
+            return cached.engine
 
         engine = create()
-        _engines[cache_key] = EngineEntry(engine=engine, last_used_at=now)
+        _engines[cache_key] = CachedEngine(engine=engine, last_used_at=now)
         logger.info("created warehouse engine", extra={"cached_engines": len(_engines)})
 
     return engine
@@ -190,19 +216,18 @@ def registry_stats() -> dict:
     checkedin come straight off each pool.
     """
     now = time.time()
-    with _lock:
-        entries = [
-            {
-                "idle_seconds": round(now - entry.last_used_at, 1),
-                "checkedout": entry.engine.pool.checkedout(),
-                "checkedin": entry.engine.pool.checkedin(),
-            }
-            for entry in _engines.values()
-        ]
+    engine_stats = [
+        {
+            "idle_seconds": round(now - cached.last_used_at, 1),
+            "checkedout": cached.engine.pool.checkedout(),
+            "checkedin": cached.engine.pool.checkedin(),
+        }
+        for cached in list(_engines.values())
+    ]
 
     return {
-        "cached_engines": len(entries),
+        "cached_engines": len(engine_stats),
         "per_warehouse_ceiling": POOL_SIZE + POOL_MAX_OVERFLOW,
         "idle_ttl_seconds": ENGINE_IDLE_TTL_SECONDS,
-        "engines": entries,
+        "engines": engine_stats,
     }

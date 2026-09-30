@@ -13,16 +13,17 @@ from ddpui.utils.warehouse.client import postgres_engine_registry
 
 
 class FakePool:
-    """Stands in for a SQLAlchemy pool; only checkedout() is read by the registry."""
+    """Stands in for a SQLAlchemy pool; checkedout() / checkedin() are read by the registry."""
 
-    def __init__(self, checkedout=0):
+    def __init__(self, checkedout=0, checkedin=1):
         self._checkedout = checkedout
+        self._checkedin = checkedin
 
     def checkedout(self):
         return self._checkedout
 
     def checkedin(self):
-        return 0
+        return self._checkedin
 
 
 class FakeEngine:
@@ -34,7 +35,9 @@ class FakeEngine:
         self.disposed = False
 
     def dispose(self):
+        # like SQLAlchemy: the engine gets a fresh, empty pool
         self.disposed = True
+        self.pool = FakePool(checkedin=0)
 
 
 @pytest.fixture(autouse=True)
@@ -164,7 +167,7 @@ def test_idle_engine_is_retired_and_its_connections_closed():
 
     assert retired == 1
     assert engine.disposed is True
-    assert postgres_engine_registry._engines == {}
+    assert key in postgres_engine_registry._engines
 
 
 def test_engine_within_the_ttl_is_left_alone():
@@ -177,8 +180,8 @@ def test_engine_within_the_ttl_is_left_alone():
     assert engine.disposed is False
 
 
-def test_next_request_after_retirement_rebuilds_the_pool():
-    """'Next time user comes again, pool comes back.'"""
+def test_next_request_after_retirement_reuses_the_disposed_engine():
+    """The entry is kept: dispose() leaves a fresh empty pool, so the engine is reused."""
     key = postgres_engine_registry.fingerprint("postgres", PG_CREDS)
     first = postgres_engine_registry.get_or_create_engine(key, make("first"))
 
@@ -188,8 +191,17 @@ def test_next_request_after_retirement_rebuilds_the_pool():
     second = postgres_engine_registry.get_or_create_engine(key, make("second"))
 
     assert first.disposed is True
-    assert second is not first
-    assert second.label == "second"
+    assert second is first
+
+
+def test_disposed_engine_is_not_disposed_again():
+    key = postgres_engine_registry.fingerprint("postgres", PG_CREDS)
+    postgres_engine_registry.get_or_create_engine(key, make())
+
+    age_entry(key, postgres_engine_registry.ENGINE_IDLE_TTL_SECONDS + 1)
+
+    assert postgres_engine_registry._sweep() == 1
+    assert postgres_engine_registry._sweep() == 0
 
 
 def test_idle_engine_running_a_query_is_not_retired():
@@ -269,4 +281,4 @@ def test_dispose_failure_does_not_break_the_sweep():
     age_entry(key, postgres_engine_registry.ENGINE_IDLE_TTL_SECONDS + 1)
 
     assert postgres_engine_registry._sweep() == 1
-    assert postgres_engine_registry._engines == {}
+    assert key in postgres_engine_registry._engines

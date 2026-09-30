@@ -158,12 +158,10 @@ def test_repeated_clients_for_one_warehouse_share_a_single_engine():
     postgres_engine_registry._engines.clear()
 
 
-def test_connect_args_are_built_only_on_a_cache_miss():
+def test_connect_args_are_built_per_client_outside_the_registry_lock():
     """
-    build_connection_args runs inside the callback the registry invokes on a miss,
-    never on the per-request path. It writes a CA certificate to a temp file for
-    warehouses configured with one -- once per engine here, once per request if this
-    ever slips back out of the callback.
+    build_connection_args runs before the registry call, so every client builds
+    them -- cache hit or miss -- and the per-key lock only covers create_engine().
     """
     postgres_engine_registry._engines.clear()
 
@@ -176,6 +174,6 @@ def test_connect_args_are_built_only_on_a_cache_miss():
                 PostgresClient(dict(BASE_PG_CREDS))
                 PostgresClient(dict(BASE_PG_CREDS))
 
-    assert mock_build.call_count == 1
+    assert mock_build.call_count == 3
 
     postgres_engine_registry._engines.clear()
