@@ -602,7 +602,7 @@ def parse_dbt_manifest_to_canvas(
     node_map = {}  # unique_id -> CanvasNode
 
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype, location=org_warehouse.bq_location)
 
     try:
         with transaction.atomic():

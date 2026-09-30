@@ -122,7 +122,7 @@ def poll_for_column_insights(
         # if the lock is not acquire, then acquire a lock and run the queries for this column
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
-        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype, location=org_warehouse.bq_location)
 
         execute_queries = GenerateResult.queries_to_execute(
             org_warehouse.org, wclient, requestor_col

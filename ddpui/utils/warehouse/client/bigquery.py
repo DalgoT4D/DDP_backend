@@ -15,16 +15,15 @@ _type_map["JSON"] = types.JSON
 
 
 class BigqueryClient(Warehouse):
-    def __init__(self, creds: dict):
-        """
-        Establish connection to the postgres database using sqlalchemy engine
-        Creds come from the secrets manager
-        """
+    def __init__(self, creds: dict, location: str = None):
+        """Creds come from the secrets manager; location is the BQ dataset region."""
         connection_string = "bigquery://{project_id}".format(**creds)
 
-        self.engine = create_engine(
-            connection_string, credentials_info=creds, pool_size=5, pool_timeout=30
-        )
+        engine_kwargs = dict(credentials_info=creds, pool_size=5, pool_timeout=30)
+        if location:
+            engine_kwargs["location"] = location
+
+        self.engine = create_engine(connection_string, **engine_kwargs)
         self.inspect_obj: Inspector = inspect(
             self.engine
         )  # this will be used to fetch metadata of the database

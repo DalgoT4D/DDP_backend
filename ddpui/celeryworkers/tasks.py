@@ -937,7 +937,7 @@ def summarize_warehouse_results(
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
     try:
-        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype, location=org_warehouse.bq_location)
     except Exception as err:
         logger.error("Failed to connect to the warehouse - %s", err)
         taskprogress.add(

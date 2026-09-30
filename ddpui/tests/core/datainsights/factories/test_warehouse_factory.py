@@ -45,6 +45,45 @@ def test_warehouse_factory():
         WarehouseFactory.connect({}, "some-no-supported-warehouse-type")
 
 
+def test_bigquery_connect_with_location():
+    """Tests that BigqueryClient passes location to create_engine when provided"""
+    creds = {"project_id": "my-project"}
+    with patch("ddpui.utils.warehouse.client.bigquery.inspect"):
+        with patch("ddpui.utils.warehouse.client.bigquery.create_engine") as mock_create_engine:
+            BigqueryClient(creds, location="asia-south1")
+            mock_create_engine.assert_called_with(
+                "bigquery://my-project",
+                credentials_info=creds,
+                pool_size=5,
+                pool_timeout=30,
+                location="asia-south1",
+            )
+
+
+def test_bigquery_connect_without_location():
+    """Tests that BigqueryClient omits location from create_engine when not provided"""
+    creds = {"project_id": "my-project"}
+    with patch("ddpui.utils.warehouse.client.bigquery.inspect"):
+        with patch("ddpui.utils.warehouse.client.bigquery.create_engine") as mock_create_engine:
+            BigqueryClient(creds)
+            mock_create_engine.assert_called_with(
+                "bigquery://my-project",
+                credentials_info=creds,
+                pool_size=5,
+                pool_timeout=30,
+            )
+
+
+def test_warehouse_factory_connect_passes_location():
+    """Tests that WarehouseFactory.connect forwards location to BigqueryClient"""
+    with patch(
+        "ddpui.utils.warehouse.client.bigquery.BigqueryClient.__init__",
+        return_value=None,
+    ) as mock_init:
+        WarehouseFactory.connect({}, WarehouseType.BIGQUERY, location="asia-south1")
+        mock_init.assert_called_once_with({}, location="asia-south1")
+
+
 def test_connect_args_1():
     """tests creation on connect_args parameter to create_engine"""
     with patch("ddpui.utils.warehouse.client.postgres.inspect"):

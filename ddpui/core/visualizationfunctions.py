@@ -27,7 +27,7 @@ def generate_chart_data(
     try:
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
         logger.info(credentials)
-        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype, location=org_warehouse.bq_location)
 
         # Use AggQueryBuilder to build the query
         builder = AggQueryBuilder()
