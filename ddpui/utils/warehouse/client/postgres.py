@@ -19,13 +19,13 @@ class PostgresClient(Warehouse):
         Creds come from the secrets manager.
         """
         cache_key = postgres_engine_registry.fingerprint(WarehouseType.POSTGRES, creds)
+        connection_args = PostgresClient.build_connection_args(creds)
 
         def build_engine():
-            """Runs on a registry cache miss only. Class-qualified so the closure
-            captures `creds`, not the half-built client."""
+            """Runs on a registry cache miss only."""
             return create_engine(
                 "postgresql+psycopg2://",
-                connect_args=PostgresClient.build_connection_args(creds),
+                connect_args=connection_args,
                 **postgres_engine_registry.pool_kwargs(),
             )
 
