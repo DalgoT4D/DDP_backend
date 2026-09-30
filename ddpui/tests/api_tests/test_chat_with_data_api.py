@@ -22,7 +22,7 @@ from ddpui.api.chat_with_data_api import (
     update_settings,
 )
 from ddpui.core.ai.constants import MAX_ORG_MEMORY_CHARS
-from ddpui.models.chat_with_data import ChatWithDataOrgMemory, ChatWithDataSession
+from ddpui.models.chat_with_data import ChatWithDataOrgConfig, ChatWithDataSession
 from ddpui.schemas.chat_with_data_schemas import CopilotSettingsUpdate, SessionRename
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.models.org import Org, OrgWarehouse
@@ -135,9 +135,9 @@ def test_memory_round_trips_stripped_with_author(orguser, authuser, org, seed_db
     assert data["text"] == "'SHG' means self-help group."
     assert data["updated_by_email"] == authuser.email
 
-    memory = ChatWithDataOrgMemory.objects.get(org=org)
-    assert memory.text == "'SHG' means self-help group."
-    assert memory.updated_by == orguser
+    config = ChatWithDataOrgConfig.objects.get(org=org)
+    assert config.memory_text == "'SHG' means self-help group."
+    assert config.memory_updated_by == orguser
 
     # empty string is a valid clear, not "field omitted"
     data = update_settings(mock_request(orguser), CopilotSettingsUpdate(text=""))["data"]
@@ -148,14 +148,14 @@ def test_memory_over_cap_is_rejected_with_400(orguser, seed_db):
     payload = CopilotSettingsUpdate(text="x" * (MAX_ORG_MEMORY_CHARS + 1))
     with pytest.raises(HttpError):
         update_settings(mock_request(orguser), payload)
-    assert not ChatWithDataOrgMemory.objects.exists()
+    assert not ChatWithDataOrgConfig.objects.filter(org=orguser.org).exists()
 
 
 def test_partial_update_of_enabled_leaves_memory_untouched(orguser, org, seed_db):
     update_settings(mock_request(orguser), CopilotSettingsUpdate(text="fiscal year Apr-Mar"))
     data = update_settings(mock_request(orguser), CopilotSettingsUpdate(enabled=True))["data"]
     assert data["text"] == "fiscal year Apr-Mar"
-    assert ChatWithDataOrgMemory.objects.get(org=org).text == "fiscal year Apr-Mar"
+    assert ChatWithDataOrgConfig.objects.get(org=org).memory_text == "fiscal year Apr-Mar"
 
 
 def test_analyst_can_neither_manage_settings_nor_chat(analyst_orguser, seed_db):

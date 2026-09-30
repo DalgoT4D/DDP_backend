@@ -59,28 +59,22 @@ class ChatWithDataTurnAudit(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
-class ChatWithDataOrgMemory(models.Model):
-    """Admin-curated facts about the org ("'SHG' means self-help group",
-    "fiscal year runs April-March"), injected verbatim into both Copilot
-    system prompts. Human-written only in v1.1 — agents never write here.
-    Edited via PUT /api/chat-with-data/settings by org admins."""
-
-    org = models.OneToOneField(Org, on_delete=models.CASCADE, related_name="chat_with_data_memory")
-    text = models.TextField(
-        blank=True, default="", validators=[MaxLengthValidator(MAX_ORG_MEMORY_CHARS)]
-    )
-    updated_by = models.ForeignKey(OrgUser, null=True, on_delete=models.SET_NULL, related_name="+")
-    updated_at = models.DateTimeField(auto_now=True)
-
-
 class ChatWithDataOrgConfig(models.Model):
-    """Per-org knobs, admin-managed (Django admin only in v1).
+    """Per-org Copilot settings: execution knobs + admin-curated context memory.
 
-    allowed_schemas=NULL means "derive": the org's dbt output schema, falling
-    back to all raw (non-system) schemas.
+    allowed_schemas=NULL means "derive" (all non-system schemas in the warehouse).
+    memory_text is injected verbatim into agent system prompts; human-written only.
     """
 
     org = models.OneToOneField(Org, on_delete=models.CASCADE, related_name="chat_with_data_config")
     allowed_schemas = models.JSONField(null=True, blank=True)
     max_result_rows = models.IntegerField(default=100)
     query_timeout_s = models.IntegerField(default=30)
+    # formerly ChatWithDataOrgMemory
+    memory_text = models.TextField(
+        blank=True, default="", validators=[MaxLengthValidator(MAX_ORG_MEMORY_CHARS)]
+    )
+    memory_updated_by = models.ForeignKey(
+        OrgUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    memory_updated_at = models.DateTimeField(null=True, blank=True)

@@ -20,7 +20,6 @@ from ddpui.core.ai.agent.context_builder import (
 from ddpui.core.ai.constants import MAX_ORG_MEMORY_CHARS
 from ddpui.models.chat_with_data import (
     ChatWithDataOrgConfig,
-    ChatWithDataOrgMemory,
     ChatWithDataSession,
 )
 from ddpui.models.dashboard import Dashboard
@@ -120,8 +119,8 @@ def test_org_config_row_overrides_schemas_and_limits(org_setup):
 @pytest.mark.django_db
 def test_memory_row_reaches_the_context(org_setup):
     orguser = org_setup
-    ChatWithDataOrgMemory.objects.create(
-        org=orguser.org, text="'SHG' means self-help group.", updated_by=orguser
+    ChatWithDataOrgConfig.objects.create(
+        org=orguser.org, memory_text="'SHG' means self-help group.", memory_updated_by=orguser
     )
     ctx = build_run_context(orguser)
     assert ctx.org_memory == "'SHG' means self-help group."
@@ -135,6 +134,6 @@ def test_no_memory_row_means_empty_org_memory(org_setup):
 
 @pytest.mark.django_db
 def test_memory_over_cap_is_rejected_at_save_time(org_setup):
-    memory = ChatWithDataOrgMemory(org=org_setup.org, text="x" * (MAX_ORG_MEMORY_CHARS + 1))
+    config = ChatWithDataOrgConfig(org=org_setup.org, memory_text="x" * (MAX_ORG_MEMORY_CHARS + 1))
     with pytest.raises(ValidationError):
-        memory.full_clean()
+        config.full_clean()

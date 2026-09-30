@@ -3,8 +3,10 @@ flag (enable/disable Copilot) and its org memory (admin-curated facts injected
 into the agents' system prompts — see org_memory_section in core/ai/prompts.py).
 """
 
+from django.utils import timezone
+
 from ddpui.core.ai.constants import CHAT_WITH_DATA_FLAG, MAX_ORG_MEMORY_CHARS
-from ddpui.models.chat_with_data import ChatWithDataOrgMemory
+from ddpui.models.chat_with_data import ChatWithDataOrgConfig
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chat_with_data_schemas import CopilotSettingsOut, CopilotSettingsUpdate
 from ddpui.utils.feature_flags import (
@@ -19,15 +21,19 @@ class MemoryTooLong(Exception):
 
 
 def get_settings(orguser: OrgUser) -> CopilotSettingsOut:
-    """Current Copilot settings for the org. Never 404s: no memory row reads
+    """Current Copilot settings for the org. Never 404s: no config row reads
     as empty text, no flag row reads as disabled."""
     org = orguser.org
-    memory = ChatWithDataOrgMemory.objects.filter(org=org).first()
+    config = ChatWithDataOrgConfig.objects.filter(org=org).first()
     return CopilotSettingsOut(
         enabled=bool(is_feature_flag_enabled(CHAT_WITH_DATA_FLAG, org)),
-        text=memory.text if memory else "",
-        updated_at=memory.updated_at.isoformat() if memory else None,
-        updated_by_email=(memory.updated_by.user.email if memory and memory.updated_by else None),
+        text=config.memory_text if config else "",
+        updated_at=config.memory_updated_at.isoformat() if config and config.memory_updated_at else None,
+        updated_by_email=(
+            config.memory_updated_by.user.email
+            if config and config.memory_updated_by
+            else None
+        ),
         max_chars=MAX_ORG_MEMORY_CHARS,
     )
 
@@ -35,7 +41,7 @@ def get_settings(orguser: OrgUser) -> CopilotSettingsOut:
 def update_settings(orguser: OrgUser, payload: CopilotSettingsUpdate) -> CopilotSettingsOut:
     """Partial update: each field only changes when supplied. `enabled` writes
     the org's CHAT_WITH_DATA flag row (org row beats a global one); `text`
-    upserts the memory row — empty string is a valid clear."""
+    upserts the config row — empty string is a valid clear."""
     org = orguser.org
     enabled, text = payload.enabled, payload.text
 
@@ -48,8 +54,13 @@ def update_settings(orguser: OrgUser, payload: CopilotSettingsUpdate) -> Copilot
         text = text.strip()
         if len(text) > MAX_ORG_MEMORY_CHARS:
             raise MemoryTooLong(f"context must be at most {MAX_ORG_MEMORY_CHARS} characters")
-        ChatWithDataOrgMemory.objects.update_or_create(
-            org=org, defaults={"text": text, "updated_by": orguser}
+        ChatWithDataOrgConfig.objects.update_or_create(
+            org=org,
+            defaults={
+                "memory_text": text,
+                "memory_updated_by": orguser,
+                "memory_updated_at": timezone.now(),
+            },
         )
 
     return get_settings(orguser)
