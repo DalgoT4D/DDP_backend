@@ -38,6 +38,8 @@ from ddpui.core.metric.exceptions import (
     MetricPermissionError,
 )
 from ddpui.core.access.ownership import is_creator_or_admin
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -222,6 +224,22 @@ class MetricService:
 
         metric.save()
         logger.info(f"Created metric {metric.id} '{metric.name}' for org {orguser.org.id}")
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.METRIC,
+            resource_id=str(metric.id),
+            action=AuditLogAction.CREATE,
+            resource_fields={
+                "name": name,
+                "description": description or "",
+                "schema_name": schema_name,
+                "table_name": table_name,
+                "column": column,
+                "aggregation": aggregation,
+                "column_expression": column_expression,
+            },
+        )
         metric = Metric.objects.select_related("created_by__user").get(id=metric.id)
         return metric
 

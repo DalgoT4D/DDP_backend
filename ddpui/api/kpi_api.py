@@ -99,25 +99,9 @@ def get_kpi_summary(request):
 def create_kpi(request, payload: KPICreate):
     """Create a new KPI"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
 
     try:
         kpi = KPIService.create_kpi(payload, orguser)
-
-        resource_fields = payload.model_dump(exclude={"metric_id"})
-        resource_fields[
-            "name"
-        ] = kpi.name  # actual resolved name, not the raw (possibly None) payload value
-        resource_fields["metric"] = kpi.metric.name
-
-        create_audit_log(
-            org=org,
-            orguser=orguser,
-            resource_type=AuditLogResourceType.KPI,
-            resource_id=str(kpi.id),
-            action=AuditLogAction.CREATE,
-            resource_fields=resource_fields,
-        )
     except MetricNotFoundError:
         raise HttpError(404, "Metric not found") from None
     except KPIValidationError as e:

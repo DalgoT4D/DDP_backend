@@ -388,7 +388,7 @@ from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
 
 class TestMetricAuditLogs:
     @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
-    @patch("ddpui.api.metric_api.create_audit_log")
+    @patch("ddpui.core.metric.metric_service.create_audit_log")
     def test_create_metric_creates_audit_log(self, mock_audit_log, mock_validate, orguser, seed_db):
         """Test that creating a metric creates an audit log entry."""
         OrgWarehouse.objects.create(org=orguser.org, wtype="postgres", credentials={})
