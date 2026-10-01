@@ -258,6 +258,75 @@ class TestQueryBuilderMultipleDimensions:
         assert "region" in compiled_query or "region" in compiled_query.lower()
 
 
+    def test_duplicate_count_all_metrics_deduplicated(self):
+        """Two count(*) metrics with the same alias must not produce duplicate SQL columns."""
+        payload = ChartDataPayload(
+            chart_type="bar",
+            schema_name="public",
+            table_name="test_table",
+            dimension_col="region",
+            metrics=[
+                ChartMetric(aggregation="count", column=None, alias="Total Count"),
+                ChartMetric(aggregation="count", column=None, alias="Total Count"),
+            ],
+        )
+
+        mock_warehouse = MagicMock(spec=OrgWarehouse)
+        mock_warehouse.wtype = "postgres"
+
+        query_builder = charts_service.build_chart_query(payload, mock_warehouse)
+        compiled_query = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
+
+        # The alias "count_all_Total Count" should appear exactly once in SELECT
+        select_section = compiled_query.split("FROM")[0]
+        assert select_section.count("count_all_Total Count") == 1
+
+    def test_duplicate_sum_metrics_deduplicated(self):
+        """Two sum(revenue) metrics with the same alias must not produce duplicate SQL columns."""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test_table",
+            dimensions=["region"],
+            metrics=[
+                ChartMetric(aggregation="sum", column="revenue", alias="Revenue"),
+                ChartMetric(aggregation="sum", column="revenue", alias="Revenue"),
+            ],
+        )
+
+        mock_warehouse = MagicMock(spec=OrgWarehouse)
+        mock_warehouse.wtype = "postgres"
+
+        query_builder = charts_service.build_chart_query(payload, mock_warehouse)
+        compiled_query = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
+
+        select_section = compiled_query.split("FROM")[0]
+        assert select_section.lower().count("sum(") == 1
+
+    def test_distinct_metrics_not_deduplicated(self):
+        """Two metrics with different aliases should both appear in the query."""
+        payload = ChartDataPayload(
+            chart_type="bar",
+            schema_name="public",
+            table_name="test_table",
+            dimension_col="region",
+            metrics=[
+                ChartMetric(aggregation="count", column=None, alias="Total Count"),
+                ChartMetric(aggregation="sum", column="revenue", alias="Revenue"),
+            ],
+        )
+
+        mock_warehouse = MagicMock(spec=OrgWarehouse)
+        mock_warehouse.wtype = "postgres"
+
+        query_builder = charts_service.build_chart_query(payload, mock_warehouse)
+        compiled_query = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
+
+        select_section = compiled_query.split("FROM")[0]
+        assert "count_all_Total Count" in select_section
+        assert "revenue" in select_section.lower()
+
+
 class TestQueryGenerationEdgeCases:
     """Tests for edge cases in query generation"""
 
