@@ -1,7 +1,7 @@
 """Schema-discovery tools: what data exists and what shape it has.
 
 These tools return METADATA only (schema/table/column names and types) —
-never row data. Actual values reach the model solely through profile_column
+never row data. Actual values reach the model solely through lookup_column_values
 and execute_sql, so PII controls only have those two surfaces to cover."""
 
 from langchain.tools import ToolRuntime, tool
@@ -64,7 +64,7 @@ def list_tables(schema_name: str, runtime: ToolRuntime[RunContext]) -> str:
 def get_table_details(schema_name: str, table_name: str, runtime: ToolRuntime[RunContext]) -> str:
     """Get a table's columns with types. Use this before writing SQL against
     the table — column names must match exactly. To learn what values a text
-    column holds before filtering on it, use profile_column."""
+    column holds before filtering on it, use lookup_column_values."""
     ctx = runtime.context
     try:
         catalog.check_table(ctx, schema_name, table_name)

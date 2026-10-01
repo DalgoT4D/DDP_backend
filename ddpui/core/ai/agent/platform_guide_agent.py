@@ -6,7 +6,7 @@ platform itself: it creates charts, dashboards, KPIs, metrics, and reports
 in-chat (behind the same approval cards), guides the user through object
 dependencies (a KPI is built on a metric; a report is a snapshot of a
 dashboard), and points to the docs.dalgo.org page for every feature it
-touches. It has NO data-querying tools — execute_sql and profile_column
+touches. It has NO data-querying tools — execute_sql and lookup_column_values
 stay with the SQL agent.
 
 Same assembly pattern as chat_data_agent.build_agent: create_agent + the

@@ -43,7 +43,7 @@ def test_system_prompt_names_dialect_schemas_and_rules():
     prompt = build_system_prompt(make_ctx())
     assert "PostgreSQL" in prompt
     assert "prod" in prompt and "staging" in prompt
-    assert "profile_column" in prompt  # instructs value-validation before filtering
+    assert "lookup_column_values" in prompt  # instructs value-validation before filtering
     assert "read-only" in prompt.lower()
 
 

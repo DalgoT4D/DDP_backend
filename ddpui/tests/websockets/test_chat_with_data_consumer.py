@@ -505,7 +505,8 @@ def test_mixed_card_offers_only_the_reviewable_requests_columns():
     pending = _pending(
         _request("execute_sql", None),
         _request(
-            "profile_column", [{"schema": "prod", "table": "beneficiaries", "column": "phone"}]
+            "lookup_column_values",
+            [{"schema": "prod", "table": "beneficiaries", "column": "phone"}],
         ),
     )
     allowed = _allowed_pii_columns(pending, ["prod.beneficiaries.phone"])

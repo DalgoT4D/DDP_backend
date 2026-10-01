@@ -15,7 +15,7 @@ from ddpui.core.ai.tools.schema_tools import (
     list_schemas,
     list_tables,
 )
-from ddpui.core.ai.tools.profile_tools import profile_column
+from ddpui.core.ai.tools.profile_tools import lookup_column_values
 from ddpui.core.ai.tools.sql_tools import execute_sql
 from ddpui.core.ai.tools import catalog
 
@@ -147,40 +147,44 @@ def test_get_table_details_rejects_unknown_table():
     assert "not found" in result and "surveys" in result
 
 
-def test_profile_column_quotes_identifiers_and_renders_values():
+def test_lookup_column_values_quotes_identifiers_and_renders_values():
     warehouse = FakeWarehouse(rows=[{"value": "MH", "occurrences": 900}])
-    result = profile_column.func(
+    result = lookup_column_values.func(
         schema_name="prod",
         table_name="surveys",
         column_name="district",
+        search_value="Maharashtra",
         runtime=make_runtime(warehouse),
     )
     assert "MH" in result
     profile_sql = warehouse.executed[-1]
     assert '"district"' in profile_sql and '"prod"."surveys"' in profile_sql
+    assert "Maharashtra" in profile_sql
 
 
-def test_profile_column_unknown_column_gives_guidance():
-    result = profile_column.func(
+def test_lookup_column_values_unknown_column_gives_guidance():
+    result = lookup_column_values.func(
         schema_name="prod",
         table_name="surveys",
         column_name="districtname",
+        search_value="Maharashtra",
         runtime=make_runtime(),
     )
     assert "does not exist" in result and "get_table_details" in result
 
 
-def test_profile_column_hashes_a_ticked_column():
+def test_lookup_column_values_hashes_a_ticked_column():
     warehouse = FakeWarehouse(rows=[{"value": "abc123", "occurrences": 4}])
     warehouse.columns = [{"name": "phone", "data_type": "text"}]
     warehouse.catalog_rows = [{"table_name": "beneficiaries", "approx_rows": 10}]
     runtime = make_runtime(warehouse)
     runtime.context.pii_columns = {"prod.beneficiaries.phone"}
 
-    out = profile_column.func(
+    out = lookup_column_values.func(
         schema_name="prod",
         table_name="beneficiaries",
         column_name="phone",
+        search_value="9876",
         runtime=runtime,
     )
 
@@ -188,14 +192,15 @@ def test_profile_column_hashes_a_ticked_column():
     assert "abc123" in out
 
 
-def test_profile_column_without_ticks_is_unhashed():
+def test_lookup_column_values_without_ticks_is_unhashed():
     warehouse = FakeWarehouse(rows=[{"value": "Pune", "occurrences": 4}])
     warehouse.catalog_rows = [{"table_name": "surveys", "approx_rows": 10}]
 
-    profile_column.func(
+    lookup_column_values.func(
         schema_name="prod",
         table_name="surveys",
         column_name="district",
+        search_value="Pune",
         runtime=make_runtime(warehouse),
     )
 
@@ -234,7 +239,7 @@ def test_registry_exposes_all_tools():
         "list_schemas",
         "list_tables",
         "get_table_details",
-        "profile_column",
+        "lookup_column_values",
         "execute_sql",
         "create_chart",
         "list_dashboards",

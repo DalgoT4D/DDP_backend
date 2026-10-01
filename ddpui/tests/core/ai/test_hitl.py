@@ -242,7 +242,7 @@ def test_non_sql_tools_get_no_columns_field():
     assert "columns" not in event["requests"][0]
 
 
-def test_profile_column_pauses_for_approval():
+def test_lookup_column_values_pauses_for_approval():
     warehouse = FakeWarehouse(rows=[{"value": "Pune", "occurrences": 4}])
     model = ScriptedChatModel(
         script=[
@@ -250,7 +250,7 @@ def test_profile_column_pauses_for_approval():
                 content="",
                 tool_calls=[
                     {
-                        "name": "profile_column",
+                        "name": "lookup_column_values",
                         "args": {
                             "schema_name": "prod",
                             "table_name": "surveys",
@@ -268,5 +268,5 @@ def test_profile_column_pauses_for_approval():
     result, _config = _invoke(agent, "what districts are there?", make_context(warehouse))
 
     interrupt = result["__interrupt__"][0]
-    assert [r["name"] for r in interrupt.value["action_requests"]] == ["profile_column"]
+    assert [r["name"] for r in interrupt.value["action_requests"]] == ["lookup_column_values"]
     assert warehouse.executed == []

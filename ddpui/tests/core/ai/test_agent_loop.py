@@ -85,7 +85,7 @@ def test_realistic_discovery_turn_fits_in_the_recursion_limit():
             tool_call("get_table_details", {"schema_name": "prod", "table_name": "t"}, "c3"),
             tool_call("get_table_details", {"schema_name": "prod", "table_name": "t"}, "c4"),
             tool_call(
-                "profile_column",
+                "lookup_column_values",
                 {"schema_name": "prod", "table_name": "t", "column_name": "c"},
                 "c5",
             ),
@@ -111,7 +111,9 @@ def test_realistic_discovery_turn_fits_in_the_recursion_limit():
         )
         resumes += 1
     assert result["messages"][-1].content == "Here is your answer."
-    assert resumes == 3  # the profile_column call and both execute_sql calls paused for approval
+    assert (
+        resumes == 3
+    )  # the lookup_column_values call and both execute_sql calls paused for approval
 
 
 def test_sql_error_recovery_second_attempt_succeeds():

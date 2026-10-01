@@ -63,7 +63,7 @@ REFLECTION_MAX_TOKENS = 300
 # when 5 PIIMiddleware instances each added a before_model AND an after_model
 # node. 160 ≈ headroom for ~32 cycles now (was ~10); a legitimate heavy turn
 # on a messy warehouse uses ~12 (schemas → tables → details ×3 → profile ×2 →
-# sql ×5 with retries — MAX_SQL_ATTEMPTS is 5). profile_column and execute_sql
+# sql ×5 with retries — MAX_SQL_ATTEMPTS is 5). lookup_column_values and execute_sql
 # both pausing for approval (Task 7) doesn't erode this: each pause/resume is
 # a fresh invocation with its own step budget. The real runaway guard is
 # sql_retry_limiter, not this ceiling.

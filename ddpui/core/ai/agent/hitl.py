@@ -101,15 +101,23 @@ def _card_columns(sql: str, ctx: RunContext) -> tuple[list[PiiColumn] | None, st
 
 def _reviewable_sql(request: ActionRequest, ctx: RunContext) -> str:
     """The SQL whose columns the card reviews. execute_sql carries it as an
-    argument; profile_column names a single column, so synthesize the
-    equivalent SELECT rather than duplicating the tool's query-building."""
+    argument; lookup_column_values synthesizes the LIKE query it will run so the
+    user sees exactly what data will be read."""
     args = request.get("args", {})
     if request["name"] == "execute_sql":
         return str(args.get("sql", ""))
-    column = args.get("column_name")
+    schema_name = args.get("schema_name", "")
+    table_name = args.get("table_name", "")
+    column = args.get("column_name", "")
+    search_value = args.get("search_value", "")
     quoted = f"`{column}`" if ctx.dialect == "bigquery" else f'"{column}"'
-    qualified = catalog.qualified(ctx.dialect, args.get("schema_name"), args.get("table_name"))
-    return f"SELECT {quoted} FROM {qualified}"
+    qualified = catalog.qualified(ctx.dialect, schema_name, table_name)
+    safe_value = search_value.replace("'", "''")
+    if ctx.dialect == "bigquery":
+        where = f"LOWER(CAST({quoted} AS STRING)) LIKE LOWER('%{safe_value}%')"
+    else:
+        where = f"LOWER({quoted}::text) LIKE LOWER('%{safe_value}%')"
+    return f"SELECT DISTINCT {quoted} AS value FROM {qualified} WHERE {where} LIMIT 10"
 
 
 def input_required_event(interrupt_value: HITLRequest, ctx: RunContext) -> InputRequiredEvent:

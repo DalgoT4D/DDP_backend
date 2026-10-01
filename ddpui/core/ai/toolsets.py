@@ -18,7 +18,7 @@ SQL_AGENT_TOOLS = (
     "list_schemas",
     "list_tables",
     "get_table_details",
-    "profile_column",
+    "lookup_column_values",
     "execute_sql",
     "ask_user",
     "handoff_to_platform_guide",
@@ -54,7 +54,7 @@ GUIDE_AGENT_TOOLS = (
 # pure metadata lookups (list_schemas, list_tables, get_table_details) are not —
 # gating them would cost several clicks before any question could be answered.
 # Only warehouse reads pause for approval on this agent
-SQL_APPROVAL_TOOLS = ("execute_sql", "profile_column")
+SQL_APPROVAL_TOOLS = ("execute_sql", "lookup_column_values")
 
 # Creation tools pause for user approval (same cards as the SQL agent's)
 GUIDE_APPROVAL_TOOLS = (
@@ -71,7 +71,7 @@ QUESTION_TOOL = "ask_user"
 
 # Tools whose card carries a PII checkbox list: the only two that return real
 # warehouse values to the model.
-PII_REVIEW_TOOLS = ("execute_sql", "profile_column")
+PII_REVIEW_TOOLS = ("execute_sql", "lookup_column_values")
 
 # ---------------------------------------------------------------------------
 # Handoff (chat/turn_graph.py)
@@ -89,7 +89,7 @@ TOOL_LABELS = {
     "list_schemas": "Looking at your data…",
     "list_tables": "Looking at your tables…",
     "get_table_details": "Reading table structure…",
-    "profile_column": "Checking data values…",
+    "lookup_column_values": "Looking up how values are stored…",
     "execute_sql": "Running query…",
     "create_chart": "Creating chart…",
     "list_dashboards": "Checking your dashboards…",
