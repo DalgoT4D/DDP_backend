@@ -52,8 +52,9 @@ class CachedEngine:
         """
         try:
             return self.engine.pool.checkedout() > 0
-        except Exception:  # skipcq: PYL-W0703
+        except Exception as err:  # skipcq: PYL-W0703
             # Never let pool introspection stop a sweep; assume idle.
+            logger.warning(f"failed to read checked-out connections: {err}")
             return False
 
     def has_open_connections(self) -> bool:
@@ -63,8 +64,9 @@ class CachedEngine:
         """
         try:
             return self.engine.pool.checkedin() > 0
-        except Exception:  # skipcq: PYL-W0703
+        except Exception as err:  # skipcq: PYL-W0703
             # Can't tell; dispose to be safe -- it is harmless on an empty pool.
+            logger.warning(f"failed to read checked-in connections: {err}")
             return True
 
 
@@ -134,9 +136,9 @@ def _sweep() -> int:
                 continue
             try:
                 cached.engine.dispose()
-            except Exception:  # skipcq: PYL-W0703
+            except Exception as err:  # skipcq: PYL-W0703
                 # Discarding a pool that fails to close must not fail the sweep.
-                logger.warning("failed to dispose warehouse engine")
+                logger.warning(f"failed to dispose warehouse engine: {err}")
             disposed_count += 1
 
     if disposed_count:
@@ -153,10 +155,10 @@ def _sweep_loop() -> None:
         time.sleep(SWEEP_INTERVAL_SECONDS)
         try:
             _sweep()
-        except Exception:  # skipcq: PYL-W0703
+        except Exception as err:  # skipcq: PYL-W0703
             # The sweeper must outlive any single failure, or this process stops
             # retiring pools for the rest of its life.
-            logger.exception("warehouse engine sweep failed")
+            logger.exception(f"warehouse engine sweep failed: {err}")
 
 
 def _ensure_sweeper() -> None:
@@ -181,9 +183,9 @@ def _ensure_sweeper() -> None:
         )
 
 
-def get_or_create_engine(cache_key: str, create) -> Engine:
+def get_or_create_engine(cache_key: str, create_engine) -> Engine:
     """
-    Return the cached engine for `cache_key`, building it via `create` on a miss.
+    Return the cached engine for `cache_key`, building it via `create_engine` on a miss.
     Only this key's lock is held while building, so other orgs never wait.
     """
     _ensure_sweeper()
@@ -203,7 +205,7 @@ def get_or_create_engine(cache_key: str, create) -> Engine:
             cached.last_used_at = now
             return cached.engine
 
-        engine = create()
+        engine = create_engine()
         _engines[cache_key] = CachedEngine(engine=engine, last_used_at=now)
         logger.info("created warehouse engine", extra={"cached_engines": len(_engines)})
 
