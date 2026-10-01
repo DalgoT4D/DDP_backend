@@ -26,9 +26,9 @@ def saved(monkeypatch):
     """Capture what would be persisted; return a canned Chart."""
     calls = {}
 
-    def fake_save(ctx, chart_data):
+    def fake_save(ctx, payload):
         calls["ctx"] = ctx
-        calls["data"] = chart_data
+        calls["data"] = payload
         return FakeChart()
 
     monkeypatch.setattr(chart_tools, "_save_chart", fake_save)
@@ -54,7 +54,7 @@ def test_creates_bar_chart_with_metric(saved):
         chart_type="bar",
         schema_name="prod",
         table_name="surveys",
-        dimension_column="district",
+        extra_config={"dimension_column": "district", "metrics": [{"aggregation": "count"}]},
     )
 
     assert "Surveys by district" in content
@@ -64,13 +64,10 @@ def test_creates_bar_chart_with_metric(saved):
         "title": "Surveys by district",
         "url_path": "/charts/42",
     }
-    data = saved["data"]
-    assert data.chart_type == "bar"
-    # the render path groups by dimension_column for EVERY chart type —
-    # x_axis_column is ignored by the query builder (blank-chart regression)
-    assert data.extra_config["dimension_column"] == "district"
-    assert "x_axis_column" not in data.extra_config
-    assert [(m["column"], m["aggregation"], m["alias"]) for m in data.extra_config["metrics"]] == [
+    ec = saved["data"].extra_config.model_dump()
+    assert ec["dimension_column"] == "district"
+    assert "x_axis_column" not in ec
+    assert [(m["column"], m["aggregation"], m["alias"]) for m in ec["metrics"]] == [
         (None, "count", "count")
     ]
 
@@ -83,9 +80,9 @@ def test_stored_extra_config_matches_the_charts_api_shape(saved):
         chart_type="bar",
         schema_name="prod",
         table_name="surveys",
-        dimension_column="district",
+        extra_config={"dimension_column": "district", "metrics": [{"aggregation": "count"}]},
     )
-    extra_config = saved["data"].extra_config
+    extra_config = saved["data"].extra_config.model_dump()
     for key in ("customizations", "filters", "pagination", "sort", "extra_dimension_column"):
         assert key in extra_config
 
@@ -99,16 +96,17 @@ def test_bar_chart_accepts_multiple_metrics(saved):
         chart_type="bar",
         schema_name="prod",
         table_name="work_orders",
-        dimension_column="state",
-        metrics=[
-            {"column": "silt_target", "aggregation": "sum", "alias": "Silt target"},
-            {"column": "silt_achieved", "aggregation": "sum"},
-        ],
+        extra_config={
+            "dimension_column": "state",
+            "metrics": [
+                {"column": "silt_target", "aggregation": "sum", "alias": "Silt target"},
+                {"column": "silt_achieved", "aggregation": "sum"},
+            ],
+        },
     )
     assert artifact["type"] == "chart"
-    assert [
-        (m["column"], m["aggregation"], m["alias"]) for m in saved["data"].extra_config["metrics"]
-    ] == [
+    ec = saved["data"].extra_config.model_dump()
+    assert [(m["column"], m["aggregation"], m["alias"]) for m in ec["metrics"]] == [
         ("silt_target", "sum", "Silt target"),
         ("silt_achieved", "sum", "sum_silt_achieved"),
     ]
@@ -121,11 +119,13 @@ def test_pie_and_number_take_exactly_one_metric(saved):
         chart_type="pie",
         schema_name="prod",
         table_name="surveys",
-        dimension_column="district",
-        metrics=[
-            {"column": "amount", "aggregation": "sum"},
-            {"column": "amount", "aggregation": "avg"},
-        ],
+        extra_config={
+            "dimension_column": "district",
+            "metrics": [
+                {"column": "amount", "aggregation": "sum"},
+                {"column": "amount", "aggregation": "avg"},
+            ],
+        },
     )
     assert artifact["status"] == "rejected"
     assert "data" not in saved
@@ -138,12 +138,15 @@ def test_pie_uses_dimension_column_key(saved):
         chart_type="pie",
         schema_name="prod",
         table_name="surveys",
-        dimension_column="district",
-        metrics=[{"column": "amount", "aggregation": "sum"}],
+        extra_config={
+            "dimension_column": "district",
+            "metrics": [{"column": "amount", "aggregation": "sum"}],
+        },
     )
     assert artifact["type"] == "chart"
-    assert saved["data"].extra_config["dimension_column"] == "district"
-    assert saved["data"].extra_config["metrics"][0]["aggregation"] == "sum"
+    ec = saved["data"].extra_config.model_dump()
+    assert ec["dimension_column"] == "district"
+    assert ec["metrics"][0]["aggregation"] == "sum"
 
 
 def test_rejects_disallowed_schema(saved):
@@ -153,7 +156,7 @@ def test_rejects_disallowed_schema(saved):
         chart_type="bar",
         schema_name="secret_schema",
         table_name="surveys",
-        dimension_column="district",
+        extra_config={"dimension_column": "district", "metrics": [{"aggregation": "count"}]},
     )
     assert artifact["status"] == "rejected"
     assert "data" not in saved
@@ -166,7 +169,7 @@ def test_rejects_bad_chart_type_and_missing_dimension(saved):
         chart_type="map",  # not offered to the agent in v1
         schema_name="prod",
         table_name="surveys",
-        dimension_column="district",
+        extra_config={"dimension_column": "district", "metrics": [{"aggregation": "count"}]},
     )
     assert artifact["status"] == "rejected"
 
@@ -176,7 +179,7 @@ def test_rejects_bad_chart_type_and_missing_dimension(saved):
         chart_type="bar",
         schema_name="prod",
         table_name="surveys",
-        dimension_column=None,  # bar needs one
+        extra_config={"metrics": [{"aggregation": "count"}]},  # no dimension_column for bar
     )
     assert artifact["status"] == "rejected"
     assert "data" not in saved

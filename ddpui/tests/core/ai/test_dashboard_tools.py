@@ -50,10 +50,11 @@ def test_place_charts_appends_below_existing_items():
 
 
 def test_list_dashboards_renders_ids_and_titles(monkeypatch):
+    monkeypatch.setattr(dashboard_tools, "_load_orguser", lambda ctx: object())
     monkeypatch.setattr(
         dashboard_tools,
         "_load_dashboards",
-        lambda ctx: [(3, "Donor Overview", True), (9, "Field Performance", False)],
+        lambda orguser: [(3, "Donor Overview", True), (9, "Field Performance", False)],
     )
     out = run_tool(dashboard_tools.list_dashboards, make_dash_context())
     assert "id 3" in out and "Donor Overview" in out and "published" in out
@@ -61,7 +62,8 @@ def test_list_dashboards_renders_ids_and_titles(monkeypatch):
 
 
 def test_list_dashboards_handles_none(monkeypatch):
-    monkeypatch.setattr(dashboard_tools, "_load_dashboards", lambda ctx: [])
+    monkeypatch.setattr(dashboard_tools, "_load_orguser", lambda ctx: object())
+    monkeypatch.setattr(dashboard_tools, "_load_dashboards", lambda orguser: [])
     out = run_tool(dashboard_tools.list_dashboards, make_dash_context())
     assert "no dashboards" in out.lower()
 
@@ -76,12 +78,13 @@ def test_create_dashboard_with_charts(monkeypatch):
         id = 42
         title = "Donor Overview"
 
-    def fake_create(ctx, title, description, chart_ids):
+    def fake_create(orguser, title, description, chart_ids):
         calls.update(title=title, chart_ids=chart_ids)
         return FakeDash()
 
+    monkeypatch.setattr(dashboard_tools, "_load_orguser", lambda ctx: object())
     monkeypatch.setattr(dashboard_tools, "_create_dashboard", fake_create)
-    monkeypatch.setattr(dashboard_tools, "_org_chart_ids", lambda ctx, ids: set(ids))
+    monkeypatch.setattr(dashboard_tools, "_org_chart_ids", lambda orguser, ids: set(ids))
 
     content, artifact = run_tool(
         dashboard_tools.create_dashboard,
@@ -100,7 +103,8 @@ def test_create_dashboard_with_charts(monkeypatch):
 
 
 def test_create_dashboard_rejects_foreign_charts(monkeypatch):
-    monkeypatch.setattr(dashboard_tools, "_org_chart_ids", lambda ctx, ids: {10})
+    monkeypatch.setattr(dashboard_tools, "_load_orguser", lambda ctx: object())
+    monkeypatch.setattr(dashboard_tools, "_org_chart_ids", lambda orguser, ids: {10})
     content, artifact = run_tool(
         dashboard_tools.create_dashboard,
         make_dash_context(),
@@ -121,12 +125,13 @@ def test_add_charts_to_existing_dashboard(monkeypatch):
         id = 3
         title = "Donor Overview"
 
-    def fake_add(ctx, dashboard_id, chart_ids):
+    def fake_add(orguser, dashboard_id, chart_ids):
         calls.update(dashboard_id=dashboard_id, chart_ids=chart_ids)
         return FakeDash()
 
+    monkeypatch.setattr(dashboard_tools, "_load_orguser", lambda ctx: object())
     monkeypatch.setattr(dashboard_tools, "_add_charts", fake_add)
-    monkeypatch.setattr(dashboard_tools, "_org_chart_ids", lambda ctx, ids: set(ids))
+    monkeypatch.setattr(dashboard_tools, "_org_chart_ids", lambda orguser, ids: set(ids))
 
     content, artifact = run_tool(
         dashboard_tools.add_charts_to_dashboard,
@@ -140,11 +145,12 @@ def test_add_charts_to_existing_dashboard(monkeypatch):
 
 
 def test_add_charts_reports_missing_dashboard(monkeypatch):
-    def fake_add(ctx, dashboard_id, chart_ids):
+    def fake_add(orguser, dashboard_id, chart_ids):
         raise dashboard_tools.DashboardNotFoundError(1)
 
+    monkeypatch.setattr(dashboard_tools, "_load_orguser", lambda ctx: object())
     monkeypatch.setattr(dashboard_tools, "_add_charts", fake_add)
-    monkeypatch.setattr(dashboard_tools, "_org_chart_ids", lambda ctx, ids: set(ids))
+    monkeypatch.setattr(dashboard_tools, "_org_chart_ids", lambda orguser, ids: set(ids))
 
     content, artifact = run_tool(
         dashboard_tools.add_charts_to_dashboard,

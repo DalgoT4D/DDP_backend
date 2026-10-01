@@ -2,7 +2,7 @@
 
 The guide agent's job is dependency-aware guidance — "a KPI is built on a
 metric; you already have these metrics" — so it needs to SEE what the org
-already has. These are thin org-scoped ORM listings: names + the fields
+already has. These are thin org-scoped listings: names + the fields
 needed to reference an object in a follow-up creation call (ids), nothing
 else. No warehouse access, no writes.
 """
@@ -11,8 +11,17 @@ from langchain.tools import ToolRuntime, tool
 
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import register_tool
+from ddpui.core.kpi.kpi_service import KPIService
+from ddpui.core.metric.metric_service import MetricService
+from ddpui.core.reports.report_service import ReportService
+from ddpui.models.org_user import OrgUser
+from ddpui.services.chart_service import ChartService
 
 MAX_LISTED = 50
+
+
+def _load_orguser(ctx: RunContext) -> OrgUser:
+    return OrgUser.objects.select_related("org").get(id=ctx.orguser_id)
 
 
 def _listing(title: str, lines: list[str]) -> str:
@@ -29,9 +38,8 @@ def list_metrics(runtime: ToolRuntime[RunContext]) -> str:
     """List the organization's existing metrics (id, name, what they measure).
     Check this BEFORE creating a metric or a KPI — a KPI is built on a metric,
     and one may already exist."""
-    from ddpui.models.metric import Metric
-
-    metrics = Metric.objects.filter(org_id=runtime.context.org_id).order_by("name")
+    orguser = _load_orguser(runtime.context)
+    metrics, _ = MetricService.list_metrics(orguser.org, page_size=MAX_LISTED)
     lines = [
         f"[id {m.id}] {m.name} — "
         + (m.column_expression or f"{m.aggregation}({m.column})")
@@ -45,11 +53,8 @@ def list_metrics(runtime: ToolRuntime[RunContext]) -> str:
 @tool
 def list_kpis(runtime: ToolRuntime[RunContext]) -> str:
     """List the organization's existing KPIs (id, name, underlying metric, target)."""
-    from ddpui.models.metric import KPI
-
-    kpis = (
-        KPI.objects.filter(org_id=runtime.context.org_id).select_related("metric").order_by("name")
-    )
+    orguser = _load_orguser(runtime.context)
+    kpis, _ = KPIService.list_kpis(orguser.org, orguser, page_size=MAX_LISTED)
     lines = [
         f"[id {k.id}] {k.name} — metric: {k.metric.name}, target: {k.target_value}" for k in kpis
     ]
@@ -61,9 +66,8 @@ def list_kpis(runtime: ToolRuntime[RunContext]) -> str:
 def list_charts(runtime: ToolRuntime[RunContext]) -> str:
     """List the organization's existing charts (id, title, type, source table).
     Check this before creating a chart or building a dashboard from charts."""
-    from ddpui.models.visualization import Chart
-
-    charts = Chart.objects.filter(org_id=runtime.context.org_id).order_by("title")
+    orguser = _load_orguser(runtime.context)
+    charts, _ = ChartService.list_charts(orguser.org, orguser, page_size=MAX_LISTED)
     lines = [
         f"[id {c.id}] {c.title} — {c.chart_type} on {c.schema_name}.{c.table_name}" for c in charts
     ]
@@ -74,8 +78,7 @@ def list_charts(runtime: ToolRuntime[RunContext]) -> str:
 @tool
 def list_reports(runtime: ToolRuntime[RunContext]) -> str:
     """List the organization's existing report snapshots (id, title, period)."""
-    from ddpui.models.report import ReportSnapshot
-
-    reports = ReportSnapshot.objects.filter(org_id=runtime.context.org_id).order_by("-created_at")
-    lines = [f"[id {r.id}] {r.title}" for r in reports]
+    orguser = _load_orguser(runtime.context)
+    reports = ReportService.list_snapshots(orguser.org, orguser)
+    lines = [f"[id {r.id}] {r.title}" for r in reports[:MAX_LISTED]]
     return _listing("Reports", lines)

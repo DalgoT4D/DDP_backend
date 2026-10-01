@@ -348,7 +348,10 @@ def test_run_turn_attaches_created_charts_via_guide_agent(orguser, session, monk
                             "chart_type": "bar",
                             "schema_name": "prod",
                             "table_name": "surveys",
-                            "dimension_column": "district",
+                            "extra_config": {
+                                "dimension_column": "district",
+                                "metrics": [{"aggregation": "count"}],
+                            },
                         },
                         "id": "c1",
                     }

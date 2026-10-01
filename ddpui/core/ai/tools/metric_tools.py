@@ -23,6 +23,7 @@ from ddpui.core.metric.metric_service import VALID_AGGREGATIONS, MetricService
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chat_with_data_schemas import CreatedArtifact
 from ddpui.schemas.kpi_schema import KPICreate, KPIExtraConfig
+from ddpui.schemas.metric_schema import MetricPayload
 from ddpui.core.ai.typed_dicts import CreationArtifact
 
 Aggregation = Literal[tuple(VALID_AGGREGATIONS)]
@@ -53,7 +54,7 @@ def create_metric(
     test query before saving."""
     ctx = runtime.context
     try:
-        metric = MetricService.create_metric(
+        payload = MetricPayload(
             name=name,
             description=description,
             schema_name=schema_name,
@@ -61,6 +62,15 @@ def create_metric(
             column=column,
             aggregation=aggregation,
             column_expression=column_expression,
+        )
+        metric = MetricService.create_metric(
+            name=payload.name,
+            description=payload.description,
+            schema_name=payload.schema_name,
+            table_name=payload.table_name,
+            column=payload.column,
+            aggregation=payload.aggregation,
+            column_expression=payload.column_expression,
             orguser=_load_orguser(ctx),
         )
     except Exception as err:  # pylint: disable=broad-except

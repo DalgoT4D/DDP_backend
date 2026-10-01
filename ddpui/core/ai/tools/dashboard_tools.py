@@ -20,11 +20,10 @@ from langchain.tools import ToolRuntime, tool
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import register_tool
 from ddpui.core.ai.tools.rendering import created, error_reason, rejection
-from ddpui.models.dashboard import Dashboard
 from ddpui.models.org_user import OrgUser
-from ddpui.models.visualization import Chart
 from ddpui.schemas.chat_with_data_schemas import CreatedArtifact
 from ddpui.schemas.dashboard_schema import DashboardTabSchema, DashboardUpdate
+from ddpui.services.chart_service import ChartNotFoundError, ChartService
 from ddpui.services.dashboard_service import (
     DashboardData,
     DashboardLockedError,
@@ -69,35 +68,36 @@ def place_charts(existing_layout: list[dict], chart_ids: list[int]) -> tuple[lis
 # ── ORM seams (monkeypatched in unit tests; sync ORM is fine in tool threads) ──
 
 
-def _load_dashboards(ctx: RunContext) -> list[tuple[int, str, bool]]:
-    return [
-        (d.id, d.title, d.is_published)
-        for d in Dashboard.objects.filter(org_id=ctx.org_id, dashboard_type="native").order_by(
-            "-updated_at"
-        )[:30]
-    ]
-
-
-def _org_chart_ids(ctx: RunContext, chart_ids: list[int]) -> set[int]:
-    return set(
-        Chart.objects.filter(org_id=ctx.org_id, id__in=chart_ids).values_list("id", flat=True)
+def _load_dashboards(orguser: OrgUser) -> list[tuple[int, str, bool]]:
+    dashboards = DashboardService.list_dashboards(
+        orguser.org, dashboard_type="native", orguser=orguser
     )
+    return [(d.id, d.title, d.is_published) for d in dashboards[:30]]
+
+
+def _org_chart_ids(orguser: OrgUser, chart_ids: list[int]) -> set[int]:
+    valid = set()
+    for chart_id in chart_ids:
+        try:
+            ChartService.get_chart(chart_id, orguser.org)
+            valid.add(chart_id)
+        except ChartNotFoundError:
+            pass
+    return valid
 
 
 def _load_orguser(ctx: RunContext) -> OrgUser:
     return OrgUser.objects.select_related("org").get(id=ctx.orguser_id)
 
 
-def _create_dashboard(ctx: RunContext, title: str, description: str | None, chart_ids: list[int]):
-    orguser = _load_orguser(ctx)
+def _create_dashboard(orguser: OrgUser, title: str, description: str | None, chart_ids: list[int]):
     dashboard = DashboardService.create_dashboard(
         DashboardData(title=title, description=description, grid_columns=GRID_COLUMNS), orguser
     )
     return _place_on_first_tab(dashboard, chart_ids, orguser)
 
 
-def _add_charts(ctx: RunContext, dashboard_id: int, chart_ids: list[int]):
-    orguser = _load_orguser(ctx)
+def _add_charts(orguser: OrgUser, dashboard_id: int, chart_ids: list[int]):
     dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
     return _place_on_first_tab(dashboard, chart_ids, orguser)
 
@@ -148,8 +148,8 @@ def list_dashboards(runtime: ToolRuntime[RunContext]) -> str:
     """List the organization's dashboards (id, title, published state). ALWAYS
     call this before creating a dashboard or adding a chart to one, so you can
     ask the user whether to add to an existing dashboard or create a new one."""
-    ctx = runtime.context
-    dashboards = _load_dashboards(ctx)
+    orguser = _load_orguser(runtime.context)
+    dashboards = _load_dashboards(orguser)
     if not dashboards:
         return "This organization has no dashboards yet."
     lines = ["Dashboards:"]
@@ -175,13 +175,14 @@ def create_dashboard(
     if not chart_ids:
         return _rejected("provide at least one chart_id to place on the dashboard")
 
-    known = _org_chart_ids(ctx, chart_ids)
+    orguser = _load_orguser(ctx)
+    known = _org_chart_ids(orguser, chart_ids)
     missing = [cid for cid in chart_ids if cid not in known]
     if missing:
         return _rejected(f"chart id(s) {missing} do not exist in this organization")
 
     try:
-        dashboard = _create_dashboard(ctx, title, description, chart_ids)
+        dashboard = _create_dashboard(orguser, title, description, chart_ids)
     except Exception as err:  # pylint: disable=broad-except
         return _rejected(f"saving failed ({error_reason(err)})")
     return _dashboard_artifact(dashboard)
@@ -200,13 +201,14 @@ def add_charts_to_dashboard(
     if not chart_ids:
         return _rejected("provide at least one chart_id to add")
 
-    known = _org_chart_ids(ctx, chart_ids)
+    orguser = _load_orguser(ctx)
+    known = _org_chart_ids(orguser, chart_ids)
     missing = [cid for cid in chart_ids if cid not in known]
     if missing:
         return _rejected(f"chart id(s) {missing} do not exist in this organization")
 
     try:
-        dashboard = _add_charts(ctx, dashboard_id, chart_ids)
+        dashboard = _add_charts(orguser, dashboard_id, chart_ids)
     except DashboardNotFoundError:
         return _rejected(f"dashboard {dashboard_id} not found — use list_dashboards for valid ids")
     except DashboardLockedError as err:

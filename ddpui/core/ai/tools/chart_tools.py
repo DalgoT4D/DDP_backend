@@ -18,8 +18,7 @@ from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import register_tool
 from ddpui.core.ai.tools.rendering import created, error_reason, rejection
 from ddpui.models.org_user import OrgUser
-from ddpui.models.visualization import Chart
-from ddpui.schemas.chart_schemas import ChartCreate, ChartMetric
+from ddpui.schemas.chart_schemas.crud import ChartCreate
 from ddpui.schemas.chat_with_data_schemas import CreatedArtifact
 from ddpui.services.chart_service import ChartData, ChartService
 from ddpui.core.ai.typed_dicts import CreationArtifact
@@ -32,22 +31,29 @@ def _rejected(reason: str) -> tuple[str, CreationArtifact]:
     return rejection("chart", "Chart not created", reason)
 
 
-def _save_chart(ctx: RunContext, chart_data: ChartData) -> Chart:
-    """Persist via the same service the Charts page uses. Sync ORM is fine here:
-    LangGraph executes sync tools in a worker thread, not on the event loop."""
-    orguser = OrgUser.objects.select_related("org").get(id=ctx.orguser_id)
-    return ChartService.create_chart(chart_data, orguser)
+def _load_orguser(ctx: RunContext) -> OrgUser:
+    return OrgUser.objects.select_related("org").get(id=ctx.orguser_id)
 
 
-def _with_default_alias(metric: ChartMetric) -> dict:
-    """The chart builder always names a metric; give the agent's unnamed ones
-    the same "<aggregation>_<column>" label."""
-    data = metric.model_dump(exclude_none=True)
-    if not metric.alias and metric.aggregation:
-        data["alias"] = (
-            f"{metric.aggregation}_{metric.column}" if metric.column else metric.aggregation
-        )
-    return data
+def _save_chart(ctx: RunContext, payload: ChartCreate) -> "Chart":
+    """Convert the validated ChartCreate payload to ChartData and persist."""
+    orguser = _load_orguser(ctx)
+    extra_config_dict = (
+        payload.extra_config.model_dump()
+        if hasattr(payload.extra_config, "model_dump")
+        else payload.extra_config or {}
+    )
+    return ChartService.create_chart(
+        ChartData(
+            title=payload.title,
+            description=payload.description,
+            chart_type=payload.chart_type,
+            schema_name=payload.schema_name,
+            table_name=payload.table_name,
+            extra_config=extra_config_dict,
+        ),
+        orguser,
+    )
 
 
 @register_tool
@@ -57,51 +63,36 @@ def create_chart(
     chart_type: AgentChartType,
     schema_name: str,
     table_name: str,
+    extra_config: dict,
     runtime: ToolRuntime[RunContext],
-    dimension_column: str | None = None,
-    metrics: list[ChartMetric] | None = None,
     description: str | None = None,
 ) -> tuple[str, CreationArtifact]:
     """Create a saved chart in the organization's chart library from ONE table.
 
-    dimension_column: the column to group by — REQUIRED for bar/line (x-axis)
-    and pie (slices); omit for number.
-    metrics: the measured values, each {column, aggregation, alias}; omit
-    column for a row count. Bar and line charts can plot SEVERAL metrics at
-    once (grouped bars / multiple lines — e.g. silt target vs silt achieved per
-    state); pie and number take exactly one. Omit metrics entirely for a simple
-    row count. Verify column names with get_table_details first. Use a short,
-    descriptive title the user will recognize later."""
+    extra_config structure per chart_type:
+    - bar / line: {"dimension_column": "<col>", "metrics": [{"column": "<col>", "aggregation": "<agg>", "alias": "<label>"}]}
+    - pie:        {"dimension_column": "<col>", "metrics": [{"column": "<col>", "aggregation": "<agg>"}]}
+    - number:     {"metrics": [{"column": "<col>", "aggregation": "<agg>"}]}
+
+    aggregation values: sum | avg | count | min | max | count_distinct.
+    Omit column when aggregation is "count" (row count). Bar and line accept
+    multiple metrics for grouped bars / multiple lines.
+    Verify column names with get_table_details first. Use a short, descriptive
+    title the user will recognize later."""
     ctx = runtime.context
     if schema_name not in ctx.allowed_schemas:
         return _rejected(f"schema '{schema_name}' is not accessible")
 
     try:
-        extra_config: dict = {
-            "metrics": [
-                _with_default_alias(ChartMetric.model_validate(m))
-                for m in (metrics or [ChartMetric(aggregation="count")])
-            ]
-        }
-        if chart_type != "number" and dimension_column:
-            extra_config["dimension_column"] = dimension_column
-        payload = ChartCreate(
-            title=title,
-            description=description,
-            chart_type=chart_type,
-            schema_name=schema_name,
-            table_name=table_name,
-            extra_config=extra_config,
-        )
         chart = _save_chart(
             ctx,
-            ChartData(
-                title=payload.title,
-                description=payload.description,
-                chart_type=payload.chart_type,
-                schema_name=payload.schema_name,
-                table_name=payload.table_name,
-                extra_config=payload.extra_config.model_dump(),
+            ChartCreate(
+                title=title,
+                description=description,
+                chart_type=chart_type,
+                schema_name=schema_name,
+                table_name=table_name,
+                extra_config=extra_config,
             ),
         )
     except ValueError as err:  # pydantic ValidationError is a ValueError
