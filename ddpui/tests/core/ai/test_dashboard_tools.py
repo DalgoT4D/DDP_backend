@@ -31,19 +31,26 @@ def run_tool(tool, ctx, **kwargs):
 # ── grid placement (pure logic) ─────────────────────────────────────────────
 
 
-def test_place_charts_fills_rows_of_three():
-    layout, components = dashboard_tools.place_charts([], [10, 11, 12, 13])
-    assert [(l["x"], l["y"]) for l in layout] == [(0, 0), (4, 0), (8, 0), (0, 3)]
-    assert all(l["w"] == 4 and l["h"] == 3 for l in layout)
+def test_place_charts_stacks_full_width_rows():
+    charts = [(10, "bar"), (11, "line"), (12, "pie")]
+    layout, components = dashboard_tools.place_charts([], charts)
+    assert [(l["x"], l["y"]) for l in layout] == [(0, 0), (0, 18), (0, 36)]
+    assert all(l["w"] == 12 and l["h"] == 18 for l in layout)
     assert components["chart-10"] == {"type": "chart", "config": {"chartId": 10}}
     assert layout[0]["i"] == "chart-10"
 
 
 def test_place_charts_appends_below_existing_items():
-    existing = [{"i": "chart-5", "x": 0, "y": 0, "w": 4, "h": 3}]
-    layout, _ = dashboard_tools.place_charts(existing, [10])
-    assert layout[0]["y"] == 3  # below the existing row
+    existing = [{"i": "chart-5", "x": 0, "y": 0, "w": 4, "h": 18}]
+    layout, _ = dashboard_tools.place_charts(existing, [(10, "bar")])
+    assert layout[0]["y"] == 18  # below the existing row
     assert layout[0]["x"] == 0
+
+
+def test_place_charts_number_charts_are_compact():
+    layout, _ = dashboard_tools.place_charts([], [(10, "number"), (11, "bar")])
+    assert [l["h"] for l in layout] == [8, 18]
+    assert layout[1]["y"] == 8
 
 
 # ── list_dashboards ─────────────────────────────────────────────────────────
