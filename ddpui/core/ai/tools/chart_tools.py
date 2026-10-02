@@ -63,8 +63,8 @@ def create_chart(
     chart_type: AgentChartType,
     schema_name: str,
     table_name: str,
-    extra_config: dict,
     runtime: ToolRuntime[RunContext],
+    extra_config: dict | None = None,
     description: str | None = None,
 ) -> tuple[str, CreationArtifact]:
     """Create a saved chart in the organization's chart library from ONE table.
