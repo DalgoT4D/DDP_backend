@@ -23,6 +23,7 @@ from ddpui.core.reports.report_service import ReportService
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.metric import Metric
 from ddpui.models.org import OrgWarehouse
+from ddpui.models.report import ReportSnapshot
 from ddpui.schemas.chart_schemas.crud import ChartCreate
 from ddpui.schemas.kpi_schema import KPICreate, KPIExtraConfig
 from ddpui.services.chart_service import ChartData, ChartService
@@ -102,3 +103,91 @@ def test_ai_chart_renders_on_dashboard(orguser, org_warehouse, seed_db, chart_ty
         response = get_chart_data_by_id(mock_request(orguser), chart.id)
 
     assert response.echarts_config
+
+
+def dashboard_with(orguser, components: dict) -> Dashboard:
+    return Dashboard.objects.create(
+        title="AI Dashboard",
+        dashboard_type="native",
+        grid_columns=12,
+        tabs=[{"id": "tab-1", "title": "T", "layout_config": [], "components": components}],
+        created_by=orguser,
+        org=orguser.org,
+    )
+
+
+def snapshot_of(orguser, dashboard):
+    return ReportService.create_snapshot(
+        title="AI Report",
+        dashboard_id=dashboard.id,
+        orguser=orguser,
+        date_column={},
+        period_start=None,
+        period_end=date(2025, 1, 31),
+    )
+
+
+@pytest.mark.parametrize("chart_type", ["bar", "line", "pie", "number"])
+def test_ai_chart_renders_in_report(orguser, org_warehouse, seed_db, chart_type):
+    chart = save_like_ai_tool(orguser, chart_type)
+    dashboard = dashboard_with(
+        orguser, {f"chart-{chart.id}": {"type": "chart", "config": {"chartId": chart.id}}}
+    )
+    snapshot = snapshot_of(orguser, dashboard)
+
+    with patch(f"{CHARTS_SERVICE}.get_warehouse_client"), patch(
+        f"{CHARTS_SERVICE}.build_chart_query"
+    ), patch(f"{CHARTS_SERVICE}.execute_chart_query", return_value=WAREHOUSE_ROWS[chart_type]):
+        result = ReportService.get_report_chart_data(snapshot.id, chart.id, orguser.org)
+
+    assert result["echarts_config"]
+
+
+@pytest.fixture
+def ai_kpi(orguser):
+    """Mirror ddpui.core.ai.tools.metric_tools.create_kpi."""
+    metric = Metric.objects.create(
+        name="Revenue",
+        schema_name="public",
+        table_name="orders",
+        column="amount",
+        aggregation="sum",
+        org=orguser.org,
+        created_by=orguser,
+    )
+    kpi = KPIService.create_kpi(
+        KPICreate(
+            metric_id=metric.id,
+            direction="increase",
+            time_grain="monthly",
+            time_dimension_column="created_at",
+            extra_config=KPIExtraConfig(),
+        ),
+        orguser,
+    )
+    yield kpi
+    ReportSnapshot.objects.filter(org=orguser.org).delete()
+    kpi.delete()
+    metric.delete()
+
+
+PERIODS = [{"period": "2025-01", "value": 30}]
+
+
+def test_ai_kpi_renders_live(orguser, org_warehouse, ai_kpi):
+    with patch.object(KPIService, "_compute_trend", return_value=PERIODS):
+        result = KPIService.compute_kpi_data(KPIService.kpi_to_response(ai_kpi), orguser.org)
+
+    assert result["data"]["current_value"] == 30
+    assert result["data"]["customizations"] is None
+
+
+def test_ai_kpi_renders_in_report(orguser, org_warehouse, ai_kpi):
+    dashboard = dashboard_with(
+        orguser, {f"kpi-{ai_kpi.id}": {"type": "kpi", "config": {"kpiId": ai_kpi.id}}}
+    )
+    with patch.object(KPIService, "_compute_trend", return_value=PERIODS):
+        snapshot = snapshot_of(orguser, dashboard)
+        result = ReportService.get_report_kpi_data(snapshot.id, ai_kpi.id, orguser.org)
+
+    assert result["data"]["current_value"] == 30
