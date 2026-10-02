@@ -68,7 +68,7 @@ def test_create_dashboard_runs_the_api_side_effects(mock_audit_log, org, admin):
     dashboard = Dashboard.objects.get(id=artifact["object_id"])
     assert f"chart-{chart.id}" in dashboard.tabs[0]["components"]
     # same default footprint the dashboard builder gives a new chart
-    assert {k: dashboard.tabs[0]["layout_config"][0][k] for k in ("w", "h")} == {"w": 4, "h": 18}
+    assert {k: dashboard.tabs[0]["layout_config"][0][k] for k in ("w", "h")} == {"w": 12, "h": 18}
     assert dashboard.is_org_default  # admin + org had no default yet
     assert ResourceShare.objects.filter(  # owner's self-share materialised
         resource_type=ResourceType.DASHBOARD,

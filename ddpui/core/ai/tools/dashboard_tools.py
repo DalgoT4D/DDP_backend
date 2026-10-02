@@ -33,13 +33,12 @@ from ddpui.services.dashboard_service import (
 )
 from ddpui.core.ai.typed_dicts import CreationArtifact
 
-# Grid placement: 12-column grid (20px rows), three 4-wide charts per row. Sizes
-# mirror the builder's getDefaultGridDimensions (webapp_v2 lib/chart-size-constraints.ts)
-CHART_W = 4
+# Grid placement: 12-column grid (20px rows), one full-width chart per row — the
+# builder's add-chart default (webapp_v2 dashboard-builder-v2 handleChartSelected,
+# heights from getDefaultGridDimensions in lib/chart-size-constraints.ts)
+GRID_COLUMNS = 12
 CHART_H = 18
 COMPACT_CHART_H = 8  # number charts show a single value
-GRID_COLUMNS = 12
-_PER_ROW = GRID_COLUMNS // CHART_W
 
 
 def chart_height(chart_type: str) -> int:
@@ -54,26 +53,16 @@ def place_charts(
     existing_layout: list[dict], charts: list[tuple[int, str]]
 ) -> tuple[list[dict], dict]:
     """Grid positions + component configs for (chart_id, chart_type) pairs,
-    appended BELOW any existing items so nothing overlaps. Each row is as tall
-    as its tallest chart."""
-    row_y = max((item.get("y", 0) + item.get("h", 0) for item in existing_layout), default=0)
+    stacked BELOW any existing items so nothing overlaps."""
+    y = max((item.get("y", 0) + item.get("h", 0) for item in existing_layout), default=0)
     layout: list[dict] = []
     components: dict = {}
-    for row_start in range(0, len(charts), _PER_ROW):
-        row = charts[row_start : row_start + _PER_ROW]
-        for col, (chart_id, chart_type) in enumerate(row):
-            key = f"chart-{chart_id}"
-            layout.append(
-                {
-                    "i": key,
-                    "x": col * CHART_W,
-                    "y": row_y,
-                    "w": CHART_W,
-                    "h": chart_height(chart_type),
-                }
-            )
-            components[key] = {"type": "chart", "config": {"chartId": chart_id}}
-        row_y += max(chart_height(chart_type) for _, chart_type in row)
+    for chart_id, chart_type in charts:
+        key = f"chart-{chart_id}"
+        height = chart_height(chart_type)
+        layout.append({"i": key, "x": 0, "y": y, "w": GRID_COLUMNS, "h": height})
+        components[key] = {"type": "chart", "config": {"chartId": chart_id}}
+        y += height
     return layout, components
 
 
