@@ -21,6 +21,7 @@ from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import register_tool
 from ddpui.core.ai.tools.rendering import created, error_reason, rejection
 from ddpui.models.org_user import OrgUser
+from ddpui.models.visualization import Chart
 from ddpui.schemas.chat_with_data_schemas import CreatedArtifact
 from ddpui.schemas.dashboard_schema import DashboardTabSchema, DashboardUpdate
 from ddpui.services.chart_service import ChartNotFoundError, ChartService
@@ -32,36 +33,47 @@ from ddpui.services.dashboard_service import (
 )
 from ddpui.core.ai.typed_dicts import CreationArtifact
 
-# Grid placement: 12-column grid, three 4-wide × 3-tall charts per row —
-# the same footprint the dashboard builder uses for chart components
+# Grid placement: 12-column grid (20px rows), three 4-wide charts per row. Sizes
+# mirror the builder's getDefaultGridDimensions (webapp_v2 lib/chart-size-constraints.ts)
 CHART_W = 4
-CHART_H = 3
+CHART_H = 18
+COMPACT_CHART_H = 8  # number charts show a single value
 GRID_COLUMNS = 12
 _PER_ROW = GRID_COLUMNS // CHART_W
+
+
+def chart_height(chart_type: str) -> int:
+    return COMPACT_CHART_H if chart_type == "number" else CHART_H
 
 
 def _rejected(reason: str) -> tuple[str, CreationArtifact]:
     return rejection("dashboard", "Dashboard action not done", reason)
 
 
-def place_charts(existing_layout: list[dict], chart_ids: list[int]) -> tuple[list[dict], dict]:
-    """Grid positions + component configs for chart_ids, appended BELOW any
-    existing items so nothing overlaps."""
-    base_y = max((item.get("y", 0) + item.get("h", 0) for item in existing_layout), default=0)
+def place_charts(
+    existing_layout: list[dict], charts: list[tuple[int, str]]
+) -> tuple[list[dict], dict]:
+    """Grid positions + component configs for (chart_id, chart_type) pairs,
+    appended BELOW any existing items so nothing overlaps. Each row is as tall
+    as its tallest chart."""
+    row_y = max((item.get("y", 0) + item.get("h", 0) for item in existing_layout), default=0)
     layout: list[dict] = []
     components: dict = {}
-    for index, chart_id in enumerate(chart_ids):
-        key = f"chart-{chart_id}"
-        layout.append(
-            {
-                "i": key,
-                "x": (index % _PER_ROW) * CHART_W,
-                "y": base_y + (index // _PER_ROW) * CHART_H,
-                "w": CHART_W,
-                "h": CHART_H,
-            }
-        )
-        components[key] = {"type": "chart", "config": {"chartId": chart_id}}
+    for row_start in range(0, len(charts), _PER_ROW):
+        row = charts[row_start : row_start + _PER_ROW]
+        for col, (chart_id, chart_type) in enumerate(row):
+            key = f"chart-{chart_id}"
+            layout.append(
+                {
+                    "i": key,
+                    "x": col * CHART_W,
+                    "y": row_y,
+                    "w": CHART_W,
+                    "h": chart_height(chart_type),
+                }
+            )
+            components[key] = {"type": "chart", "config": {"chartId": chart_id}}
+        row_y += max(chart_height(chart_type) for _, chart_type in row)
     return layout, components
 
 
@@ -84,6 +96,12 @@ def _org_chart_ids(orguser: OrgUser, chart_ids: list[int]) -> set[int]:
         except ChartNotFoundError:
             pass
     return valid
+
+
+def _chart_types(orguser: OrgUser, chart_ids: list[int]) -> dict[int, str]:
+    return dict(
+        Chart.objects.filter(org=orguser.org, id__in=chart_ids).values_list("id", "chart_type")
+    )
 
 
 def _load_orguser(ctx: RunContext) -> OrgUser:
@@ -112,7 +130,10 @@ def _place_on_first_tab(dashboard, chart_ids: list[int], orguser: OrgUser):
     new_ids = [cid for cid in chart_ids if f"chart-{cid}" not in tab.get("components", {})]
     if not new_ids:
         return dashboard
-    layout, components = place_charts(tab.get("layout_config", []), new_ids)
+    chart_types = _chart_types(orguser, new_ids)
+    layout, components = place_charts(
+        tab.get("layout_config", []), [(cid, chart_types.get(cid, "")) for cid in new_ids]
+    )
     first_tab = {
         **tab,
         "layout_config": tab.get("layout_config", []) + layout,
