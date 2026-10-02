@@ -230,7 +230,8 @@ def build_chart_data_payload(
         resolved_dashboard_filters: Optional list of resolved dashboard filter dicts.
     """
     ec = chart_config.extra_config or {}
-    customizations = ec.get("customizations", {})
+    # Key can be present with None (charts saved via ChartCreate.model_dump, e.g. the AI tool)
+    customizations = ec.get("customizations") or {}
     if chart_config.title:
         customizations["title"] = chart_config.title
 
