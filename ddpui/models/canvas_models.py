@@ -48,6 +48,11 @@ class CanvasNode(models.Model):
         OrgDbtModel, on_delete=models.SET_NULL, null=True
     )  # For MODEL/SOURCE nodes
 
+    # Canonical React Flow position. Coordinates represent the top-left corner
+    # of the node in flow space and are intentionally independent of pan/zoom.
+    position_x = models.FloatField(null=True, blank=True)
+    position_y = models.FloatField(null=True, blank=True)
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
