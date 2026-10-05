@@ -748,7 +748,7 @@ class TestGetPublicFilterPreview:
         mock_results = [{"value": "shipped", "count": 10}, {"value": "pending", "count": 5}]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.api.public_api.execute_query"
+            "ddpui.core.charts.charts_service.execute_query"
         ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()
@@ -769,12 +769,103 @@ class TestGetPublicFilterPreview:
             assert response.options[0].value == "shipped"
             assert response.options[0].count == 10
 
+    def test_dashboard_token_value_filter_narrowed_by_constraint(self, public_dashboard, seed_db):
+        """A `constraints` entry adds a narrowing WHERE clause to the query"""
+        mock_results = [{"value": "Ernakulam", "count": 4}]
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.core.charts.charts_service.execute_query"
+        ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
+            mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
+            mock_wc.return_value = MagicMock()
+            mock_exec.return_value = mock_results
+
+            request = _make_public_request()
+            response = get_public_filter_preview(
+                request,
+                token=public_dashboard.public_share_token,
+                schema_name="public",
+                table_name="orders",
+                column_name="district",
+                filter_type="value",
+                constraints='[{"column": "state", "operator": "in", "value": ["Kerala"]}]',
+            )
+
+            assert response.is_valid is True
+            # Called as execute_query(warehouse_client, query_builder) — inspect the builder
+            query_builder = mock_exec.call_args[0][1]
+            assert len(query_builder.where_clauses) == 2
+            assert "state" in str(query_builder.where_clauses[1])
+
+    def test_dashboard_token_narrowed_by_multiple_constraints_and_combined(
+        self, public_dashboard, seed_db
+    ):
+        """Two `constraints` entries AND-combine on the live public dashboard share too --
+        _execute_filter_preview is shared, so this also covers the report-share route."""
+        mock_results = [{"value": "Ernakulam", "count": 4}]
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.core.charts.charts_service.execute_query"
+        ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
+            mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
+            mock_wc.return_value = MagicMock()
+            mock_exec.return_value = mock_results
+
+            request = _make_public_request()
+            response = get_public_filter_preview(
+                request,
+                token=public_dashboard.public_share_token,
+                schema_name="public",
+                table_name="orders",
+                column_name="city",
+                filter_type="value",
+                constraints=(
+                    '[{"column": "state", "operator": "in", "value": ["Kerala"]}, '
+                    '{"column": "country", "operator": "in", "value": ["India"]}]'
+                ),
+            )
+
+            assert response.is_valid is True
+            query_builder = mock_exec.call_args[0][1]
+            assert len(query_builder.where_clauses) == 3
+            assert "state" in str(query_builder.where_clauses[1])
+            assert "country" in str(query_builder.where_clauses[2])
+
+    def test_dashboard_token_narrowed_query_falls_back_on_error(self, public_dashboard, seed_db):
+        """_execute_filter_preview is shared by both public routes -- proving the fallback
+        here also covers the report-share route, which calls the same helper."""
+        mock_results = [{"value": "Ernakulam", "count": 4}, {"value": "Pune", "count": 2}]
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.core.charts.charts_service.execute_query"
+        ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
+            mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
+            mock_wc.return_value = MagicMock()
+            mock_exec.side_effect = [Exception("column state does not exist"), mock_results]
+
+            request = _make_public_request()
+            response = get_public_filter_preview(
+                request,
+                token=public_dashboard.public_share_token,
+                schema_name="public",
+                table_name="orders",
+                column_name="district",
+                filter_type="value",
+                constraints='[{"column": "state", "operator": "in", "value": ["Kerala"]}]',
+            )
+
+            assert response.is_valid is True
+            assert len(response.options) == 2
+            assert mock_exec.call_count == 2
+            retry_query_builder = mock_exec.call_args_list[1][0][1]
+            assert len(retry_query_builder.where_clauses) == 1
+
     def test_report_token_value_filter(self, public_snapshot, seed_db):
         """Public report snapshot token resolves org and returns value filter options"""
         mock_results = [{"value": "active", "count": 20}, {"value": "inactive", "count": 3}]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.api.public_api.execute_query"
+            "ddpui.core.charts.charts_service.execute_query"
         ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()
@@ -793,6 +884,33 @@ class TestGetPublicFilterPreview:
             assert response.is_valid is True
             assert len(response.options) == 2
             assert response.options[0].value == "active"
+
+    def test_report_token_value_filter_narrowed_by_constraint(self, public_snapshot, seed_db):
+        """A `constraints` entry narrows options on the report-share preview route too"""
+        mock_results = [{"value": "Ernakulam", "count": 4}]
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.core.charts.charts_service.execute_query"
+        ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
+            mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
+            mock_wc.return_value = MagicMock()
+            mock_exec.return_value = mock_results
+
+            request = _make_public_request()
+            response = get_public_report_filter_preview(
+                request,
+                token=public_snapshot.public_share_token,
+                schema_name="public",
+                table_name="orders",
+                column_name="district",
+                filter_type="value",
+                constraints='[{"column": "state", "operator": "in", "value": ["Kerala"]}]',
+            )
+
+            assert response.is_valid is True
+            query_builder = mock_exec.call_args[0][1]
+            assert len(query_builder.where_clauses) == 2
+            assert "state" in str(query_builder.where_clauses[1])
 
     def test_report_token_numerical_filter(self, public_snapshot, seed_db):
         """Public report token works for numerical filter type"""

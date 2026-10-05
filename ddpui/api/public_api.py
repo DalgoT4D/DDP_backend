@@ -2,7 +2,7 @@
 
 import hmac
 import json
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import copy
 from datetime import datetime
 
@@ -30,6 +30,7 @@ from ddpui.services.dashboard_service import DashboardService
 from ddpui.api.filter_api import (
     FilterPreviewResponse,
     FilterOptionResponse as AuthFilterOptionResponse,
+    parse_narrowing_constraints,
 )
 from ddpui.schemas.chart_schemas import (
     ChartConfig,
@@ -38,7 +39,11 @@ from ddpui.schemas.chart_schemas import (
     MapDataOverlayPayload,
 )
 from ddpui.core.charts import charts_service
-from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
+from ddpui.core.charts.charts_service import (
+    get_warehouse_client,
+    execute_query,
+    get_value_filter_options_with_fallback,
+)
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.core.reports.report_service import ReportService
 from ddpui.core.kpi.kpi_service import KPIService
@@ -322,6 +327,7 @@ def _execute_filter_preview(
     column_name: str,
     filter_type: str,
     limit: int,
+    constraints: Optional[List[Dict[str, Any]]] = None,  # narrows this filter
 ):
     """Shared logic for executing a filter preview query against the warehouse.
 
@@ -330,16 +336,14 @@ def _execute_filter_preview(
     warehouse_client = get_warehouse_client(org_warehouse)
 
     if filter_type == "value":
-        query_builder = AggQueryBuilder()
-        query_builder.add_column(column(column_name).label("value"))
-        query_builder.add_aggregate_column(None, "count", alias="count")
-        query_builder.fetch_from(table_name, schema_name)
-        query_builder.where_clause(column(column_name).isnot(None))
-        query_builder.group_cols_by(column_name)
-        query_builder.order_cols_by([("count", "desc"), ("value", "asc")])
-        query_builder.limit_rows(limit)
-
-        results = execute_query(warehouse_client, query_builder)
+        results = get_value_filter_options_with_fallback(
+            warehouse_client,
+            schema_name,
+            table_name,
+            column_name,
+            limit,
+            constraints=constraints,
+        )
         options = [
             AuthFilterOptionResponse(
                 label=str(row["value"]) if row["value"] is not None else "NULL",
@@ -421,6 +425,7 @@ def get_public_filter_preview(
     column_name: str,
     filter_type: str,
     limit: int = 100,
+    constraints: Optional[str] = None,  # JSON list of {column, operator, value}
 ):
     """Get public filter preview for a dashboard token"""
     dashboard = _resolve_public_dashboard(token)
@@ -438,7 +443,13 @@ def get_public_filter_preview(
             raise Exception("No warehouse configured for organization")
 
         return _execute_filter_preview(
-            org_warehouse, schema_name, table_name, column_name, filter_type, limit
+            org_warehouse,
+            schema_name,
+            table_name,
+            column_name,
+            filter_type,
+            limit,
+            parse_narrowing_constraints(constraints),
         )
 
     except ValueError as e:
@@ -460,6 +471,7 @@ def get_public_report_filter_preview(
     column_name: str,
     filter_type: str,
     limit: int = 100,
+    constraints: Optional[str] = None,  # JSON list of {column, operator, value}
 ):
     """Get public filter preview for a report snapshot token"""
     try:
@@ -478,7 +490,13 @@ def get_public_report_filter_preview(
             raise Exception("No warehouse configured for organization")
 
         return _execute_filter_preview(
-            org_warehouse, schema_name, table_name, column_name, filter_type, limit
+            org_warehouse,
+            schema_name,
+            table_name,
+            column_name,
+            filter_type,
+            limit,
+            parse_narrowing_constraints(constraints),
         )
 
     except ValueError as e:

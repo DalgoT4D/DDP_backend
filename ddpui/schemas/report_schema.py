@@ -27,6 +27,7 @@ class FrozenDashboardConfig(Schema):
     tabs: Optional[List[Dict[str, Any]]] = None
     filter_layout: Optional[str] = None
     filters: List[Dict[str, Any]] = []
+    dependent_group_filter_ids: List[int] = []
 
 
 class FrozenChartConfig(Schema):

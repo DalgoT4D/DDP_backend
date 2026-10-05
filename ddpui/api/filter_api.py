@@ -1,5 +1,6 @@
 """Filter API endpoints for dashboard filters"""
 
+import json
 from typing import List, Optional, Dict, Any
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
@@ -11,9 +12,14 @@ from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.dashboard import DashboardFilterType
-from ddpui.core.charts.charts_service import execute_query, get_warehouse_client
+from ddpui.core.charts.charts_service import (
+    execute_query,
+    get_warehouse_client,
+    get_value_filter_options_with_fallback,
+)
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.core import warehousefunctions as _wh_funcs
+from ddpui.schemas.chart_schemas.config import FilterOperator
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -43,6 +49,33 @@ class FilterOptionResponse(Schema):
     label: str
     value: str
     count: Optional[int] = None
+
+
+class FilterNarrowingConstraint(Schema):
+    """One narrowing constraint -- same shape as ChartFilter, so it can go straight into
+    apply_chart_filters(). A numerical/datetime constraint sends two of these
+    (greater_than_equal + less_than_equal); a value constraint sends one (`in`)."""
+
+    column: str
+    operator: FilterOperator
+    value: Optional[Any] = None
+
+
+def parse_narrowing_constraints(constraints_json: Optional[str]) -> Optional[List[Dict[str, Any]]]:
+    """Parses the `constraints` query param into plain dicts. Raises HttpError(400) on bad
+    JSON or a bad shape."""
+    if not constraints_json:
+        return None
+    try:
+        raw = json.loads(constraints_json)
+    except json.JSONDecodeError as err:
+        raise HttpError(400, "Invalid constraints parameter: must be valid JSON") from err
+    try:
+        return [FilterNarrowingConstraint(**entry).dict() for entry in raw]
+    except (TypeError, ValueError) as err:
+        raise HttpError(
+            400, "Invalid constraints parameter: each entry needs a column, operator, and value"
+        ) from err
 
 
 class NumericalStatsResponse(Schema):
@@ -214,9 +247,11 @@ def get_filter_preview(
     column_name: str,
     filter_type: str,  # 'value', 'numerical', or 'datetime'
     limit: int = 100,
+    constraints: Optional[str] = None,  # JSON list of {column, operator, value}; narrows this filter
 ):
     """Get preview data for a filter (values, numerical stats, or date range)"""
     orguser = request.orguser
+    parsed_constraints = parse_narrowing_constraints(constraints)
 
     # Get org warehouse
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
@@ -227,18 +262,14 @@ def get_filter_preview(
         warehouse_client = get_warehouse_client(org_warehouse)
 
         if filter_type == "value":
-            # Get distinct values with counts for categorical filter
-            query_builder = AggQueryBuilder()
-            query_builder.add_column(column(column_name).label("value"))
-            query_builder.add_aggregate_column(None, "count", alias="count")
-            query_builder.fetch_from(table_name, schema_name)
-            query_builder.where_clause(column(column_name).isnot(None))
-            query_builder.group_cols_by(column_name)
-            query_builder.order_cols_by([("count", "desc"), ("value", "asc")])
-            query_builder.limit_rows(limit)
-
-            # Execute query using charts_service function
-            results = execute_query(warehouse_client, query_builder)
+            results = get_value_filter_options_with_fallback(
+                warehouse_client,
+                schema_name,
+                table_name,
+                column_name,
+                limit,
+                constraints=parsed_constraints,
+            )
 
             options = [
                 FilterOptionResponse(

@@ -31,6 +31,7 @@ from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.core.reports.report_service import ReportService
+from ddpui.services.dashboard_service import DashboardService, FilterData
 from ddpui.schemas.report_schema import SnapshotUpdate
 from ddpui.core.reports.exceptions import (
     SnapshotNotFoundError,
@@ -713,6 +714,46 @@ class TestGetSnapshotViewData:
         assert rm["period_end"] == date(2025, 1, 31)
         assert rm["dashboard_title"] == "Test Dashboard"
         assert rm["dashboard_id"] == sample_snapshot.frozen_dashboard["dashboard_id"]
+
+    def test_view_data_includes_dependent_group_filter_ids(
+        self, mock_org_warehouse_model, mock_factory, sample_dashboard, sample_filter, orguser, org
+    ):
+        """A dashboard's dependent group is frozen into the snapshot and exposed in view data"""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
+        f1 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="orders", column_name="state"
+            ),
+        )
+        f2 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="orders", column_name="city"
+            ),
+        )
+        DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id, f2.id])
+
+        snapshot = ReportService.create_snapshot(
+            title="Report with group",
+            dashboard_id=sample_dashboard.id,
+            date_column={
+                "schema_name": "public",
+                "table_name": "orders",
+                "column_name": "created_at",
+            },
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 1, 31),
+            orguser=orguser,
+        )
+
+        view_data = ReportService.get_snapshot_view_data(snapshot.id, org)
+
+        assert view_data["dashboard_data"]["dependent_group_filter_ids"] == [f1.id, f2.id]
 
     def test_warehouse_discovered_column_injects_chart_filters(
         self, mock_org_warehouse_model, mock_factory, sample_snapshot, org

@@ -41,7 +41,12 @@ from ddpui.services.dashboard_service import (
     upload_widget_image,
     copy_widget_image,
 )
-from ddpui.schemas.dashboard_schema import DashboardCreate, DashboardUpdate, DashboardTabSchema
+from ddpui.schemas.dashboard_schema import (
+    DashboardCreate,
+    DashboardUpdate,
+    DashboardTabSchema,
+    FilterUpdate,
+)
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
@@ -322,6 +327,116 @@ class TestCreateFilterValidation:
 
 
 # ================================================================================
+# Test set_dependent_group (dependent-filters v2 group model)
+# ================================================================================
+
+
+class TestSetDependentGroup:
+    """Tests for DashboardService.set_dependent_group()"""
+
+    def test_rejects_a_different_table_filter(self, sample_dashboard, org, seed_db):
+        """Grouping filters from two different tables is rejected -- narrowing can't
+        cross tables."""
+        f1 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="schools", column_name="state"
+            ),
+        )
+        f2 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="students", column_name="city"
+            ),
+        )
+
+        with pytest.raises(FilterValidationError):
+            DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id, f2.id])
+
+    def test_saving_a_single_member_dissolves_the_group(self, sample_dashboard, org, seed_db):
+        """A group needs 2+ members to narrow anything -- saving just 1 dissolves it
+        entirely (spec: 'a group under 2 members dissolves')."""
+        f1 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="schools", column_name="state"
+            ),
+        )
+
+        dashboard = DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id])
+
+        assert dashboard.dependent_group_filter_ids == []
+
+    def test_deleting_a_group_member_removes_it_from_the_group(self, sample_dashboard, org, seed_db):
+        """Deleting a filter that's in the dependent group removes it from that list too"""
+        f1 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="schools", column_name="state"
+            ),
+        )
+        f2 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value",
+                schema_name="public",
+                table_name="schools",
+                column_name="district",
+            ),
+        )
+        DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id, f2.id])
+
+        DashboardService.delete_filter(sample_dashboard.id, f2.id, org)
+
+        sample_dashboard.refresh_from_db()
+        assert f2.id not in sample_dashboard.dependent_group_filter_ids
+
+    def test_changing_a_group_members_type_removes_it_but_keeps_the_rest_grouped(
+        self, sample_dashboard, org, seed_db
+    ):
+        """Editing a group member's filter_type away from categorical removes it from
+        the group, leaving the other members correctly grouped (not dissolved, since 2
+        remain)."""
+        f1 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="schools", column_name="state"
+            ),
+        )
+        f2 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value",
+                schema_name="public",
+                table_name="schools",
+                column_name="population",
+            ),
+        )
+        f3 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="schools", column_name="city"
+            ),
+        )
+        DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id, f2.id, f3.id])
+
+        DashboardService.update_filter(
+            sample_dashboard.id, f2.id, org, FilterUpdate(filter_type="numerical")
+        )
+
+        sample_dashboard.refresh_from_db()
+        assert sample_dashboard.dependent_group_filter_ids == [f1.id, f3.id]
+
+
+# ================================================================================
 # Test Exception Classes
 # ================================================================================
 
@@ -429,7 +544,7 @@ class TestDataClasses:
 
         assert data.name is None
         assert data.settings is None
-        assert data.order == 0  # Default
+        assert data.order == 0
 
 
 # ================================================================================

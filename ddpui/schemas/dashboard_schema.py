@@ -89,6 +89,7 @@ class DashboardResponse(Schema):
     # mirrors enforcement from this; never "no_access" (those rows are hidden).
     access_level: Optional[str] = None
     is_private: bool = False
+    dependent_group_filter_ids: List[int] = []
 
 
 # =============================================================================
@@ -118,6 +119,18 @@ class FilterUpdate(Schema):
     column_name: Optional[str] = None
     settings: Optional[dict] = None
     order: Optional[int] = None
+
+
+class SetDependentGroup(Schema):
+    """Schema for replacing a dashboard's dependent group"""
+
+    filter_ids: List[int]
+
+
+class DependentGroupResponse(Schema):
+    """Schema for the dependent group after a set/replace"""
+
+    dependent_group_filter_ids: List[int]
 
 
 class FilterOptionResponse(Schema):

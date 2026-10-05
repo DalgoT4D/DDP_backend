@@ -736,6 +736,22 @@ class DashboardService:
         if data.order is not None:
             filter_obj.order = data.order
 
+        dashboard = filter_obj.dashboard
+        if filter_id in dashboard.dependent_group_filter_ids:
+            other_member_ids = [
+                fid for fid in dashboard.dependent_group_filter_ids if fid != filter_id
+            ]
+            other_members = dashboard.filters.filter(id__in=other_member_ids)
+            still_valid = filter_obj.filter_type == DashboardFilterType.VALUE.value and all(
+                (m.schema_name, m.table_name) == (filter_obj.schema_name, filter_obj.table_name)
+                for m in other_members
+            )
+            if not still_valid:
+                dashboard.dependent_group_filter_ids = (
+                    other_member_ids if len(other_member_ids) >= 2 else []
+                )
+                dashboard.save(update_fields=["dependent_group_filter_ids"])
+
         filter_obj.save()
         logger.info(f"Updated filter {filter_id} in dashboard {dashboard_id}")
         return filter_obj
@@ -757,9 +773,48 @@ class DashboardService:
             FilterNotFoundError: If filter doesn't exist
         """
         filter_obj = DashboardService.get_filter(dashboard_id, filter_id, org)
+        dashboard = filter_obj.dashboard
+
+        if filter_id in dashboard.dependent_group_filter_ids:
+            remaining = [fid for fid in dashboard.dependent_group_filter_ids if fid != filter_id]
+            # A group under 2 members dissolves entirely, rather than being left at 1.
+            dashboard.dependent_group_filter_ids = remaining if len(remaining) >= 2 else []
+            dashboard.save(update_fields=["dependent_group_filter_ids"])
+
         filter_obj.delete()
         logger.info(f"Deleted filter {filter_id} from dashboard {dashboard_id}")
         return True
+
+    @staticmethod
+    def set_dependent_group(dashboard_id: int, org: Org, filter_ids: List[int]) -> Dashboard:
+        """Replace a dashboard's dependent group with the given filter ids.
+
+        Every id must belong to this dashboard, be a categorical (VALUE-type) filter,
+        and share one (schema_name, table_name) -- narrowing can't cross tables.
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+            FilterValidationError: If any id is missing, non-categorical, or a different table
+        """
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+
+        filters = list(dashboard.filters.filter(id__in=filter_ids))
+        if len(filters) != len(filter_ids):
+            raise FilterValidationError("All filter ids must belong to this dashboard")
+
+        non_categorical = [f.id for f in filters if f.filter_type != DashboardFilterType.VALUE.value]
+        if non_categorical:
+            raise FilterValidationError(f"Only categorical filters can be grouped: {non_categorical}")
+
+        tables = {(f.schema_name, f.table_name) for f in filters}
+        if len(tables) > 1:
+            raise FilterValidationError("All filters in a dependent group must share one table")
+
+        # A group of exactly 1 can't narrow anything -- dissolve it instead.
+        dashboard.dependent_group_filter_ids = filter_ids if len(filter_ids) != 1 else []
+        dashboard.save(update_fields=["dependent_group_filter_ids"])
+        logger.info(f"Set dependent group for dashboard {dashboard_id}: {filter_ids}")
+        return dashboard
 
     # =========================================================================
     # Business Logic Operations (existing methods)
