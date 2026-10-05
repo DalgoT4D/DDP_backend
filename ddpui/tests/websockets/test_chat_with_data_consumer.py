@@ -129,20 +129,23 @@ def test_connect_closed_when_feature_not_enabled(orguser):
     run(scenario())
 
 
-def test_connect_closed_for_someone_elses_session(orguser, enabled_org):
+def test_connect_closed_for_another_orgs_session(orguser, enabled_org):
+    other_org = Org.objects.create(
+        name="Other WS Org", slug=f"ws-other-{uuid_lib.uuid4().hex[:8]}", airbyte_workspace_id="w"
+    )
     other_user = User.objects.create(
         username=f"cwdws2-{uuid_lib.uuid4().hex[:8]}", email="cwdws2@test.com", password="x"
     )
     other = OrgUser.objects.create(
         user=other_user,
-        org=orguser.org,
+        org=other_org,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
-    session = ChatWithDataSession.objects.create(org=orguser.org, orguser=orguser)
+    session = ChatWithDataSession.objects.create(org=other_org, orguser=other)
 
     async def scenario():
         communicator = make_communicator(
-            session_id=session.id, token=token_for(other), orgslug=orguser.org.slug
+            session_id=session.id, token=token_for(orguser), orgslug=orguser.org.slug
         )
         await communicator.connect()
         close = await communicator.receive_output()
@@ -295,6 +298,46 @@ def test_full_turn_streams_events_and_updates_title(orguser, scripted_turn):
     run(scenario())
     session.refresh_from_db()
     assert session.title == "Survey counts"
+
+
+def test_another_admin_in_the_org_can_continue_the_session(orguser, scripted_turn):
+    session = scripted_turn  # created by `orguser`
+    other_user = User.objects.create(
+        username=f"cwdws3-{uuid_lib.uuid4().hex[:8]}", email="cwdws3@test.com", password="x"
+    )
+    other = OrgUser.objects.create(
+        user=other_user,
+        org=orguser.org,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+
+    async def scenario():
+        communicator = make_communicator(
+            session_id=session.id, token=token_for(other), orgslug=orguser.org.slug
+        )
+        connected, _ = await communicator.connect()
+        assert connected
+
+        await communicator.send_json_to({"action": "send_message", "message": "how many?"})
+        while True:
+            event = await communicator.receive_json_from(timeout=10)
+            if event["type"] in ("title_updated", "error", "input_required"):
+                break
+        assert event["type"] == "input_required"
+
+        await communicator.send_json_to({"action": "resume_approval", "approve": True})
+        events = []
+        while True:
+            event = await communicator.receive_json_from(timeout=10)
+            events.append(event)
+            if event["type"] in ("title_updated", "error"):
+                break
+
+        complete = next(e for e in events if e["type"] == "message_complete")
+        assert complete["message"] == "1,284 surveys."
+        await communicator.disconnect()
+
+    run(scenario())
 
 
 def test_resume_approval_refuses_a_card_that_could_not_be_checked_for_pii(orguser, scripted_turn):
