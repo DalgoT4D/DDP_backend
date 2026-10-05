@@ -745,7 +745,7 @@ from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
 
 
 class TestReportAuditLogs:
-    @patch("ddpui.api.report_api.create_audit_log")
+    @patch("ddpui.core.reports.report_service.create_audit_log")
     def test_create_snapshot_creates_audit_log(
         self, mock_audit_log, orguser, sample_dashboard, sample_filter, sample_chart, seed_db
     ):

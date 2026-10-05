@@ -955,7 +955,7 @@ def test_seed_data(seed_db):
 from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
 
 
-@patch("ddpui.api.charts_api.create_audit_log")
+@patch("ddpui.services.chart_service.create_audit_log")
 def test_create_chart_creates_audit_log(mock_audit_log, seed_db, orguser, org_warehouse):
     """Test that creating a chart creates an audit log entry."""
     request = mock_request(orguser)

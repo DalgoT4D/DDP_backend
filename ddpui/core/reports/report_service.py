@@ -11,6 +11,8 @@ from django.utils import timezone
 
 from ddpui.core.access.access_control import accessible_filter
 from ddpui.core.access.ownership import is_creator_or_admin
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import ResourceType
@@ -74,17 +76,8 @@ class ReportService:
 
     @staticmethod
     def _extract_chart_ids(dashboard: Dashboard) -> List[int]:
-        """Extract chart IDs from tabs."""
-        chart_ids = []
-
-        for tab in dashboard.tabs or []:
-            for component in (tab.get("components") or {}).values():
-                if component.get("type") == "chart":
-                    chart_id = component.get("config", {}).get("chartId")
-                    if chart_id:
-                        chart_ids.append(chart_id)
-
-        return list(set(chart_ids))
+        """Extract chart IDs from tabs (delegates to the shared model walk)."""
+        return dashboard.component_ids("chart")
 
     @staticmethod
     def _freeze_chart_configs(dashboard: Dashboard) -> Dict[str, Any]:
@@ -722,6 +715,22 @@ class ReportService:
         )
 
         logger.info(f"Created snapshot {snapshot.id} from dashboard {dashboard_id}")
+
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.REPORT,
+            resource_id=str(snapshot.id),
+            action=AuditLogAction.CREATE,
+            resource_fields={
+                "title": title,
+                "dashboard": frozen_dashboard.get("title"),
+                "date_column": date_column or None,
+                # date objects aren't JSON-serializable by the default JSONField encoder
+                "period_start": period_start.isoformat() if period_start else None,
+                "period_end": period_end.isoformat() if period_end else None,
+            },
+        )
         return snapshot
 
     @staticmethod

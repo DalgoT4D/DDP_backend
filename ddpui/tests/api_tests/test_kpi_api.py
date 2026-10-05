@@ -221,7 +221,7 @@ from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
 
 
 class TestKPIAuditLogs:
-    @patch("ddpui.api.kpi_api.create_audit_log")
+    @patch("ddpui.core.kpi.kpi_service.create_audit_log")
     def test_create_kpi_creates_audit_log(self, mock_audit_log, orguser, sample_metric, seed_db):
         """Test that creating a KPI creates an audit log entry."""
         request = mock_request(orguser)

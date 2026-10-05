@@ -19,7 +19,11 @@ from django.utils import timezone
 from sqlalchemy import text, distinct, column
 from sqlalchemy.dialects import postgresql
 
+from ddpui.auth import orguser_has_permission
 from ddpui.core.access import access_control
+from ddpui.core.access.resource_share import sync_dashboard_cascade
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.resource_share import ResourceType
 from ddpui.models.dashboard import (
@@ -162,6 +166,24 @@ class LockInfo:
     lock_token: str
     expires_at: datetime
     locked_by_email: str
+
+
+# Fields update_dashboard can change; each one lands in the UPDATE audit log
+# only when its value actually differs from what was saved
+_AUDITED_UPDATE_FIELDS = (
+    "title",
+    "description",
+    "grid_columns",
+    "target_screen_size",
+    "tabs",
+    "filter_layout",
+    "is_published",
+)
+
+
+def _blank_normalized(value):
+    """Treat None and "" as equal: the DB stores None, the frontend sends an empty string."""
+    return value if value not in (None, "") else None
 
 
 class DashboardService:
@@ -389,6 +411,34 @@ class DashboardService:
         )
 
         logger.info(f"Created dashboard {dashboard.id} for org {orguser.org.id}")
+
+        # The org's first dashboard becomes its default when the creator may
+        # manage that; otherwise it becomes the creator's own landing page
+        org = orguser.org
+        if not Dashboard.objects.filter(org=org, is_org_default=True).exists():
+            if orguser_has_permission(orguser, "can_manage_org_default_dashboard"):
+                dashboard.is_org_default = True
+                dashboard.save(update_fields=["is_org_default"])
+            elif not orguser.landing_dashboard:
+                orguser.landing_dashboard = dashboard
+                orguser.save(update_fields=["landing_dashboard"])
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DASHBOARD,
+            resource_id=str(dashboard.id),
+            action=AuditLogAction.CREATE,
+            resource_fields={
+                "title": data.title,
+                "description": data.description or "",
+                "grid_columns": data.grid_columns,
+            },
+        )
+
+        # Materialise the owner's access as a self-share row so it survives
+        # future org-floor changes (no tabs yet, so no cascade children)
+        sync_dashboard_cascade(dashboard)
         return dashboard
 
     @staticmethod
@@ -420,6 +470,10 @@ class DashboardService:
             if not dashboard.lock.is_expired() and dashboard.lock.locked_by != orguser:
                 raise DashboardLockedError(dashboard.lock.locked_by.user.email)
 
+        # Pre-update values, so the audit log can skip fields that are sent
+        # but unchanged (auto-save re-sends the full current state)
+        before = {field: getattr(dashboard, field) for field in _AUDITED_UPDATE_FIELDS}
+
         # Apply updates
         if data.title is not None:
             dashboard.title = data.title
@@ -450,6 +504,33 @@ class DashboardService:
                 logger.info(f"Auto-refreshed lock for dashboard {dashboard_id} during save")
 
         logger.info(f"Updated dashboard {dashboard.id}")
+
+        if data.tabs is not None:
+            sync_dashboard_cascade(dashboard)
+
+        touched_fields = {
+            "title": data.title,
+            "description": data.description,
+            "grid_columns": data.grid_columns,
+            "target_screen_size": data.target_screen_size,
+            "tabs": [tab.model_dump() for tab in data.tabs] if data.tabs is not None else None,
+            "filter_layout": data.filter_layout,
+            "is_published": data.is_published,
+        }
+        changed_fields = {
+            field: value
+            for field, value in touched_fields.items()
+            if value is not None and _blank_normalized(value) != _blank_normalized(before[field])
+        }
+        if changed_fields:
+            create_audit_log(
+                org=org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.DASHBOARD,
+                resource_id=str(dashboard_id),
+                action=AuditLogAction.UPDATE,
+                resource_fields={**changed_fields, "title": dashboard.title},
+            )
         return dashboard
 
     @staticmethod

@@ -959,7 +959,7 @@ def test_seed_data(seed_db):
 from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_create_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser):
     """Test that creating a dashboard creates an audit log entry."""
     request = mock_request(orguser)
@@ -983,7 +983,7 @@ def test_create_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser):
     Dashboard.objects.filter(title="Audit Log Test Dashboard").delete()
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, sample_dashboard):
     """Test that updating a dashboard creates an audit log entry."""
     request = mock_request(orguser)
@@ -1006,7 +1006,7 @@ def test_update_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, sa
     assert resource_fields == {"title": "Updated Dashboard Title"}
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_no_fields_touched_skips_audit_log(
     mock_audit_log, seed_db, orguser, sample_dashboard
 ):
@@ -1021,7 +1021,7 @@ def test_update_dashboard_no_fields_touched_skips_audit_log(
     mock_audit_log.assert_not_called()
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_none_vs_empty_string_skips_audit_log(
     mock_audit_log, seed_db, orguser, org
 ):
@@ -1047,7 +1047,7 @@ def test_update_dashboard_none_vs_empty_string_skips_audit_log(
     dashboard.delete()
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_same_values_skips_audit_log(
     mock_audit_log, seed_db, orguser, sample_dashboard
 ):
@@ -1066,7 +1066,7 @@ def test_update_dashboard_same_values_skips_audit_log(
     mock_audit_log.assert_not_called()
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_mixed_changed_and_unchanged_fields(
     mock_audit_log, seed_db, orguser, sample_dashboard
 ):
@@ -1088,7 +1088,7 @@ def test_update_dashboard_mixed_changed_and_unchanged_fields(
     }
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_tabs_logs_full_tabs_json(
     mock_audit_log, seed_db, orguser, sample_dashboard
 ):
