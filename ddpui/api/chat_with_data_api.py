@@ -69,7 +69,7 @@ def create_session(request):
 @chat_with_data_router.get("/sessions/")
 @has_permission(["can_use_chat_with_data"])
 def list_sessions(request):
-    """The requesting user's sessions, most recent first."""
+    """All of the org's sessions, most recent first."""
     orguser: OrgUser = request.orguser
     sessions = service.list_sessions(orguser)
     return api_response(
@@ -81,7 +81,7 @@ def list_sessions(request):
 @chat_with_data_router.put("/sessions/{session_id}")
 @has_permission(["can_use_chat_with_data"])
 def rename_session(request, session_id: int, payload: SessionRename):
-    """Rename a session (owner only)."""
+    """Rename a session in the org."""
     orguser: OrgUser = request.orguser
     try:
         session = service.rename_session(orguser, session_id, payload.title)
@@ -93,7 +93,7 @@ def rename_session(request, session_id: int, payload: SessionRename):
 @chat_with_data_router.delete("/sessions/{session_id}")
 @has_permission(["can_use_chat_with_data"])
 def delete_session(request, session_id: int):
-    """Soft-delete a session (owner only)."""
+    """Soft-delete a session in the org."""
     orguser: OrgUser = request.orguser
     try:
         service.delete_session(orguser, session_id)

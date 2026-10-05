@@ -10,7 +10,7 @@ from ddpui.utils.feature_flags import is_feature_flag_enabled
 
 
 class SessionNotFound(Exception):
-    """Session missing or not owned by the requesting user."""
+    """Session missing, deleted, or in another org."""
 
 
 def get_status(orguser: OrgUser) -> StatusResponse:
@@ -42,23 +42,21 @@ def create_session(orguser: OrgUser) -> ChatWithDataSession:
     return ChatWithDataSession.objects.create(org=orguser.org, orguser=orguser)
 
 
-def _owned_live_sessions(orguser: OrgUser):
-    """The one queryset every lookup builds on: the requesting user's own
-    non-deleted sessions. Someone else's session id is indistinguishable from
-    a missing one."""
-    return ChatWithDataSession.objects.filter(
-        org=orguser.org, orguser=orguser, deleted_at__isnull=True
-    )
+def _org_live_sessions(orguser: OrgUser):
+    """The one queryset every lookup builds on: the org's non-deleted sessions.
+    Org-scoped, not user-scoped — chat is admin-only, and admins see every
+    session in their org. Another org's session id looks missing."""
+    return ChatWithDataSession.objects.filter(org=orguser.org, deleted_at__isnull=True)
 
 
 def list_sessions(orguser: OrgUser) -> list[ChatWithDataSession]:
-    """The requesting user's own live sessions, most recent activity first."""
-    return list(_owned_live_sessions(orguser).order_by("-updated_at"))
+    """All of the org's live sessions, most recent activity first."""
+    return list(_org_live_sessions(orguser).order_by("-updated_at"))
 
 
 def get_session(orguser: OrgUser, session_id: int) -> ChatWithDataSession:
-    """Owner-scoped lookup."""
-    session = _owned_live_sessions(orguser).filter(id=session_id).first()
+    """Org-scoped lookup."""
+    session = _org_live_sessions(orguser).filter(id=session_id).first()
     if session is None:
         raise SessionNotFound(f"session {session_id} not found")
     return session
@@ -66,7 +64,7 @@ def get_session(orguser: OrgUser, session_id: int) -> ChatWithDataSession:
 
 async def aget_session(orguser: OrgUser, session_id: int) -> ChatWithDataSession:
     """Async variant of get_session for async endpoints/consumers."""
-    session = await _owned_live_sessions(orguser).filter(id=session_id).afirst()
+    session = await _org_live_sessions(orguser).filter(id=session_id).afirst()
     if session is None:
         raise SessionNotFound(f"session {session_id} not found")
     return session

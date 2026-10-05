@@ -173,7 +173,7 @@ def test_analyst_can_neither_manage_settings_nor_chat(analyst_orguser, seed_db):
 
 @pytest.fixture
 def other_orguser(org, seed_db):
-    """A different user in the SAME org — must not see the first user's sessions."""
+    """A different admin in the SAME org — sees the first user's sessions."""
     user = User.objects.create(username="cwdother", email="cwdother@test.com", password="x")
     ou = OrgUser.objects.create(
         user=user,
@@ -202,13 +202,14 @@ def test_session_lifecycle_create_list_rename_delete(orguser, seed_db):
     assert ChatWithDataSession.objects.get(id=session_id).deleted_at is not None
 
 
-def test_sessions_are_owner_scoped_within_the_org(orguser, other_orguser, seed_db):
+def test_sessions_are_shared_across_the_org(orguser, other_orguser, seed_db):
     created = create_session(mock_request(orguser))
     session_id = created["data"]["id"]
 
-    # same org, different user: invisible and untouchable
-    assert list_sessions(mock_request(other_orguser))["data"] == []
-    with pytest.raises(HttpError):
-        rename_session(mock_request(other_orguser), session_id, SessionRename(title="hijack"))
-    with pytest.raises(HttpError):
-        delete_session(mock_request(other_orguser), session_id)
+    # same org, different admin: sees and manages the session
+    listed = list_sessions(mock_request(other_orguser))["data"]
+    assert [s["id"] for s in listed] == [session_id]
+    renamed = rename_session(mock_request(other_orguser), session_id, SessionRename(title="shared"))
+    assert renamed["data"]["title"] == "shared"
+    delete_session(mock_request(other_orguser), session_id)
+    assert list_sessions(mock_request(orguser))["data"] == []
