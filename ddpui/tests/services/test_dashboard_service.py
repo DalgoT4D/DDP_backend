@@ -370,7 +370,9 @@ class TestSetDependentGroup:
 
         assert dashboard.dependent_group_filter_ids == []
 
-    def test_deleting_a_group_member_removes_it_from_the_group(self, sample_dashboard, org, seed_db):
+    def test_deleting_a_group_member_removes_it_from_the_group(
+        self, sample_dashboard, org, seed_db
+    ):
         """Deleting a filter that's in the dependent group removes it from that list too"""
         f1 = DashboardService.create_filter(
             sample_dashboard.id,

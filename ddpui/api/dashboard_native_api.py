@@ -516,9 +516,7 @@ def delete_filter(request, dashboard_id: int, filter_id: int):
     return {"success": True}
 
 
-@dashboard_native_router.put(
-    "/{dashboard_id}/dependent-group/", response=DependentGroupResponse
-)
+@dashboard_native_router.put("/{dashboard_id}/dependent-group/", response=DependentGroupResponse)
 @has_permission(["can_view_dashboards"])
 @has_access(
     ResourceType.DASHBOARD,

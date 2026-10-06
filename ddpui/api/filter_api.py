@@ -247,7 +247,9 @@ def get_filter_preview(
     column_name: str,
     filter_type: str,  # 'value', 'numerical', or 'datetime'
     limit: int = 100,
-    constraints: Optional[str] = None,  # JSON list of {column, operator, value}; narrows this filter
+    constraints: Optional[
+        str
+    ] = None,  # JSON list of {column, operator, value}; narrows this filter
 ):
     """Get preview data for a filter (values, numerical stats, or date range)"""
     orguser = request.orguser

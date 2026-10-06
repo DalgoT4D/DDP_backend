@@ -883,9 +883,13 @@ class DashboardService:
         if len(filters) != len(filter_ids):
             raise FilterValidationError("All filter ids must belong to this dashboard")
 
-        non_categorical = [f.id for f in filters if f.filter_type != DashboardFilterType.VALUE.value]
+        non_categorical = [
+            f.id for f in filters if f.filter_type != DashboardFilterType.VALUE.value
+        ]
         if non_categorical:
-            raise FilterValidationError(f"Only categorical filters can be grouped: {non_categorical}")
+            raise FilterValidationError(
+                f"Only categorical filters can be grouped: {non_categorical}"
+            )
 
         tables = {(f.schema_name, f.table_name) for f in filters}
         if len(tables) > 1:
