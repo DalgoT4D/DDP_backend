@@ -1091,9 +1091,10 @@ def get_value_filter_options_with_fallback(
     except Exception as narrow_err:
         if not constraints:
             raise
+        constraint_columns = [c.get("column") for c in constraints]
         logger.warning(
-            f"Narrowed filter preview failed for constraints={constraints}, "
-            f"falling back to unnarrowed list: {narrow_err}"
+            f"Narrowed filter preview failed for columns={constraint_columns}, "
+            f"falling back to unnarrowed list ({type(narrow_err).__name__})"
         )
         return execute_query(warehouse_client, _build(False))
 

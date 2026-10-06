@@ -4,6 +4,7 @@ import json
 from typing import List, Optional, Dict, Any
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
+from pydantic import model_validator
 from ninja.errors import HttpError
 from sqlalchemy import func, column, distinct, cast, Float, Date
 from sqlalchemy.sql.expression import table
@@ -59,6 +60,13 @@ class FilterNarrowingConstraint(Schema):
     column: str
     operator: FilterOperator
     value: Optional[Any] = None
+
+    @model_validator(mode="after")
+    def value_required_for_value_operators(self):
+        valueless_operators = {"is_null", "is_not_null"}
+        if self.operator not in valueless_operators and self.value is None:
+            raise ValueError(f"'value' is required for operator '{self.operator}'")
+        return self
 
 
 def parse_narrowing_constraints(constraints_json: Optional[str]) -> Optional[List[Dict[str, Any]]]:
