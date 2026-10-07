@@ -12,6 +12,7 @@ from ddpui.schemas.org_preferences_schema import (
     UpdateAccessDefaultsSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
+    UpdateAutoAcceptSchemaChangesSchema,
 )
 from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
@@ -148,6 +149,25 @@ def update_access_defaults(request, payload: UpdateAccessDefaultsSchema):
     org_preferences.default_analyst_level = payload.default_analyst_level
     org_preferences.default_member_level = payload.default_member_level
     org_preferences.allow_public_sharing = payload.allow_public_sharing
+    org_preferences.save()
+
+    return {"success": True, "res": org_preferences.to_json()}
+
+
+@orgpreference_router.put("/auto-accept-schema-changes")
+@has_permission(["can_edit_schema_change_settings"])
+def update_auto_accept_schema_changes(request, payload: UpdateAutoAcceptSchemaChangesSchema):
+    """Updates the org-wide flag that auto-accepts non-breaking schema changes."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_preferences = OrgPreferences.objects.filter(org=org).first()
+    if org_preferences is None:
+        org_preferences = OrgPreferences.objects.create(org=org)
+
+    org_preferences.auto_accept_non_breaking_schema_changes = (
+        payload.auto_accept_non_breaking_schema_changes
+    )
     org_preferences.save()
 
     return {"success": True, "res": org_preferences.to_json()}

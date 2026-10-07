@@ -498,13 +498,68 @@ def test_detect_schema_changes_for_org_ensure_orphan_connections_are_deleted(
     ) as fetch_and_update_org_schema_changes_mock, patch(
         "ddpui.celeryworkers.tasks.send_text_message"
     ) as mock_send_text_message:
-        fetch_and_update_org_schema_changes_mock.return_value = None, "error"
+        fetch_and_update_org_schema_changes_mock.return_value = None, "error", None
         detect_schema_changes_for_org(org_without_workspace)
     assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 0
     tag = " [STAGING]" if not PRODUCTION else ""
     mock_send_text_message.assert_called_once_with(
         "adminemail", f"Schema change detection errors for test-org-WO-slug{tag}", "error"
     )
+
+
+def test_detect_schema_changes_for_org_notifies_when_auto_accept_fallback_leaves_row(
+    org_without_workspace: Org,
+):
+    """When auto-accept apply fails and the fallback creates an OrgSchemaChange row,
+    notification must still fire with the 'auto-accept failed' subject."""
+    from ddpui.models.org_preferences import OrgPreferences
+
+    synctask = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
+    if synctask is None:
+        synctask = Task.objects.create(
+            slug=TASK_AIRBYTESYNC, type="Airbyte Sync", label="Airbyte Sync"
+        )
+    connection_id = "fallback-conn-id"
+    OrgTask.objects.create(org=org_without_workspace, task=synctask, connection_id=connection_id)
+    # Flag is ON for this org
+    OrgPreferences.objects.create(
+        org=org_without_workspace, auto_accept_non_breaking_schema_changes=True
+    )
+    # Simulate the fallback: apply_schema_change raised and the fallback created a row
+    OrgSchemaChange.objects.create(
+        org=org_without_workspace, connection_id=connection_id, change_type="non_breaking"
+    )
+
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
+    ) as fetch_mock, patch("ddpui.celeryworkers.tasks.notify_schema_change") as notify_mock, patch(
+        "ddpui.celeryworkers.tasks.send_text_message"
+    ) as platform_mail_mock, patch.dict(
+        os.environ, {"FRONTEND_URL": "http://x", "ADMIN_EMAIL": "platform@dalgo"}
+    ):
+        fetch_mock.return_value = (
+            {
+                "status": "active",
+                "schemaChange": "non_breaking",
+                "catalogDiff": {"transforms": [{"stream_name": "foo"}]},
+                "name": "my-conn",
+            },
+            None,
+            "Airbyte 500: getCatalog(...) must not be null",
+        )
+        detect_schema_changes_for_org(org_without_workspace)
+
+    notify_mock.assert_called_once()
+    _, message, subject = notify_mock.call_args.args
+    assert "Auto-accept failed" in subject
+    # The upstream error reason must appear in the org-admin notification body
+    assert "getCatalog(...) must not be null" in message
+    # Platform admin also alerted with the raw error
+    platform_mail_mock.assert_called_once()
+    pm_recipient, pm_subject, pm_body = platform_mail_mock.call_args.args
+    assert pm_recipient == "platform@dalgo"
+    assert "Auto-accept failed" in pm_subject
+    assert "getCatalog(...) must not be null" in pm_body
 
 
 def test_get_connection_catalog_task_error(org_without_workspace: Org):
@@ -515,7 +570,7 @@ def test_get_connection_catalog_task_error(org_without_workspace: Org):
     ) as fetch_and_update_org_schema_changes_mock, patch(
         "ddpui.celeryworkers.tasks.send_text_message"
     ) as mock_send_text_message:
-        fetch_and_update_org_schema_changes_mock.return_value = None, "error"
+        fetch_and_update_org_schema_changes_mock.return_value = None, "error", None
         get_connection_catalog_task(task_key, org_without_workspace.id, "fake-connection-id")
     result = SingleTaskProgress.fetch(task_key)
     assert result == [
@@ -539,14 +594,18 @@ def test_get_connection_catalog_task_success(org_without_workspace: Org):
     with patch(
         "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
     ) as fetch_and_update_org_schema_changes_mock:
-        fetch_and_update_org_schema_changes_mock.return_value = {
-            "name": 'connection_catalog["name"]',
-            "connectionId": 'connection_catalog["connectionId"]',
-            "catalogId": 'connection_catalog["catalogId"]',
-            "syncCatalog": 'connection_catalog["syncCatalog"]',
-            "schemaChange": 'connection_catalog["schemaChange"]',
-            "catalogDiff": 'connection_catalog["catalogDiff"]',
-        }, None
+        fetch_and_update_org_schema_changes_mock.return_value = (
+            {
+                "name": 'connection_catalog["name"]',
+                "connectionId": 'connection_catalog["connectionId"]',
+                "catalogId": 'connection_catalog["catalogId"]',
+                "syncCatalog": 'connection_catalog["syncCatalog"]',
+                "schemaChange": 'connection_catalog["schemaChange"]',
+                "catalogDiff": 'connection_catalog["catalogDiff"]',
+            },
+            None,
+            None,
+        )
         get_connection_catalog_task(task_key, org_without_workspace.id, "fake-connection-id")
     result = SingleTaskProgress.fetch(task_key)
     assert result == [
