@@ -7,6 +7,7 @@ import sqlparse
 from sqlparse.tokens import Keyword, Number, Token
 import uuid
 import sqlalchemy
+from sqlalchemy import column, func, text, and_
 from ninja import Router
 from ninja.errors import HttpError
 import sqlalchemy.exc
@@ -25,6 +26,7 @@ from ddpui.auth import has_permission
 
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.generate_result import GenerateResult, poll_for_column_insights
+from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.celeryworkers.tasks import summarize_warehouse_results
 
 from ddpui.schemas.warehouse_api_schemas import (
@@ -82,18 +84,10 @@ def get_column_values(request, schema_name: str, table_name: str, column_name: s
         raise HttpError(404, "Please set up your warehouse first")
 
     try:
-        from ddpui.core.datainsights.query_builder import AggQueryBuilder
-
-        # Use query builder to fetch distinct column values
         query_builder = AggQueryBuilder()
 
-        # Set the table to select from
         query_builder.fetch_from(table_name, schema_name)
 
-        # Select distinct values from the column
-        from sqlalchemy import column, func, text, and_
-
-        # Add the column with DISTINCT
         query_builder.add_column(func.distinct(column(column_name)))
 
         # Add filters to exclude null and empty values
@@ -108,12 +102,12 @@ def get_column_values(request, schema_name: str, table_name: str, column_name: s
         query_builder.limit_rows(500)
 
         # Execute query
-        wclient = dbtautomation_service._get_wclient(org_warehouse)
+        wclient = WarehouseFactory.get_warehouse_client(org_warehouse)
         sql_stmt = query_builder.build()
         compiled_stmt = sql_stmt.compile(
             bind=wclient.engine, compile_kwargs={"literal_binds": True}
         )
-        results = wclient.run_query(str(compiled_stmt))
+        results = wclient.execute(str(compiled_stmt))
 
         if results and len(results) > 0:
             # Extract the column values from the query results, filter out empty strings
