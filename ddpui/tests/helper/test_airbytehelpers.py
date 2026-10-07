@@ -1394,11 +1394,13 @@ def test_fetch_and_update_org_schema_changes_auto_accept_failure_falls_back(
     mock_apply_schema_change.side_effect = Exception("airbyte down")
     OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
 
-    fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+    _, _, auto_accept_err = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
 
     mock_apply_schema_change.assert_called_once()
     mock_create_audit_log.assert_not_called()
     assert OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+    # Error reason is returned to the caller so the notifier can show it to admins
+    assert auto_accept_err == "airbyte down"
     OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
 
 
@@ -1459,9 +1461,9 @@ def test_fetch_and_update_org_schema_changes_invalid_change_type(
         "catalogDiff": {},
     }
 
-    err, result = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
-    assert err is None
-    assert "Something went wrong" in result
+    catalog, err, _ = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+    assert catalog is None
+    assert "Something went wrong" in err
 
 
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
@@ -1474,7 +1476,7 @@ def test_fetch_and_update_org_schema_changes_api_error(
 
     mock_get_connection_catalog.side_effect = Exception("API Error")
 
-    _, error = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+    _, error, _ = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
 
     assert "Something went wrong" in error
 

@@ -324,9 +324,11 @@ def detect_schema_changes_for_org(org: Org, delay=0):
 
     # check for schema changes
     for org_task in org_tasks:
-        connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(
-            org, org_task.connection_id
-        )
+        (
+            connection_catalog,
+            err,
+            auto_accept_err,
+        ) = airbytehelpers.fetch_and_update_org_schema_changes(org, org_task.connection_id)
         if delay:
             sleep(delay)
 
@@ -339,6 +341,13 @@ def detect_schema_changes_for_org(org: Org, delay=0):
                 )
             logger.error(err)
             continue
+
+        if auto_accept_err and os.getenv("ADMIN_EMAIL"):
+            send_text_message(
+                os.getenv("ADMIN_EMAIL"),
+                f"Auto-accept failed for {org.slug} connection {org_task.connection_id}{tag}",
+                auto_accept_err,
+            )
 
         if connection_catalog is None:
             if os.getenv("ADMIN_EMAIL"):
@@ -385,11 +394,13 @@ def detect_schema_changes_for_org(org: Org, delay=0):
                     ).exists()
                 )
                 if auto_accept_failed:
+                    error_detail = auto_accept_err or "unknown error"
                     message = (
                         f"To the admins of {org.name},\n\nDalgo tried to automatically apply a "
                         f'non-breaking schema change for "{connection_name}" but was unable to.'
-                        f" The change needs manual review."
-                        f"\n\nPlease visit {connections_page} and review the Pending Actions"
+                        f"\n\nError: {error_detail}"
+                        f"\n\nThe change needs manual review. Please visit {connections_page} "
+                        f"and review the Pending Actions"
                     )
                     subject = f"{org.name}: Auto-accept failed, schema change needs review"
                 else:
@@ -430,7 +441,9 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
     taskprogress = SingleTaskProgress(task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180")))
     taskprogress.add({"message": "started", "status": TaskProgressStatus.RUNNING, "result": None})
 
-    connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(org, connection_id)
+    connection_catalog, err, _ = airbytehelpers.fetch_and_update_org_schema_changes(
+        org, connection_id
+    )
     # unsure how to handle a deprecated connection, ideally we would never get here
 
     if err:

@@ -1006,9 +1006,9 @@ def delete_source(org: Org, source_id: str):
 
 
 def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
-    """
-    Fetches the schema change catalog from airbyte and updates OrgSchemaChnage in our db
-    """
+    """Returns (connection_catalog, fetch_error, auto_accept_error).
+    auto_accept_error is set only when the auto-accept flag was on and apply failed."""
+    auto_accept_error = None
     try:
         logger.info(f"Fetching schema change (catalog) for connection {org.slug}|{connection_id}")
         connection_catalog = airbyte_service.get_connection_catalog(
@@ -1021,6 +1021,7 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
         return (
             None,
             f"Something went wrong fetching schema change (catalog) for {org.slug} connection {connection_id}: {err}",
+            None,
         )
 
     # update schema change type in our db
@@ -1075,6 +1076,7 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
                         connection_id=connection_id,
                         defaults={"change_type": change_type, "org": org},
                     )
+                    auto_accept_error = str(err)
             else:
                 OrgSchemaChange.objects.update_or_create(
                     connection_id=connection_id,
@@ -1087,9 +1089,10 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
         return (
             None,
             f"Something went wrong updating OrgSchemaChange {org.slug} {connection_id}: {err}",
+            None,
         )
 
-    return connection_catalog, None
+    return connection_catalog, None, auto_accept_error
 
 
 def get_schema_changes(org: Org):
