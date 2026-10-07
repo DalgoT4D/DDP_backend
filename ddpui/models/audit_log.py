@@ -48,6 +48,7 @@ class AuditLogAction(models.TextChoices):
     PASSWORD_RESET_COMPLETED = "password_reset_completed", "Password Reset Completed"
     PASSWORD_CHANGED = "password_changed", "Password Changed"
     EMAIL_VERIFIED = "email_verified", "Email Verified"
+    SCHEMA_CHANGE_AUTO_ACCEPTED = "schema_change_auto_accepted", "Schema Change Auto Accepted"
 
 
 class AuditLog(models.Model):

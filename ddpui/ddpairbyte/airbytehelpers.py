@@ -1057,9 +1057,8 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
                         orguser=None,
                         resource_type=AuditLogResourceType.CONNECTION,
                         resource_id=connection_id,
-                        action=AuditLogAction.UPDATE,
+                        action=AuditLogAction.SCHEMA_CHANGE_AUTO_ACCEPTED,
                         resource_fields={
-                            "event": "schema_change_auto_accepted",
                             "change_type": change_type,
                             "catalog_diff": catalog_diff,
                         },
