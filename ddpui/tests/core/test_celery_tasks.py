@@ -507,6 +507,53 @@ def test_detect_schema_changes_for_org_ensure_orphan_connections_are_deleted(
     )
 
 
+def test_detect_schema_changes_for_org_notifies_when_auto_accept_fallback_leaves_row(
+    org_without_workspace: Org,
+):
+    """When auto-accept apply fails and the fallback creates an OrgSchemaChange row,
+    notification must still fire with the 'auto-accept failed' subject."""
+    from ddpui.models.org_preferences import OrgPreferences
+
+    synctask = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
+    if synctask is None:
+        synctask = Task.objects.create(
+            slug=TASK_AIRBYTESYNC, type="Airbyte Sync", label="Airbyte Sync"
+        )
+    connection_id = "fallback-conn-id"
+    OrgTask.objects.create(org=org_without_workspace, task=synctask, connection_id=connection_id)
+    # Flag is ON for this org
+    OrgPreferences.objects.create(
+        org=org_without_workspace, auto_accept_non_breaking_schema_changes=True
+    )
+    # Simulate the fallback: apply_schema_change raised and the fallback created a row
+    OrgSchemaChange.objects.create(
+        org=org_without_workspace, connection_id=connection_id, change_type="non_breaking"
+    )
+
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
+    ) as fetch_mock, patch(
+        "ddpui.celeryworkers.tasks.notify_schema_change"
+    ) as notify_mock, patch.dict(
+        os.environ, {"FRONTEND_URL": "http://x"}
+    ):
+        fetch_mock.return_value = (
+            {
+                "status": "active",
+                "schemaChange": "non_breaking",
+                "catalogDiff": {"transforms": [{"stream_name": "foo"}]},
+                "name": "my-conn",
+            },
+            None,
+        )
+        detect_schema_changes_for_org(org_without_workspace)
+
+    notify_mock.assert_called_once()
+    # Third arg is the subject; must flag the failed auto-accept
+    _, _, subject = notify_mock.call_args.args
+    assert "Auto-accept failed" in subject
+
+
 def test_get_connection_catalog_task_error(org_without_workspace: Org):
     """tests get_connection_catalog_task"""
     task_key = "test-task-key"
