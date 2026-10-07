@@ -343,30 +343,14 @@ class ConnectionMeta(models.Model):
     connection_name = models.CharField(max_length=100, null=True)
 
 
-class ConnectionJob(models.Model):
-    """
-    All the large jobs (reset or update schema) scheduled by the system are stored here
-    - ddpui.utils.constants.UPDATE_SCHEMA
-    - ddpui.utils.constants.TASK_AIRBYTERESET
-    """
-
-    connection_id = models.CharField(max_length=36, null=False)
-    job_type = models.CharField(max_length=36, null=False)
-    scheduled_at = models.DateTimeField(null=False)
-    flow_run_id = models.CharField(max_length=36, null=False)
-    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
-
-
 class OrgSchemaChange(models.Model):
-    """This contains the deployment id of an organization to schedule flows/pipelines"""
+    """Pending schema change detected on an org connection, awaiting review or auto-accept."""
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     connection_id = models.CharField(max_length=36, unique=True, null=True)
     change_type = models.CharField(max_length=36, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
-    schedule_job = models.ForeignKey(ConnectionJob, null=True, on_delete=models.SET_NULL)
 
 
 class OrgFeatureFlag(models.Model):

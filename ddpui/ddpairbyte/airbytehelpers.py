@@ -33,6 +33,7 @@ from ddpui.models.org import (
     OrgSchemaChange,
     ConnectionMeta,
 )
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.airbyte import AirbyteJob
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
@@ -73,6 +74,8 @@ from ddpui.utils.helpers import (
     get_integer_env_var,
 )
 from ddpui.utils import secretsmanager
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.core.pipelinefunctions import (
     setup_airbyte_sync_task_config,
     setup_airbyte_update_schema_task_config,
@@ -1036,25 +1039,50 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
             and catalog_diff
             and len(catalog_diff.get("transforms", [])) > 0
         ):
-            OrgSchemaChange.objects.update_or_create(
-                connection_id=connection_id,
-                defaults={"change_type": change_type, "org": org},
-            )
+            if (
+                change_type == "non_breaking"
+                and OrgPreferences.objects.filter(
+                    org=org, auto_accept_non_breaking_schema_changes=True
+                ).exists()
+            ):
+                try:
+                    airbyte_service.apply_schema_change(connection_catalog)
+                    logger.info(
+                        "Auto-accepted non-breaking schema change for %s|%s",
+                        org.slug,
+                        connection_id,
+                    )
+                    create_audit_log(
+                        org=org,
+                        orguser=None,
+                        resource_type=AuditLogResourceType.CONNECTION,
+                        resource_id=connection_id,
+                        action=AuditLogAction.UPDATE,
+                        resource_fields={
+                            "event": "schema_change_auto_accepted",
+                            "change_type": change_type,
+                            "catalog_diff": catalog_diff,
+                        },
+                    )
+                    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+                except Exception as err:
+                    logger.exception(
+                        "Failed to auto-accept schema change for %s|%s: %s",
+                        org.slug,
+                        connection_id,
+                        err,
+                    )
+                    OrgSchemaChange.objects.update_or_create(
+                        connection_id=connection_id,
+                        defaults={"change_type": change_type, "org": org},
+                    )
+            else:
+                OrgSchemaChange.objects.update_or_create(
+                    connection_id=connection_id,
+                    defaults={"change_type": change_type, "org": org},
+                )
         else:
-            schema_change = OrgSchemaChange.objects.filter(connection_id=connection_id).first()
-            # see if any jobs are scheduled for the schema change; delete them
-            if schema_change:
-                if schema_change.schedule_job:
-                    job = schema_change.schedule_job
-                    try:
-                        if job.flow_run_id:
-                            prefect_service.delete_flow_run(job.flow_run_id)
-                        job.delete()
-                        schema_change.delete()
-                    except Exception as err:
-                        logger.exception("Failed to delete the large schema change job - %s", err)
-                else:
-                    schema_change.delete()
+            OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
 
     except Exception as err:
         return (
@@ -1069,7 +1097,7 @@ def get_schema_changes(org: Org):
     """
     Get the schema changes of a connection in an org.
     """
-    org_schema_change = OrgSchemaChange.objects.filter(org=org).select_related("schedule_job").all()
+    org_schema_change = OrgSchemaChange.objects.filter(org=org).all()
 
     if org_schema_change is None:
         return None, "No schema change found"

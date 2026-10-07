@@ -38,6 +38,7 @@ from ddpui.models.org import (
     TransformType,
 )
 from ddpui.models.airbyte import AirbyteJob
+from ddpui.models.org_preferences import OrgPreferences
 
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import (
@@ -363,11 +364,15 @@ def detect_schema_changes_for_org(org: Org, delay=0):
             change_type,
         )
 
-        # notify users
+        # notify users (skip for auto-accepted non_breaking — handled silently)
+        auto_accept = OrgPreferences.objects.filter(
+            org=org, auto_accept_non_breaking_schema_changes=True
+        ).exists()
         if change_type == "breaking" or (
             change_type == "non_breaking"
             and catalog_diff
             and len(catalog_diff.get("transforms", [])) > 0
+            and not auto_accept
         ):
             try:
                 frontend_url = os.getenv("FRONTEND_URL")

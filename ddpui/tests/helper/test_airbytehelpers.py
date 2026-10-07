@@ -37,6 +37,7 @@ from ddpui.models.org import (
     OrgSchemaChange,
     OrgDbt,
 )
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.org_user import OrgUser, User
 from ddpui.models.airbyte import AirbyteJob
@@ -1310,6 +1311,93 @@ def test_fetch_and_update_org_schema_changes_non_breaking_change_with_diff(
     assert not OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
     fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
 
+    assert OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.create_audit_log")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.apply_schema_change")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_non_breaking_auto_accepted(
+    mock_get_connection_catalog,
+    mock_apply_schema_change,
+    mock_create_audit_log,
+    org_with_workspace,
+):
+    """flag on + non_breaking + transforms: apply_schema_change called, no OrgSchemaChange row, audit log written"""
+    connection_id = "test_connection_id"
+    OrgPreferences.objects.create(
+        org=org_with_workspace, auto_accept_non_breaking_schema_changes=True
+    )
+
+    mock_get_connection_catalog.return_value = {
+        "schemaChange": "non_breaking",
+        "catalogDiff": {"transforms": [{"stream_name": "test_stream"}]},
+    }
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+    fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+
+    mock_apply_schema_change.assert_called_once()
+    mock_create_audit_log.assert_called_once()
+    assert not OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.create_audit_log")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.apply_schema_change")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_breaking_never_auto_accepted(
+    mock_get_connection_catalog,
+    mock_apply_schema_change,
+    mock_create_audit_log,
+    org_with_workspace,
+):
+    """flag on + breaking: still creates OrgSchemaChange, apply not called"""
+    connection_id = "test_connection_id"
+    OrgPreferences.objects.create(
+        org=org_with_workspace, auto_accept_non_breaking_schema_changes=True
+    )
+
+    mock_get_connection_catalog.return_value = {
+        "schemaChange": "breaking",
+        "catalogDiff": {"transforms": [{"stream_name": "test_stream"}]},
+    }
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+    fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+
+    mock_apply_schema_change.assert_not_called()
+    mock_create_audit_log.assert_not_called()
+    assert OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.create_audit_log")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.apply_schema_change")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_auto_accept_failure_falls_back(
+    mock_get_connection_catalog,
+    mock_apply_schema_change,
+    mock_create_audit_log,
+    org_with_workspace,
+):
+    """flag on + non_breaking + apply raises: falls back to creating OrgSchemaChange row"""
+    connection_id = "test_connection_id"
+    OrgPreferences.objects.create(
+        org=org_with_workspace, auto_accept_non_breaking_schema_changes=True
+    )
+
+    mock_get_connection_catalog.return_value = {
+        "schemaChange": "non_breaking",
+        "catalogDiff": {"transforms": [{"stream_name": "test_stream"}]},
+    }
+    mock_apply_schema_change.side_effect = Exception("airbyte down")
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+    fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+
+    mock_apply_schema_change.assert_called_once()
+    mock_create_audit_log.assert_not_called()
     assert OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
     OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
 
