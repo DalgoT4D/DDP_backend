@@ -15,16 +15,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
 echo "==> migrate"
-uv run python manage.py migrate
+python manage.py migrate
 
 echo "==> loaddata seeds"
-uv run python manage.py loaddata seed/*.json
+python manage.py loaddata seed/*.json
 
 echo "==> create-system-orguser"
-uv run python manage.py create-system-orguser
+python manage.py create-system-orguser
 
 echo "==> clear redis permission key"
-uv run python manage.py clear_role_permissions
+python manage.py clear_role_permissions
 
 # ---- org + admin user ----
 if [[ "$SKIP_ORG" == true ]]; then
@@ -47,9 +47,9 @@ fi
 
 echo "==> create org '${ORG_NAME}' and admin user '${ADMIN_EMAIL}'"
 if [[ -n "$ADMIN_PASSWORD" ]]; then
-  PASSWORD="$ADMIN_PASSWORD" uv run python manage.py createorganduser "$ORG_NAME" "$ADMIN_EMAIL"
+  PASSWORD="$ADMIN_PASSWORD" python manage.py createorganduser "$ORG_NAME" "$ADMIN_EMAIL"
 else
-  uv run python manage.py createorganduser "$ORG_NAME" "$ADMIN_EMAIL"
+  python manage.py createorganduser "$ORG_NAME" "$ADMIN_EMAIL"
 fi
 
 echo "Done."
