@@ -38,6 +38,7 @@ from ddpui.models.org import (
     TransformType,
 )
 from ddpui.models.airbyte import AirbyteJob
+from ddpui.models.org_preferences import OrgPreferences
 
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import (
@@ -323,9 +324,11 @@ def detect_schema_changes_for_org(org: Org, delay=0):
 
     # check for schema changes
     for org_task in org_tasks:
-        connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(
-            org, org_task.connection_id
-        )
+        (
+            connection_catalog,
+            err,
+            auto_accept_err,
+        ) = airbytehelpers.fetch_and_update_org_schema_changes(org, org_task.connection_id)
         if delay:
             sleep(delay)
 
@@ -338,6 +341,13 @@ def detect_schema_changes_for_org(org: Org, delay=0):
                 )
             logger.error(err)
             continue
+
+        if auto_accept_err and os.getenv("ADMIN_EMAIL"):
+            send_text_message(
+                os.getenv("ADMIN_EMAIL"),
+                f"Auto-accept failed for {org.slug} connection {org_task.connection_id}{tag}",
+                auto_accept_err,
+            )
 
         if connection_catalog is None:
             if os.getenv("ADMIN_EMAIL"):
@@ -363,25 +373,44 @@ def detect_schema_changes_for_org(org: Org, delay=0):
             change_type,
         )
 
-        # notify users
-        if change_type == "breaking" or (
-            change_type == "non_breaking"
-            and catalog_diff
-            and len(catalog_diff.get("transforms", [])) > 0
-        ):
+        # Notify whenever a pending OrgSchemaChange row exists for this connection.
+        # Row existence is the single source of truth for "needs admin attention":
+        # - breaking changes always leave a row
+        # - non_breaking changes leave one when auto-accept is off OR when auto-accept
+        #   was attempted but failed and fell back (prevents silent failure)
+        if OrgSchemaChange.objects.filter(connection_id=org_task.connection_id).exists():
             try:
                 frontend_url = os.getenv("FRONTEND_URL")
                 if frontend_url.endswith("/"):
                     frontend_url = frontend_url[:-1]
                 connections_page = f"{frontend_url}/pipeline/ingest?tab=connections"
                 connection_name = connection_catalog["name"]
-                notify_schema_change(
-                    org,
-                    f"To the admins of {org.name},\n\nThis email is to let you know that"
-                    f' schema changes have been detected in your Dalgo sources for "{connection_name}".'
-                    f"\n\nPlease visit {connections_page} and review the Pending Actions",
-                    f"{org.name}: Schema changes detected in your Dalgo sources",
+                # If flag is on and the change is non_breaking but a row still exists,
+                # auto-accept must have been attempted and failed.
+                auto_accept_failed = (
+                    change_type == "non_breaking"
+                    and OrgPreferences.objects.filter(
+                        org=org, auto_accept_non_breaking_schema_changes=True
+                    ).exists()
                 )
+                if auto_accept_failed:
+                    error_detail = auto_accept_err or "unknown error"
+                    message = (
+                        f"To the admins of {org.name},\n\nDalgo tried to automatically apply a "
+                        f'non-breaking schema change for "{connection_name}" but was unable to.'
+                        f"\n\nError: {error_detail}"
+                        f"\n\nThe change needs manual review. Please visit {connections_page} "
+                        f"and review the Pending Actions"
+                    )
+                    subject = f"{org.name}: Auto-accept failed, schema change needs review"
+                else:
+                    message = (
+                        f"To the admins of {org.name},\n\nThis email is to let you know that"
+                        f' schema changes have been detected in your Dalgo sources for "{connection_name}".'
+                        f"\n\nPlease visit {connections_page} and review the Pending Actions"
+                    )
+                    subject = f"{org.name}: Schema changes detected in your Dalgo sources"
+                notify_schema_change(org, message, subject)
             except Exception as err:
                 logger.error(err)
 
@@ -412,7 +441,9 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
     taskprogress = SingleTaskProgress(task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180")))
     taskprogress.add({"message": "started", "status": TaskProgressStatus.RUNNING, "result": None})
 
-    connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(org, connection_id)
+    connection_catalog, err, _ = airbytehelpers.fetch_and_update_org_schema_changes(
+        org, connection_id
+    )
     # unsure how to handle a deprecated connection, ideally we would never get here
 
     if err:

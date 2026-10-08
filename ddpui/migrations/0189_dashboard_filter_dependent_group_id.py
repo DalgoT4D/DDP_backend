@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0184_merge_org_memory_into_config"),
+        ("ddpui", "0188_alter_auditlog_action"),
     ]
 
     operations = [

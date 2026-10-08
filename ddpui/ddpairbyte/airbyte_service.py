@@ -1122,6 +1122,32 @@ def get_connection_catalog(connection_id: str, **kwargs) -> dict:
     return res
 
 
+def apply_schema_change(connection_catalog: dict) -> dict:
+    """Accept schema changes by sending the refreshed syncCatalog back to Airbyte.
+    Expects the response from get_connection_catalog(). skipReset=True (non-breaking only)."""
+    connection_id = connection_catalog.get("connectionId")
+    sync_catalog = connection_catalog.get("syncCatalog")
+    source_catalog_id = connection_catalog.get("catalogId")
+
+    if not connection_id or not sync_catalog:
+        raise HttpError(400, "connection_catalog missing connectionId or syncCatalog")
+
+    payload = {
+        "connectionId": connection_id,
+        "syncCatalog": sync_catalog,
+        "skipReset": True,
+    }
+    if source_catalog_id:
+        payload["sourceCatalogId"] = source_catalog_id
+
+    res = abreq("web_backend/connections/update", payload)
+    if "connectionId" not in res:
+        error_message = res.get("message", json.dumps(res))
+        logger.error("Failed to apply schema change: %s", error_message)
+        raise HttpError(500, f"Failed to apply schema change: {error_message}")
+    return res
+
+
 def get_current_airbyte_version():
     """Fetch airbyte version"""
 

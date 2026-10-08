@@ -742,5 +742,13 @@
             "name": "Can Use Chat With Data",
             "slug": "can_use_chat_with_data"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 94,
+        "fields": {
+            "name": "Can Edit Schema Change Settings",
+            "slug": "can_edit_schema_change_settings"
+        }
     }
 ]
