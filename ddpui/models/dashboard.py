@@ -152,8 +152,8 @@ class Dashboard(models.Model):
             "target_screen_size": self.target_screen_size,
             "tabs": self.tabs or [],
             "filter_layout": self.filter_layout,
-            "dependent_group_filter_ids": list(
-                self.filters.filter(dependent_group_id__isnull=False).values_list("id", flat=True)
+            "dependent_group_filter_ids": sorted(
+                f.id for f in self.filters.all() if f.dependent_group_id is not None
             ),
             "is_published": self.is_published,
             "published_at": self.published_at.isoformat() if self.published_at else None,
