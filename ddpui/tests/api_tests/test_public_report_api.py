@@ -748,7 +748,7 @@ class TestGetPublicFilterPreview:
         mock_results = [{"value": "shipped", "count": 10}, {"value": "pending", "count": 5}]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.core.charts.charts_service.execute_query"
+            "ddpui.services.dashboard_service.execute_query"
         ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()
@@ -774,7 +774,7 @@ class TestGetPublicFilterPreview:
         mock_results = [{"value": "Ernakulam", "count": 4}]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.core.charts.charts_service.execute_query"
+            "ddpui.services.dashboard_service.execute_query"
         ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()
@@ -805,7 +805,7 @@ class TestGetPublicFilterPreview:
         mock_results = [{"value": "Ernakulam", "count": 4}]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.core.charts.charts_service.execute_query"
+            "ddpui.services.dashboard_service.execute_query"
         ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()
@@ -837,7 +837,7 @@ class TestGetPublicFilterPreview:
         mock_results = [{"value": "Ernakulam", "count": 4}, {"value": "Pune", "count": 2}]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.core.charts.charts_service.execute_query"
+            "ddpui.services.dashboard_service.execute_query"
         ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()
@@ -865,7 +865,7 @@ class TestGetPublicFilterPreview:
         mock_results = [{"value": "active", "count": 20}, {"value": "inactive", "count": 3}]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.core.charts.charts_service.execute_query"
+            "ddpui.services.dashboard_service.execute_query"
         ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()
@@ -890,7 +890,7 @@ class TestGetPublicFilterPreview:
         mock_results = [{"value": "Ernakulam", "count": 4}]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.core.charts.charts_service.execute_query"
+            "ddpui.services.dashboard_service.execute_query"
         ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()

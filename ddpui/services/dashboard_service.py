@@ -43,6 +43,8 @@ from ddpui.core.charts.charts_service import (
     get_warehouse_client,
     execute_chart_query,
     transform_data_for_chart,
+    apply_chart_filters,
+    execute_query,
 )
 from ddpui.schemas.dashboard_schema import DashboardTabSchema
 from ddpui.utils.constants import (
@@ -818,20 +820,21 @@ class DashboardService:
             filter_obj.order = data.order
 
         dashboard = filter_obj.dashboard
-        if filter_id in dashboard.dependent_group_filter_ids:
-            other_member_ids = [
-                fid for fid in dashboard.dependent_group_filter_ids if fid != filter_id
-            ]
-            other_members = dashboard.filters.filter(id__in=other_member_ids)
+        if filter_obj.dependent_group_id is not None:
+            group_id = filter_obj.dependent_group_id
+            other_members = list(
+                dashboard.filters.filter(dependent_group_id=group_id).exclude(id=filter_id)
+            )
             still_valid = filter_obj.filter_type == DashboardFilterType.VALUE.value and all(
                 (m.schema_name, m.table_name) == (filter_obj.schema_name, filter_obj.table_name)
                 for m in other_members
             )
             if not still_valid:
-                dashboard.dependent_group_filter_ids = (
-                    other_member_ids if len(other_member_ids) >= 2 else []
-                )
-                dashboard.save(update_fields=["dependent_group_filter_ids"])
+                filter_obj.dependent_group_id = None
+                if len(other_members) < 2:
+                    DashboardFilter.objects.filter(id__in=[m.id for m in other_members]).update(
+                        dependent_group_id=None
+                    )
 
         filter_obj.save()
         logger.info(f"Updated filter {filter_id} in dashboard {dashboard_id}")
@@ -856,18 +859,23 @@ class DashboardService:
         filter_obj = DashboardService.get_filter(dashboard_id, filter_id, org)
         dashboard = filter_obj.dashboard
 
-        if filter_id in dashboard.dependent_group_filter_ids:
-            remaining = [fid for fid in dashboard.dependent_group_filter_ids if fid != filter_id]
+        if filter_obj.dependent_group_id is not None:
+            group_id = filter_obj.dependent_group_id
+            remaining = list(
+                dashboard.filters.filter(dependent_group_id=group_id).exclude(id=filter_id)
+            )
             # A group under 2 members dissolves entirely, rather than being left at 1.
-            dashboard.dependent_group_filter_ids = remaining if len(remaining) >= 2 else []
-            dashboard.save(update_fields=["dependent_group_filter_ids"])
+            if len(remaining) < 2:
+                DashboardFilter.objects.filter(id__in=[m.id for m in remaining]).update(
+                    dependent_group_id=None
+                )
 
         filter_obj.delete()
         logger.info(f"Deleted filter {filter_id} from dashboard {dashboard_id}")
         return True
 
     @staticmethod
-    def set_dependent_group(dashboard_id: int, org: Org, filter_ids: List[int]) -> Dashboard:
+    def set_dependent_group(dashboard_id: int, org: Org, filter_ids: List[int]) -> List[int]:
         """Replace a dashboard's dependent group with the given filter ids.
 
         Every id must belong to this dashboard, be a categorical (VALUE-type) filter,
@@ -895,11 +903,19 @@ class DashboardService:
         if len(tables) > 1:
             raise FilterValidationError("All filters in a dependent group must share one table")
 
+        DashboardFilter.objects.filter(
+            dashboard=dashboard, dependent_group_id__isnull=False
+        ).update(dependent_group_id=None)
+
         # A group of exactly 1 can't narrow anything -- dissolve it instead.
-        dashboard.dependent_group_filter_ids = filter_ids if len(filter_ids) != 1 else []
-        dashboard.save(update_fields=["dependent_group_filter_ids"])
+        if len(filter_ids) < 2:
+            logger.info(f"Dissolved dependent group for dashboard {dashboard_id}")
+            return []
+
+        group_id = 1
+        DashboardFilter.objects.filter(id__in=filter_ids).update(dependent_group_id=group_id)
         logger.info(f"Set dependent group for dashboard {dashboard_id}: {filter_ids}")
-        return dashboard
+        return filter_ids
 
     # =========================================================================
     # Business Logic Operations (existing methods)
@@ -1274,6 +1290,44 @@ class DashboardService:
                 errors.append(f"Filter {filter.id} has invalid type: {filter.filter_type}")
 
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+
+
+def get_value_filter_options_with_fallback(
+    warehouse_client: Warehouse,
+    schema_name: str,
+    table_name: str,
+    column_name: str,
+    limit: int,
+    constraints: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Distinct values + counts for a dropdown filter, narrowed by any active constraints.
+    Falls back to the unnarrowed list if the narrowed query fails.
+    """
+
+    def _build(with_constraints: bool) -> AggQueryBuilder:
+        qb = AggQueryBuilder()
+        qb.add_column(column(column_name).label("value"))
+        qb.add_aggregate_column(None, "count", alias="count")
+        qb.fetch_from(table_name, schema_name)
+        qb.where_clause(column(column_name).isnot(None))
+        if with_constraints:
+            apply_chart_filters(qb, constraints or [])
+        qb.group_cols_by(column_name)
+        qb.order_cols_by([("count", "desc"), ("value", "asc")])
+        qb.limit_rows(limit)
+        return qb
+
+    try:
+        return execute_query(warehouse_client, _build(True))
+    except Exception as narrow_err:
+        if not constraints:
+            raise
+        constraint_columns = [c.get("column") for c in constraints]
+        logger.warning(
+            f"Narrowed filter preview failed for columns={constraint_columns}, "
+            f"falling back to unnarrowed list ({type(narrow_err).__name__})"
+        )
+        return execute_query(warehouse_client, _build(False))
 
 
 def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, str]:

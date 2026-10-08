@@ -78,10 +78,6 @@ class Dashboard(models.Model):
         help_text="Layout for dashboard filters - vertical sidebar or horizontal top bar",
     )
 
-    # Dependent filters: at most one unnamed group per dashboard --
-    # every filter id in this list mutually narrows every other one.
-    dependent_group_filter_ids = models.JSONField(default=list)
-
     # Publishing status
     is_published = models.BooleanField(default=False)
     published_at = models.DateTimeField(null=True, blank=True)
@@ -156,7 +152,9 @@ class Dashboard(models.Model):
             "target_screen_size": self.target_screen_size,
             "tabs": self.tabs or [],
             "filter_layout": self.filter_layout,
-            "dependent_group_filter_ids": self.dependent_group_filter_ids or [],
+            "dependent_group_filter_ids": list(
+                self.filters.filter(dependent_group_id__isnull=False).values_list("id", flat=True)
+            ),
             "is_published": self.is_published,
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "created_by": self.created_by.user.email if self.created_by else None,
@@ -195,6 +193,9 @@ class DashboardFilter(models.Model):
 
     # Filter settings
     settings = models.JSONField(default=dict, help_text="Filter-specific settings")
+
+    # Same value on multiple filters groups them together; null = ungrouped.
+    dependent_group_id = models.BigIntegerField(null=True, blank=True)
 
     # UI positioning
     order = models.IntegerField(default=0)

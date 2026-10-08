@@ -303,6 +303,7 @@ def duplicate_dashboard(request, dashboard_id: int):
                 column_name=original_filter.column_name,
                 settings=original_filter.settings,
                 order=original_filter.order,
+                dependent_group_id=original_filter.dependent_group_id,
             )
             filter_id_mapping[str(original_filter.id)] = str(new_filter.id)
 
@@ -310,11 +311,6 @@ def duplicate_dashboard(request, dashboard_id: int):
             original_dashboard.tabs or [], filter_id_mapping
         )
         new_dashboard.tabs = remap_widget_images(remapped_tabs, org, org)
-        new_dashboard.dependent_group_filter_ids = [
-            int(filter_id_mapping[str(old_id)])
-            for old_id in original_dashboard.dependent_group_filter_ids or []
-            if str(old_id) in filter_id_mapping
-        ]
         new_dashboard.save()
 
         logger.info(f"Duplicated dashboard {dashboard_id} as {new_dashboard.id} for org {org.id}")
@@ -528,7 +524,7 @@ def set_dependent_group(request, dashboard_id: int, payload: SetDependentGroup):
     orguser: OrgUser = request.orguser
 
     try:
-        dashboard = DashboardService.set_dependent_group(
+        filter_ids = DashboardService.set_dependent_group(
             dashboard_id, orguser.org, payload.filter_ids
         )
     except DashboardNotFoundError as err:
@@ -536,7 +532,7 @@ def set_dependent_group(request, dashboard_id: int, payload: SetDependentGroup):
     except FilterValidationError as err:
         raise HttpError(400, err.message) from err
 
-    return DependentGroupResponse(dependent_group_filter_ids=dashboard.dependent_group_filter_ids)
+    return DependentGroupResponse(dependent_group_filter_ids=filter_ids)
 
 
 # Filter options endpoint

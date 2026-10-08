@@ -10,8 +10,8 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.AddField(
-            model_name="dashboard",
-            name="dependent_group_filter_ids",
-            field=models.JSONField(default=list),
+            model_name="dashboardfilter",
+            name="dependent_group_id",
+            field=models.BigIntegerField(blank=True, null=True),
         ),
     ]

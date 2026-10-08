@@ -1,7 +1,7 @@
 """Filter API endpoints for dashboard filters"""
 
 import json
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TypedDict
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
 from pydantic import model_validator
@@ -16,8 +16,8 @@ from ddpui.models.dashboard import DashboardFilterType
 from ddpui.core.charts.charts_service import (
     execute_query,
     get_warehouse_client,
-    get_value_filter_options_with_fallback,
 )
+from ddpui.services.dashboard_service import get_value_filter_options_with_fallback
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.core import warehousefunctions as _wh_funcs
 from ddpui.schemas.chart_schemas.config import FilterOperator
@@ -69,7 +69,15 @@ class FilterNarrowingConstraint(Schema):
         return self
 
 
-def parse_narrowing_constraints(constraints_json: Optional[str]) -> Optional[List[Dict[str, Any]]]:
+class FilterNarrowingConstraintDict(TypedDict):
+    column: str
+    operator: FilterOperator
+    value: Any
+
+
+def parse_narrowing_constraints(
+    constraints_json: Optional[str],
+) -> Optional[List[FilterNarrowingConstraintDict]]:
     """Parses the `constraints` query param into plain dicts. Raises HttpError(400) on bad
     JSON or a bad shape."""
     if not constraints_json:

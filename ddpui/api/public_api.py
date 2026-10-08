@@ -42,8 +42,8 @@ from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import (
     get_warehouse_client,
     execute_query,
-    get_value_filter_options_with_fallback,
 )
+from ddpui.services.dashboard_service import get_value_filter_options_with_fallback
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.core.reports.report_service import ReportService
 from ddpui.core.kpi.kpi_service import KPIService

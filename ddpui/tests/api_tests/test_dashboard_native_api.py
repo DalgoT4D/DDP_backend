@@ -920,8 +920,7 @@ class TestDuplicateDashboardTabs:
             table_name="orders",
             column_name="city",
         )
-        sample_dashboard.dependent_group_filter_ids = [f1.id, f2.id]
-        sample_dashboard.save()
+        DashboardFilter.objects.filter(id__in=[f1.id, f2.id]).update(dependent_group_id=f1.id)
 
         request = mock_request(orguser)
         response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)

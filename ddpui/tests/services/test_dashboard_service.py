@@ -366,9 +366,9 @@ class TestSetDependentGroup:
             ),
         )
 
-        dashboard = DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id])
+        filter_ids = DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id])
 
-        assert dashboard.dependent_group_filter_ids == []
+        assert filter_ids == []
 
     def test_deleting_a_group_member_removes_it_from_the_group(
         self, sample_dashboard, org, seed_db
@@ -396,7 +396,7 @@ class TestSetDependentGroup:
         DashboardService.delete_filter(sample_dashboard.id, f2.id, org)
 
         sample_dashboard.refresh_from_db()
-        assert f2.id not in sample_dashboard.dependent_group_filter_ids
+        assert sample_dashboard.to_json()["dependent_group_filter_ids"] == []
 
     def test_changing_a_group_members_type_removes_it_but_keeps_the_rest_grouped(
         self, sample_dashboard, org, seed_db
@@ -435,7 +435,7 @@ class TestSetDependentGroup:
         )
 
         sample_dashboard.refresh_from_db()
-        assert sample_dashboard.dependent_group_filter_ids == [f1.id, f3.id]
+        assert sample_dashboard.to_json()["dependent_group_filter_ids"] == [f1.id, f3.id]
 
 
 # ================================================================================

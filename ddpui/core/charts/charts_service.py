@@ -1053,52 +1053,6 @@ def execute_query(
     return list(results)
 
 
-def get_value_filter_options_with_fallback(
-    warehouse_client: Warehouse,
-    schema_name: str,
-    table_name: str,
-    column_name: str,
-    limit: int,
-    constraints: Optional[List[Dict[str, Any]]] = None,
-) -> List[Dict[str, Any]]:
-    """Distinct values + counts for a dropdown filter, narrowed by every active constraint
-    (dependent-filters). Each entry in `constraints` is a ChartFilter-shaped
-    {"column", "operator", "value"} -- a numerical/datetime constraint sends two
-    (greater_than_equal + less_than_equal), a value constraint sends one ("in"). Applied via
-    apply_chart_filters(), same as chart-level filters, so they combine with AND the same
-    way. If the narrowed query fails -- e.g. a column was renamed/removed since the
-    constraint was set up -- falls back to the fully unnarrowed list rather than breaking
-    this filter. An independent filter's own query failure still raises.
-
-    Shared by filter_api.py (internal) and public_api.py (both public routes).
-    """
-
-    def _build(with_constraints: bool) -> AggQueryBuilder:
-        qb = AggQueryBuilder()
-        qb.add_column(column(column_name).label("value"))
-        qb.add_aggregate_column(None, "count", alias="count")
-        qb.fetch_from(table_name, schema_name)
-        qb.where_clause(column(column_name).isnot(None))
-        if with_constraints:
-            apply_chart_filters(qb, constraints or [])
-        qb.group_cols_by(column_name)
-        qb.order_cols_by([("count", "desc"), ("value", "asc")])
-        qb.limit_rows(limit)
-        return qb
-
-    try:
-        return execute_query(warehouse_client, _build(True))
-    except Exception as narrow_err:
-        if not constraints:
-            raise
-        constraint_columns = [c.get("column") for c in constraints]
-        logger.warning(
-            f"Narrowed filter preview failed for columns={constraint_columns}, "
-            f"falling back to unnarrowed list ({type(narrow_err).__name__})"
-        )
-        return execute_query(warehouse_client, _build(False))
-
-
 def execute_chart_query(
     warehouse_client: Warehouse, query_builder: AggQueryBuilder, payload: ExecuteChartQuery
 ) -> List[Dict[str, Any]]:
