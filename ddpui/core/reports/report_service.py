@@ -71,6 +71,9 @@ class ReportService:
             "tabs": dashboard.tabs,
             "filter_layout": dashboard.filter_layout,
             "filters": [f.to_json() for f in filters],
+            "dependent_group_filter_ids": [
+                f.id for f in filters if f.dependent_group_id is not None
+            ],
         }
 
     @staticmethod

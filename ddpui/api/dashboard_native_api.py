@@ -46,6 +46,8 @@ from ddpui.schemas.dashboard_schema import (
     DashboardFilterResponse,
     FilterCreate,
     FilterUpdate,
+    SetDependentGroup,
+    DependentGroupResponse,
     FilterOptionResponse,
     FilterOptionsResponse,
     LockResponse,
@@ -301,6 +303,7 @@ def duplicate_dashboard(request, dashboard_id: int):
                 column_name=original_filter.column_name,
                 settings=original_filter.settings,
                 order=original_filter.order,
+                dependent_group_id=original_filter.dependent_group_id,
             )
             filter_id_mapping[str(original_filter.id)] = str(new_filter.id)
 
@@ -507,6 +510,29 @@ def delete_filter(request, dashboard_id: int, filter_id: int):
         raise HttpError(404, "Filter not found") from err
 
     return {"success": True}
+
+
+@dashboard_native_router.put("/{dashboard_id}/dependent-group/", response=DependentGroupResponse)
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.EDIT,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
+def set_dependent_group(request, dashboard_id: int, payload: SetDependentGroup):
+    """Replace a dashboard's dependent group with the given filter ids"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        filter_ids = DashboardService.set_dependent_group(
+            dashboard_id, orguser.org, payload.filter_ids
+        )
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    except FilterValidationError as err:
+        raise HttpError(400, err.message) from err
+
+    return DependentGroupResponse(dependent_group_filter_ids=filter_ids)
 
 
 # Filter options endpoint

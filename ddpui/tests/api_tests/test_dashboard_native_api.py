@@ -42,6 +42,7 @@ from ddpui.api.dashboard_native_api import (
     delete_filter,
     favorite_dashboard,
     unfavorite_dashboard,
+    set_dependent_group,
     set_personal_landing_dashboard,
     set_org_default_dashboard,
     upload_dashboard_widget_image,
@@ -52,6 +53,7 @@ from ddpui.schemas.dashboard_schema import (
     DashboardTabSchema,
     FilterCreate,
     FilterUpdate,
+    SetDependentGroup,
 )
 from ddpui.services.dashboard_service import (
     WidgetImageValidationError,
@@ -753,6 +755,26 @@ class TestDeleteFilter:
 
 
 # ================================================================================
+# Test set_dependent_group endpoint (dependent-filters v2 group model)
+# ================================================================================
+
+
+class TestSetDependentGroup:
+    """Tests for set_dependent_group endpoint"""
+
+    def test_set_dependent_group_dashboard_not_found(self, orguser, seed_db):
+        """Test setting group on a non-existent dashboard returns 404"""
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            set_dependent_group(
+                request, dashboard_id=99999, payload=SetDependentGroup(filter_ids=[1, 2])
+            )
+
+        assert excinfo.value.status_code == 404
+
+
+# ================================================================================
 # Test duplicate_dashboard tabs (NEW in feature/dashboard_tabs)
 # ================================================================================
 
@@ -879,6 +901,34 @@ class TestDuplicateDashboardTabs:
             == "https://test-bucket.s3.amazonaws.com/orgs/dash-api-test-org/dashboards/images/new.png"
         )
         mock_copy.assert_called_once()
+
+    def test_duplicate_dashboard_remaps_dependent_group_filter_ids(
+        self, orguser, sample_dashboard, seed_db
+    ):
+        """Test that dependent_group_filter_ids is remapped to the copy's new filter ids"""
+        f1 = DashboardFilter.objects.create(
+            dashboard=sample_dashboard,
+            filter_type="value",
+            schema_name="public",
+            table_name="orders",
+            column_name="state",
+        )
+        f2 = DashboardFilter.objects.create(
+            dashboard=sample_dashboard,
+            filter_type="value",
+            schema_name="public",
+            table_name="orders",
+            column_name="city",
+        )
+        DashboardFilter.objects.filter(id__in=[f1.id, f2.id]).update(dependent_group_id=f1.id)
+
+        request = mock_request(orguser)
+        response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        new_filter_ids = {f.id for f in response.filters}
+        assert set(response.dependent_group_filter_ids) == new_filter_ids
+        assert f1.id not in response.dependent_group_filter_ids
+        assert f2.id not in response.dependent_group_filter_ids
 
 
 # ================================================================================

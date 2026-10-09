@@ -510,6 +510,26 @@ def test_dashboard_filter_create(sample_dashboard, seed_db):
     filter_obj.delete()
 
 
+def test_dashboard_filter_dependent_group_id_default(sample_dashboard, seed_db):
+    """Test dependent_group_id defaults to None and can be set"""
+    filter_obj = DashboardFilter.objects.create(
+        dashboard=sample_dashboard,
+        filter_type="value",
+        schema_name="public",
+        table_name="orders",
+        column_name="status",
+        order=0,
+    )
+    assert filter_obj.dependent_group_id is None
+
+    filter_obj.dependent_group_id = filter_obj.id
+    filter_obj.save()
+    filter_obj.refresh_from_db()
+    assert filter_obj.dependent_group_id == filter_obj.id
+
+    filter_obj.delete()
+
+
 def test_dashboard_filter_all_types(sample_dashboard, seed_db):
     """Test creating filters with all filter types"""
     for filter_type, _ in DashboardFilterType.choices():

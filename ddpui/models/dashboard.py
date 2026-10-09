@@ -152,6 +152,9 @@ class Dashboard(models.Model):
             "target_screen_size": self.target_screen_size,
             "tabs": self.tabs or [],
             "filter_layout": self.filter_layout,
+            "dependent_group_filter_ids": sorted(
+                f.id for f in self.filters.all() if f.dependent_group_id is not None
+            ),
             "is_published": self.is_published,
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "created_by": self.created_by.user.email if self.created_by else None,
@@ -190,6 +193,9 @@ class DashboardFilter(models.Model):
 
     # Filter settings
     settings = models.JSONField(default=dict, help_text="Filter-specific settings")
+
+    # Same value on multiple filters groups them together; null = ungrouped.
+    dependent_group_id = models.BigIntegerField(null=True, blank=True)
 
     # UI positioning
     order = models.IntegerField(default=0)
