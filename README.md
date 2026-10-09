@@ -1,3 +1,8 @@
+> **This repository is now a read-only archive.**
+> Dalgo has moved to a monorepo at **[DalgoT4D/dalgo](https://github.com/DalgoT4D/dalgo)**. All active development, issues, and contributions should go there.
+
+---
+
 ## DDP_backend
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
