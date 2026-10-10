@@ -203,7 +203,7 @@ def post_login(request, payload: LoginPayload):
     """Uses the username and password in the request to return a JWT auth token"""
     serializer = CustomTokenObtainSerializer(
         data={
-            "username": payload.username,
+            "username":User.objects.get(email__iexact=payload.username).username,
             "password": payload.password,
         }
     )
@@ -230,7 +230,7 @@ def post_login_token(request):
     access_token = serializer.access_token
 
     # Get user data
-    retval = orguserfunctions.lookup_user(user.username)
+    retval = orguserfunctions.lookup_user(user.email)
     retval["token"] = str(access_token)
     retval["refresh"] = str(serializer)
     return retval
