@@ -242,7 +242,7 @@ class RegexExtractionOperationConfig(Schema):
 
 class ReplaceColOp(Schema):
     find: str
-    replace: str
+    replace: Optional[str] = ""
 
 
 class ReplaceColumnValueConfig(Schema):
