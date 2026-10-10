@@ -22,6 +22,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.auth import has_permission
+from ddpui.utils.warehouse.exceptions import TableNotFoundError
 
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.generate_result import GenerateResult, poll_for_column_insights
@@ -166,6 +167,8 @@ def get_table_count(request, schema_name: str, table_name: str):
         client = dbtautomation_service._get_wclient(org_warehouse)
         total_rows = client.get_total_rows(schema_name, table_name)
         return {"total_rows": total_rows}
+    except TableNotFoundError:
+        raise HttpError(404, f"Table {schema_name}.{table_name} not found")
     except Exception as e:
         logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {e}")
         raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
