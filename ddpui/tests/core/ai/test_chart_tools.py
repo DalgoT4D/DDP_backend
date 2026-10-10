@@ -183,3 +183,17 @@ def test_rejects_bad_chart_type_and_missing_dimension(saved):
     )
     assert artifact["status"] == "rejected"
     assert "data" not in saved
+
+
+def test_rejects_missing_extra_config(saved):
+    """When the LLM omits extra_config, the tool should reject gracefully
+    instead of raising an unhandled ValidationError."""
+    content, artifact = run_tool(
+        make_chart_context(),
+        title="Surveys by state",
+        chart_type="bar",
+        schema_name="prod",
+        table_name="surveys",
+    )
+    assert artifact["status"] == "rejected"
+    assert "data" not in saved
