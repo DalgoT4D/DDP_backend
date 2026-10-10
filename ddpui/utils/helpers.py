@@ -62,17 +62,39 @@ def map_airbyte_keys_to_postgres_keys(conn_info: dict):
     """called by `post_system_transformation_tasks` and `_get_wclient`"""
     if "tunnel_method" in conn_info:
         method = conn_info["tunnel_method"]
+        tunnel_type = method.get("tunnel_method")
 
-        if method["tunnel_method"] in ["SSH_KEY_AUTH", "SSH_PASSWORD_AUTH"]:
-            conn_info["ssh_host"] = method["tunnel_host"]
-            conn_info["ssh_port"] = method["tunnel_port"]
-            conn_info["ssh_username"] = method["tunnel_user"]
+        if tunnel_type in ["SSH_KEY_AUTH", "SSH_PASSWORD_AUTH"]:
+            tunnel_host = method.get("tunnel_host")
+            tunnel_port = method.get("tunnel_port")
+            tunnel_user = method.get("tunnel_user")
+            missing = [
+                k
+                for k, v in [
+                    ("tunnel_host", tunnel_host),
+                    ("tunnel_port", tunnel_port),
+                    ("tunnel_user", tunnel_user),
+                ]
+                if not v
+            ]
+            if missing:
+                raise ValueError(
+                    f"SSH tunnel config is missing required fields: {', '.join(missing)}"
+                )
+            conn_info["ssh_host"] = tunnel_host
+            conn_info["ssh_port"] = tunnel_port
+            conn_info["ssh_username"] = tunnel_user
 
-        if method["tunnel_method"] == "SSH_KEY_AUTH":
-            conn_info["ssh_pkey"] = method["ssh_key"]
+        if tunnel_type == "SSH_KEY_AUTH":
+            ssh_key = method.get("ssh_key")
+            if not ssh_key:
+                raise ValueError(
+                    "SSH tunnel config is missing required field: ssh_key"
+                )
+            conn_info["ssh_pkey"] = ssh_key
             conn_info["ssh_private_key_password"] = method.get("tunnel_private_key_password")
 
-        elif method["tunnel_method"] == "SSH_PASSWORD_AUTH":
+        elif tunnel_type == "SSH_PASSWORD_AUTH":
             conn_info["ssh_password"] = method.get("tunnel_user_password")
 
     conn_info["user"] = conn_info["username"]
