@@ -19,7 +19,10 @@ class SingleTaskProgress:
 
     def get(self) -> list:
         """get the list of progress"""
-        return json.loads(self.redis.get(self.task_key_))
+        result = self.redis.get(self.task_key_)
+        if result is None:
+            return []
+        return json.loads(result)
 
     def set(self, progress: list) -> None:
         """set the list of progress"""
