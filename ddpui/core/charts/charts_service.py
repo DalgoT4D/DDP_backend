@@ -804,6 +804,25 @@ def _next_day(val: str) -> str:
     return (datetime.strptime(val, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
+def _coerce_boolean_value(value):
+    """Coerce a filter value to a Python bool for boolean columns.
+
+    Returns None when the value is empty or unrecognisable so the caller
+    can skip the filter instead of sending an invalid literal to PostgreSQL.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lower = value.strip().lower()
+        if lower in ("true", "t", "yes", "y", "1"):
+            return True
+        if lower in ("false", "f", "no", "n", "0"):
+            return False
+    return None
+
+
 def apply_chart_filters(
     query_builder: AggQueryBuilder, filters: List[Dict[str, Any]]
 ) -> AggQueryBuilder:
@@ -838,6 +857,16 @@ def apply_chart_filters(
 
         if not column_name or operator is None:
             continue
+
+        # Coerce boolean values; skip when empty/unrecognisable to avoid
+        # PostgreSQL InvalidTextRepresentation ("invalid input syntax for
+        # type boolean").
+        data_type = (filter_config.get("data_type") or "").lower()
+        if data_type == "boolean" and operator not in ("is_null", "is_not_null"):
+            coerced = _coerce_boolean_value(filter_config.get("value", ""))
+            if coerced is None:
+                continue
+            filter_config = {**filter_config, "value": coerced}
 
         # Timestamp date filters need day-range logic — keep full config
         if operator in ("equals", "not_equals") and _is_timestamp_date(filter_config):
