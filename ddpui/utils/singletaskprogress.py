@@ -14,16 +14,22 @@ class SingleTaskProgress:
 
     def __init__(self, task_key: str, expire_in_seconds: int) -> None:
         self.task_key_ = task_key
+        self.expire_in_seconds_ = expire_in_seconds
         self.redis = RedisClient.get_instance()
         self.redis.set(self.task_key_, json.dumps([]), expire_in_seconds)
 
     def get(self) -> list:
         """get the list of progress"""
-        return json.loads(self.redis.get(self.task_key_))
+        result = self.redis.get(self.task_key_)
+        if result is None:
+            return []
+        return json.loads(result)
 
     def set(self, progress: list) -> None:
         """set the list of progress"""
         expiry = self.redis.ttl(self.task_key_)
+        if expiry < 0:
+            expiry = self.expire_in_seconds_
         self.redis.set(self.task_key_, json.dumps(progress), expiry)
 
     def add(self, progress) -> None:
