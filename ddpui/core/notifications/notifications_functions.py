@@ -29,8 +29,16 @@ def get_recipients(
     user_email: str,
     manager_or_above: bool,
     superset_clients: bool = False,
+    org_slugs: Optional[List[str]] = None,
 ) -> Tuple[Optional[str], Optional[List[int]]]:
-    """Returns the list of recipients based on the request parameters"""
+    """Returns the list of recipients based on the request parameters.
+
+    org_slugs is additive: when given, it takes precedence over org_slug and merges
+    recipients across every listed org into one list -- the admin broadcast path
+    calls it this way for both a single-org and a multi-org audience. A slug with
+    no matching org just contributes nothing (Django's __in doesn't error on a
+    miss), the same failure mode as an org with no users.
+    """
 
     queryset = OrgUser.objects.all()
 
@@ -39,9 +47,12 @@ def get_recipients(
         pass  # no additional filter
 
     elif sent_to == SentToEnum.ALL_ORG_USERS:
-        if not org_slug:
+        if org_slugs:
+            queryset = queryset.filter(org__slug__in=org_slugs)
+        elif org_slug:
+            queryset = queryset.filter(org__slug=org_slug)
+        else:
             return "org_slug is required to sent notification to all org users.", None
-        queryset = queryset.filter(org__slug=org_slug)
 
     elif sent_to == SentToEnum.SINGLE_USER:
         if not user_email:
@@ -99,7 +110,14 @@ def handle_recipient(
         notification.sent_time = timezone.as_utc(datetime.now())
         notification.save()
 
-        if not skip_email and user_preference.enable_email_notifications:
+        # three independent narrowings, all of which must allow the email: the sender's
+        # persisted choice (send_email, the admin broadcast channel picker), the caller's
+        # (skip_email, set when it sends a specialized email itself), and the recipient's.
+        if (
+            notification.send_email
+            and not skip_email
+            and user_preference.enable_email_notifications
+        ):
             try:
                 plain_body, html_body = render_notification_email(
                     notification.email_subject,
@@ -146,6 +164,9 @@ def create_notification(
         email_subject=email_subject,
         urgent=urgent,
         scheduled_time=scheduled_time,
+        target_org_ids=notification_data.target_org_ids,
+        send_in_app=notification_data.send_in_app,
+        send_email=notification_data.send_email,
     )
 
     if not notification:
@@ -260,7 +281,9 @@ def fetch_user_notifications(
 
     notifications = (
         NotificationRecipient.objects.filter(
-            recipient=orguser, notification__sent_time__isnull=False
+            recipient=orguser,
+            notification__sent_time__isnull=False,
+            notification__send_in_app=True,
         )
         .select_related("notification")
         .order_by("-notification__timestamp")
@@ -304,6 +327,7 @@ def fetch_user_notifications_v1(
         NotificationRecipient.objects.filter(
             recipient=orguser,
             notification__sent_time__isnull=False,
+            notification__send_in_app=True,
             **({"read_status": read_status == 1} if read_status is not None else {}),
         )
         .select_related("notification")
@@ -408,7 +432,7 @@ def get_unread_notifications_count(
     Returns the count of unread notifications for a specific user.
     """
     unread_count = NotificationRecipient.objects.filter(
-        recipient=orguser, read_status=False
+        recipient=orguser, read_status=False, notification__send_in_app=True
     ).count()
 
     return None, {"success": True, "res": unread_count}
@@ -423,7 +447,7 @@ def mark_all_notifications_as_read(
     """
     try:
         updated_count = NotificationRecipient.objects.filter(
-            recipient__id=orguser_id, read_status=False
+            recipient__id=orguser_id, read_status=False, notification__send_in_app=True
         ).update(read_status=True)
         return None, {"success": True, "updated_count": updated_count}
     except Exception as e:

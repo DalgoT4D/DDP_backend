@@ -12,7 +12,7 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken, TokenErro
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from django.contrib.auth.models import User
 
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.role_based_access import RolePermission, RoleSlug
 from ddpui.utils import thread
 from ddpui.utils.redis_client import RedisClient
@@ -81,6 +81,30 @@ def orguser_has_permission(orguser, permission_slug: str) -> bool:
     return RolePermission.objects.filter(
         role=orguser.new_role, permission__slug=permission_slug
     ).exists()
+
+
+def has_platform_admin_permission(api_endpoint):
+    """Gate that checks UserAttributes.is_platform_admin on the requesting user.
+
+    User-level check — independent of which org the request is scoped to.
+    Returns 404 (not 403) to avoid advertising the endpoint's existence.
+    """
+
+    @wraps(api_endpoint)
+    def wrapper(*args, **kwargs):
+        request = args[0]
+        try:
+            if not UserAttributes.objects.filter(
+                user=request.orguser.user, is_platform_admin=True
+            ).exists():
+                raise HttpError(404, UNAUTHORIZED)
+        except HttpError:
+            raise
+        except Exception:
+            raise HttpError(404, UNAUTHORIZED)
+        return api_endpoint(*args, **kwargs)
+
+    return wrapper
 
 
 def has_access(rtype: str, required_level: str, get_resource_id=None):
@@ -154,8 +178,11 @@ def blacklist_jti_in_redis(token_str, token_class):
 class CustomJwtAuthMiddleware(HttpBearer):
     """the authenticate() function is called on every authenticated request via django middleware"""
 
+    # the cookie this middleware reads the access token from
+    cookie_name = "access_token"
+
     def __call__(self, request):
-        cookie_token = request.COOKIES.get("access_token")
+        cookie_token = request.COOKIES.get(self.cookie_name)
 
         if not cookie_token:
             return super().__call__(request)
