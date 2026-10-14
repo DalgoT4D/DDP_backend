@@ -11,7 +11,7 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken, TokenErro
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from django.contrib.auth.models import User
 
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.role_based_access import RolePermission, RoleSlug
 from ddpui.utils import thread
 from ddpui.utils.redis_client import RedisClient
@@ -35,12 +35,6 @@ GUEST_ROLE = RoleSlug.MEMBER
 # package any earlier would hit a partially-initialized ddpui.auth.
 from ddpui.core.access import access_control, shareable_types
 from ddpui.models.resource_share import AccessLevel, LEVEL_RANK
-
-# Admin Portal authority, granted in seed/003_role_permissions.json to super-admin alone.
-# Seeding it needs `loaddata` followed by `manage.py clear_role_permissions` — the role ->
-# permission map is cached in redis and a warm cache will not contain a new slug.
-PLATFORM_ADMIN_PERMISSION = "can_manage_platform"
-
 
 def has_permission(permission_slugs: list):
     def decorator(api_endpoint):
@@ -66,16 +60,26 @@ def has_permission(permission_slugs: list):
     return decorator
 
 
-def user_has_platform_admin_permission(user: User) -> bool:
-    """
-    True when any of this user's org roles grants PLATFORM_ADMIN_PERMISSION.
+def has_platform_admin_permission(api_endpoint):
+    """Gate that checks UserAttributes.is_platform_admin on the requesting user.
 
-    For identity payloads (login, currentuser) which have no org context. Route-level
-    gating uses @has_permission instead, on the role of the org on the request.
+    User-level check — independent of which org the request is scoped to.
+    Returns 404 (not 403) to avoid advertising the endpoint's existence.
     """
-    return RolePermission.objects.filter(
-        role__orguser__user=user, permission__slug=PLATFORM_ADMIN_PERMISSION
-    ).exists()
+    @wraps(api_endpoint)
+    def wrapper(*args, **kwargs):
+        request = args[0]
+        try:
+            if not UserAttributes.objects.filter(
+                user=request.orguser.user, is_platform_admin=True
+            ).exists():
+                raise HttpError(404, UNAUTHORIZED)
+        except HttpError:
+            raise
+        except Exception:
+            raise HttpError(404, UNAUTHORIZED)
+        return api_endpoint(*args, **kwargs)
+    return wrapper
 
 
 def has_access(rtype: str, required_level: str, get_resource_id=None):

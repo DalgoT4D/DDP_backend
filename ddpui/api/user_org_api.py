@@ -63,7 +63,7 @@ from ddpui.ddpairbyte import airbytehelpers
 
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.feature_flags import get_all_feature_flags_for_org
-from ddpui.utils.orguserhelpers import holds_platform_admin, permissions_for_role
+from ddpui.utils.orguserhelpers import permissions_for_role
 from ddpui.utils.response_wrapper import api_response, ApiResponse
 from ddpui.core.org_logo.exceptions import (
     OrgLogoNotFoundError,
@@ -179,7 +179,9 @@ def get_current_user_v2(request, org_slug: str = None):
                 work_domain=curr_orguser.work_domain,
                 has_seen_resource_sharing_notice=curr_orguser.has_seen_resource_sharing_notice,
                 # per row, from that row's own role
-                is_platform_admin=holds_platform_admin(row_permissions),
+                is_platform_admin=UserAttributes.objects.filter(
+                    user=curr_orguser.user, is_platform_admin=True
+                ).exists(),
             )
         )
 
@@ -310,6 +312,7 @@ def get_organization_users(request):
     ):
         if curr_orguser.org.orgtncs.exists():
             curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
+
         row_permissions = permissions_for_role(curr_orguser.new_role)
         res.append(
             OrgUserResponse(
@@ -324,7 +327,9 @@ def get_organization_users(request):
                     curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
                 ),
                 subscription_plan=(curr_orguser.org.base_plan() if curr_orguser.org else None),
-                is_platform_admin=holds_platform_admin(row_permissions),
+                is_platform_admin=UserAttributes.objects.filter(
+                    user=curr_orguser.user, is_platform_admin=True
+                ).exists(),
             )
         )
 

@@ -77,6 +77,7 @@ from ddpui.models.org_user import (
     NewInvitationSchema,
     AcceptInvitationSchema,
     LoginPayload,
+    UserAttributes,
 )
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard
@@ -88,7 +89,6 @@ from ddpui.auth import (
     SUPER_ADMIN_ROLE,
     ANALYST_ROLE,
     GUEST_ROLE,
-    PLATFORM_ADMIN_PERMISSION,
     UNAUTHORIZED,
 )
 from ddpui.core.admin import admin_service
@@ -128,13 +128,10 @@ def orguser(authuser, org, seed_db):
 
 
 def make_platform_admin(orguser: OrgUser) -> OrgUser:
-    """promote an OrgUser to super-admin, the role holding can_manage_platform.
-
-    mock_request() reads request.permissions off the row's role, so promoting the row is
-    all the gate needs — the production path.
-    """
-    orguser.new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
-    orguser.save()
+    """set UserAttributes.is_platform_admin=True for this user — the production gate."""
+    ua, _ = UserAttributes.objects.get_or_create(user=orguser.user)
+    ua.is_platform_admin = True
+    ua.save()
     return orguser
 
 
@@ -173,27 +170,23 @@ def test_admin_currentuser_ok_for_platform_admin(orguser):
 
 
 def test_currentuserv2_reports_platform_admin_true(orguser):
-    """currentuserv2 reports is_platform_admin: true for a super-admin membership"""
+    """currentuserv2 reports is_platform_admin: true when UserAttributes.is_platform_admin is set"""
     request = mock_request(make_platform_admin(orguser))
     response = get_current_user_v2(request)
     assert len(response) == 1
     assert response[0].is_platform_admin is True
-    # the flag is a convenience over the permission list, which carries the same fact
-    assert PLATFORM_ADMIN_PERMISSION in {p["slug"] for p in response[0].permissions}
 
 
 def test_currentuserv2_reports_platform_admin_false(orguser):
-    """currentuserv2 reports false for an org admin, who lacks the permission"""
+    """currentuserv2 reports false when UserAttributes.is_platform_admin is not set"""
     request = mock_request(orguser)
     response = get_current_user_v2(request)
     assert len(response) == 1
     assert response[0].is_platform_admin is False
-    assert PLATFORM_ADMIN_PERMISSION not in {p["slug"] for p in response[0].permissions}
 
 
 # ---- every OrgUserResponse mapper agrees on the flag --------------------------
-# from_orguser() and the two inline builders all derive it through
-# holds_platform_admin(), so a super-admin never reads False on one endpoint.
+# from_orguser() and the two inline builders all read UserAttributes.is_platform_admin.
 
 
 def test_from_orguser_reports_platform_admin(orguser):
@@ -1067,7 +1060,7 @@ def test_week1_full_admin_lifecycle_flow(
 # ---- router auth: no separate admin session ----------------------------------
 # The admin portal signs in through the shared POST /api/v2/login/ and the admin
 # router inherits the API-wide CustomJwtAuthMiddleware, exactly like every other
-# router. Authority is @has_permission([PLATFORM_ADMIN_PERMISSION]) on each route, so
+# router. Authority is @has_platform_admin_permission on each route, so
 # the guarantee worth
 # holding is: a signed-in NON-admin is refused. Asserted by calling the view functions
 # directly, per this repo's testing skill (no ninja TestClient).
@@ -1110,16 +1103,13 @@ def test_v2_login_response_carries_is_platform_admin(seed_db):
     pins this key — without this test, dropping it from lookup_user() would silently
     break the admin sign-in. See lookup_user() in ddpui/core/orguserfunctions.py.
 
-    The login body has no org context, so the key reports whether the user holds
-    can_manage_platform through ANY of their memberships.
+    The login body has no org context — is_platform_admin comes from UserAttributes,
+    not from any org role.
     """
     user = User.objects.create_user(
         username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
     )
-    login_org = Org.objects.create(name="login-admin-org", slug="login-admin-org")
-    OrgUser.objects.create(
-        user=user, org=login_org, new_role=Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
-    )
+    UserAttributes.objects.create(user=user, is_platform_admin=True)
 
     with patch("ddpui.auth.RedisClient.get_instance") as mock_redis, patch(
         "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}
@@ -1147,7 +1137,7 @@ def test_v2_login_reports_is_platform_admin_false_for_a_normal_user(seed_db):
     into the admin shell (the backend would still refuse every route, but the UX breaks).
     """
     User.objects.create_user(username="ops@dalgo.org", email="ops@dalgo.org", password="Secret@123")
-    # no OrgUser rows at all -> no role grants can_manage_platform -> False
+    # no UserAttributes row -> is_platform_admin defaults to False
 
     with patch("ddpui.auth.RedisClient.get_instance") as mock_redis, patch(
         "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}

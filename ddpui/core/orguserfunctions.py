@@ -12,7 +12,7 @@ from django.db import transaction
 from django.utils.text import slugify
 from django.utils import timezone as django_timezone
 
-from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE, user_has_platform_admin_permission
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE
 from ddpui.models.alert import Alert
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.metric import KPI, Metric
@@ -76,8 +76,7 @@ def lookup_user(email: str):
         "active": user.is_active,
         "can_create_orgs": userattributes.can_create_orgs,
         "is_consultant": userattributes.is_consultant,
-        # from the user's roles, not UserAttributes: no org context here, so "in some org"
-        "is_platform_admin": user_has_platform_admin_permission(user),
+        "is_platform_admin": userattributes.is_platform_admin,
     }
 
 

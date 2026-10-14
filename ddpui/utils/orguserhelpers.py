@@ -2,9 +2,8 @@
 
 from django.utils.text import slugify
 
-from ddpui.auth import PLATFORM_ADMIN_PERMISSION
 from ddpui.models.org_user import Invitation, InvitationSchema
-from ddpui.models.org_user import OrgUser, OrgUserResponse
+from ddpui.models.org_user import OrgUser, OrgUserResponse, UserAttributes
 from ddpui.models.org import OrgWarehouse, OrgType
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.models.role_based_access import Role
@@ -18,11 +17,6 @@ def permissions_for_role(role: Role) -> list[dict]:
         {"slug": rolep.permission.slug, "name": rolep.permission.name}
         for rolep in role.rolepermissions.all()
     ]
-
-
-def holds_platform_admin(permissions: list[dict]) -> bool:
-    """True when a permissions_for_role list grants the Admin Portal"""
-    return any(perm["slug"] == PLATFORM_ADMIN_PERMISSION for perm in permissions)
 
 
 def from_orguser(orguser: OrgUser) -> OrgUserResponse:
@@ -51,7 +45,9 @@ def from_orguser(orguser: OrgUser) -> OrgUserResponse:
         plan_end_date=plan_end,
         work_domain=orguser.work_domain,
         has_seen_resource_sharing_notice=orguser.has_seen_resource_sharing_notice,
-        is_platform_admin=holds_platform_admin(permissions),
+        is_platform_admin=UserAttributes.objects.filter(
+            user=orguser.user, is_platform_admin=True
+        ).exists(),
     )
     if orguser.org:
         response.org.tnc_accepted = OrgTnC.objects.filter(org=orguser.org).exists()

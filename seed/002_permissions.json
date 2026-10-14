@@ -735,12 +735,4 @@
             "slug": "can_share_charts"
         }
     },
-    {
-        "model": "ddpui.Permission",
-        "pk": 93,
-        "fields": {
-            "name": "Can Manage Platform",
-            "slug": "can_manage_platform"
-        }
-    }
 ]
