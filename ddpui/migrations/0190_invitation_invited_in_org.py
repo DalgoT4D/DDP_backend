@@ -24,7 +24,7 @@ def backfill_invited_in_org(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0181_favorite"),
+        ("ddpui", "0189_dashboard_filter_dependent_group_id"),
     ]
 
     operations = [

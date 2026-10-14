@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0182_invitation_invited_in_org"),
+        ("ddpui", "0190_invitation_invited_in_org"),
     ]
 
     operations = [
