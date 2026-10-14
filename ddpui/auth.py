@@ -37,6 +37,7 @@ GUEST_ROLE = RoleSlug.MEMBER
 from ddpui.core.access import access_control, shareable_types
 from ddpui.models.resource_share import AccessLevel, LEVEL_RANK
 
+
 def has_permission(permission_slugs: list):
     def decorator(api_endpoint):
         def check(request):
@@ -80,13 +81,15 @@ def orguser_has_permission(orguser, permission_slug: str) -> bool:
     return RolePermission.objects.filter(
         role=orguser.new_role, permission__slug=permission_slug
     ).exists()
-    
+
+
 def has_platform_admin_permission(api_endpoint):
     """Gate that checks UserAttributes.is_platform_admin on the requesting user.
 
     User-level check — independent of which org the request is scoped to.
     Returns 404 (not 403) to avoid advertising the endpoint's existence.
     """
+
     @wraps(api_endpoint)
     def wrapper(*args, **kwargs):
         request = args[0]
@@ -100,6 +103,7 @@ def has_platform_admin_permission(api_endpoint):
         except Exception:
             raise HttpError(404, UNAUTHORIZED)
         return api_endpoint(*args, **kwargs)
+
     return wrapper
 
 
