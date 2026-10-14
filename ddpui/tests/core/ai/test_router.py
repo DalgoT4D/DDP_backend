@@ -131,3 +131,15 @@ def test_backstop_leaves_genuine_data_questions_alone():
     ]:
         route = run(route_question(question, model))
         assert route.intent == "data_question", question
+
+
+def test_fenced_json_with_trailing_reasoning():
+    """Haiku sometimes appends reasoning after the closing fence."""
+    raw = (
+        '```json\n{"intent": "data_question", "complexity": "simple"}\n```\n\n'
+        "**Reasoning:** This is a follow-up about data analysis."
+    )
+    model = FakeModel(raw)
+    route = run(route_question("divide them by dbt vs airbyte", model))
+    assert route.intent == "data_question"
+    assert route.complexity == "simple"
