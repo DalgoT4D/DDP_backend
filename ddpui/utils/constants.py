@@ -12,7 +12,6 @@ TASK_AIRBYTESYNC = "airbyte-sync"
 TASK_AIRBYTERESET = "airbyte-reset"
 TASK_AIRBYTECLEAR = "airbyte-clear"
 TASK_DBTSEED = "dbt-seed"
-TASK_GENERATE_EDR = "generate-edr"
 UPDATE_SCHEMA = "update-schema"
 
 # Dbt transformation sequence task slugs; we can always take this from the user/frontend also
@@ -23,7 +22,6 @@ TRANSFORM_TASKS_SEQ = {
     TASK_DBTSEED: 4,
     TASK_DBTRUN: 5,
     TASK_DBTTEST: 6,
-    TASK_GENERATE_EDR: 25,
 }
 # when a new pipeline is created; these are the transform tasks being pushed by default
 DEFAULT_TRANSFORM_TASKS_IN_PIPELINE = [
@@ -91,3 +89,21 @@ AIRBYTE_JOB_STATUS_FAILED = "failed"
 AIRBYTE_JOB_STATUS_CANCELLED = "cancelled"
 
 AIRBYTE_CONNECTION_DEPRECATED = "deprecated"
+
+
+# Image uploads — shared by dashboard widget images and org logo
+ALLOWED_IMAGE_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+}
+MAX_IMAGE_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+IMAGE_CONTENT_TYPE_TO_EXT = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/svg+xml": "svg",
+}

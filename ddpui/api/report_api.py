@@ -85,7 +85,6 @@ def list_snapshots(
 def create_snapshot(request, payload: SnapshotCreate):
     """Create a new snapshot from a dashboard"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
     try:
         s = ReportService.create_snapshot(
             title=payload.title,
@@ -94,25 +93,6 @@ def create_snapshot(request, payload: SnapshotCreate):
             date_column=payload.date_column.model_dump() if payload.date_column else {},
             period_end=payload.period_end,
             period_start=payload.period_start,
-        )
-
-        create_audit_log(
-            org=org,
-            orguser=orguser,
-            resource_type=AuditLogResourceType.REPORT,
-            resource_id=str(s.id),
-            action=AuditLogAction.CREATE,
-            resource_fields={
-                "title": payload.title,
-                "dashboard": s.frozen_dashboard.get("title") if s.frozen_dashboard else None,
-                "date_column": payload.date_column.model_dump() if payload.date_column else None,
-                # date objects aren't JSON-serializable by the default JSONField
-                # encoder — must convert to strings before logging.
-                "period_start": (
-                    payload.period_start.isoformat() if payload.period_start else None
-                ),
-                "period_end": payload.period_end.isoformat() if payload.period_end else None,
-            },
         )
 
         return api_response(

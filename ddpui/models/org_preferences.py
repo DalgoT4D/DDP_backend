@@ -28,6 +28,7 @@ class OrgPreferences(models.Model):
         max_length=10, choices=AccessLevel.choices, default=AccessLevel.VIEW
     )
     allow_public_sharing = models.BooleanField(default=True)
+    auto_accept_non_breaking_schema_changes = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
 
@@ -48,4 +49,7 @@ class OrgPreferences(models.Model):
             "default_analyst_level": self.default_analyst_level,
             "default_member_level": self.default_member_level,
             "allow_public_sharing": bool(self.allow_public_sharing),
+            "auto_accept_non_breaking_schema_changes": bool(
+                self.auto_accept_non_breaking_schema_changes
+            ),
         }

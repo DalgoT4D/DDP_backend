@@ -1059,7 +1059,6 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
 def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
 
     # ChartData / ChartService operate on dicts internally; ChartCreate.extra_config
     # is a typed sub-schema (validated already), so convert back here.
@@ -1088,22 +1087,6 @@ def create_chart(request, payload: ChartCreate):
         chart = ChartService.create_chart(chart_data, orguser)
 
         logger.info(f"Chart {chart.id} saved successfully (type={chart.chart_type})")
-
-        create_audit_log(
-            org=org,
-            orguser=orguser,
-            resource_type=AuditLogResourceType.CHART,
-            resource_id=str(chart.id),
-            action=AuditLogAction.CREATE,
-            resource_fields={
-                "title": payload.title,
-                "description": payload.description or "",
-                "chart_type": payload.chart_type,
-                "schema_name": payload.schema_name,
-                "table_name": payload.table_name,
-                "extra_config": extra_config,
-            },
-        )
 
     except ChartValidationError as e:
         logger.error(f"Chart validation error: {e.message}")

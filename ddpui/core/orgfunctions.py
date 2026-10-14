@@ -12,7 +12,14 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui import settings
 from ddpui.models.org import Org
 from ddpui.schemas.org_schema import CreateOrgSchema
-from ddpui.utils.constants import DALGO_WITH_SUPERSET, DALGO, FREE_TRIAL
+from ddpui.utils.constants import (
+    DALGO_WITH_SUPERSET,
+    DALGO,
+    FREE_TRIAL,
+    ALLOWED_IMAGE_CONTENT_TYPES,
+    MAX_IMAGE_UPLOAD_SIZE_BYTES,
+    IMAGE_CONTENT_TYPE_TO_EXT,
+)
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.utils.http import dalgo_get, dalgo_head
 from ddpui.utils.s3_utils import upload_file, delete_file
@@ -24,16 +31,6 @@ from ddpui.core.org_logo.exceptions import (
 )
 
 logger = CustomLogger("ddpui")
-
-ALLOWED_LOGO_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"}
-MAX_LOGO_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
-LOGO_CONTENT_TYPE_TO_EXT = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/gif": "gif",
-    "image/webp": "webp",
-    "image/svg+xml": "svg",
-}
 
 
 def _get_logo_bucket() -> str:
@@ -73,7 +70,7 @@ def get_logo_bytes(logo_url: str) -> tuple[bytes, str]:
     try:
         for chunk in resp.iter_content(chunk_size=65536):
             total += len(chunk)
-            if total > MAX_LOGO_FILE_SIZE_BYTES:
+            if total > MAX_IMAGE_UPLOAD_SIZE_BYTES:
                 raise OrgLogoFetchError("Logo exceeds maximum allowed size")
             chunks.append(chunk)
     except OrgLogoFetchError:
@@ -88,14 +85,14 @@ def get_logo_bytes(logo_url: str) -> tuple[bytes, str]:
 def upload_logo_from_file(file_bytes: bytes, content_type: str, filename: str, org: Org) -> Org:
     """Validate and upload an image file to S3, replacing any existing logo."""
     try:
-        if content_type not in ALLOWED_LOGO_CONTENT_TYPES:
+        if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
             raise ValueError(
-                f"Invalid file type: {content_type}. Allowed types: {', '.join(ALLOWED_LOGO_CONTENT_TYPES)}"
+                f"Invalid file type: {content_type}. Allowed types: {', '.join(ALLOWED_IMAGE_CONTENT_TYPES)}"
             )
-        if len(file_bytes) > MAX_LOGO_FILE_SIZE_BYTES:
+        if len(file_bytes) > MAX_IMAGE_UPLOAD_SIZE_BYTES:
             raise ValueError("File size exceeds the 5MB limit")
 
-        ext = LOGO_CONTENT_TYPE_TO_EXT[content_type]
+        ext = IMAGE_CONTENT_TYPE_TO_EXT[content_type]
         s3_key = f"orgs/{org.slug}/logo/{uuid.uuid4()}.{ext}"
         bucket = _get_logo_bucket()
         logo_url = upload_file(bucket, s3_key, file_bytes, content_type)
@@ -124,9 +121,9 @@ def upload_logo_from_url(image_url: str, org: Org) -> Org:
     except Exception as e:
         raise OrgLogoValidationError("Could not verify the URL serves an image") from e
 
-    if content_type not in ALLOWED_LOGO_CONTENT_TYPES:
+    if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
         raise OrgLogoValidationError(
-            f"URL does not point to a valid image. Allowed types: {', '.join(ALLOWED_LOGO_CONTENT_TYPES)}"
+            f"URL does not point to a valid image. Allowed types: {', '.join(ALLOWED_IMAGE_CONTENT_TYPES)}"
         )
 
     _replace_logo(org, logo_url=image_url, s3_key=None, filename=None)

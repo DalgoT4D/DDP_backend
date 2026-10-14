@@ -127,6 +127,20 @@ class Dashboard(models.Model):
     def __str__(self):
         return f"{self.title} ({self.dashboard_type})"
 
+    def component_ids(self, comp_type: str) -> list[int]:
+        """IDs of one component type across all tabs, deduplicated — the single
+        tabs[].components walk shared by reports, KPIs, and chat scope.
+        Components carry their id under "<type>Id" ("chart" -> "chartId")."""
+        id_key = f"{comp_type}Id"
+        ids = []
+        for tab in self.tabs or []:
+            for component in (tab.get("components") or {}).values():
+                if component.get("type") == comp_type:
+                    ref = component.get("config", {}).get(id_key)
+                    if ref:
+                        ids.append(ref)
+        return list(dict.fromkeys(ids))
+
     def to_json(self):
         """Return JSON representation"""
         return {
@@ -138,6 +152,9 @@ class Dashboard(models.Model):
             "target_screen_size": self.target_screen_size,
             "tabs": self.tabs or [],
             "filter_layout": self.filter_layout,
+            "dependent_group_filter_ids": sorted(
+                f.id for f in self.filters.all() if f.dependent_group_id is not None
+            ),
             "is_published": self.is_published,
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "created_by": self.created_by.user.email if self.created_by else None,
@@ -176,6 +193,9 @@ class DashboardFilter(models.Model):
 
     # Filter settings
     settings = models.JSONField(default=dict, help_text="Filter-specific settings")
+
+    # Same value on multiple filters groups them together; null = ungrouped.
+    dependent_group_id = models.BigIntegerField(null=True, blank=True)
 
     # UI positioning
     order = models.IntegerField(default=0)

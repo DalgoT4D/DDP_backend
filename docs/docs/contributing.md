@@ -56,9 +56,6 @@ source venv/bin/activate
 pip install -r requirements_dbt.txt
 deactivate
 
-# Note the absolute path to the directory containing the venv folder
-# You'll need this for DBT_VENV in .env (not the activate script path, just the folder path)
-
 # 3. Create client dbt root directory
 # Create a directory to store organization-specific dbt projects
 mkdir -p /path/to/client-dbt-projects
@@ -146,7 +143,6 @@ AWS_S3_BUCKET_NAME=your-s3-bucket
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 
 # === DBT CONFIGURATION ===
-DBT_VENV=/path/to/dbt-folder
 CLIENTDBT_ROOT=/path/to/client-dbt-projects
 ```
 
@@ -166,9 +162,7 @@ CLIENTDBT_ROOT=/path/to/client-dbt-projects
 
 7. **Frontend URLs**: Must match your frontend application URLs for CORS
 
-8. **DBT_VENV**: Absolute path to the folder containing the dbt venv (the system will append `/venv/bin/activate`)
-
-9. **CLIENTDBT_ROOT**: Absolute path to directory where organization dbt projects are stored
+8. **CLIENTDBT_ROOT**: Absolute path to directory where organization dbt projects are stored
 
 ##### Main Setup
 

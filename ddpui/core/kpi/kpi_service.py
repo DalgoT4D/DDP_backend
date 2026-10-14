@@ -7,6 +7,8 @@ from django.db.models import Q
 from sqlalchemy import column, literal_column, func, and_
 
 from ddpui.core.access.access_control import accessible_filter
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
@@ -244,6 +246,17 @@ class KPIService:
         )
 
         logger.info(f"Created KPI {kpi.id} '{kpi.name}' for org {orguser.org.id}")
+        resource_fields = payload.model_dump(exclude={"metric_id"})
+        resource_fields["name"] = kpi.name  # resolved name, not the raw payload value
+        resource_fields["metric"] = metric.name
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.KPI,
+            resource_id=str(kpi.id),
+            action=AuditLogAction.CREATE,
+            resource_fields=resource_fields,
+        )
         # Reload with relation chains prefetched so kpi_to_response (which reads
         # created_by.user.email and metric.created_by.user.email) does not fire lazy queries
         return KPI.objects.select_related("metric__created_by__user", "created_by__user").get(

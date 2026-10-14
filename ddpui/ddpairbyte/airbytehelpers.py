@@ -20,7 +20,7 @@ from django.forms.models import model_to_dict
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
-from ddpui.core.oauth import google_oauth_service, google_service_account
+from ddpui.core.oauth import google_oauth_service
 from ddpui.core.oauth.google_oauth_provider import (
     GSHEETS_SOURCE_NAME,
     get_connector,
@@ -33,6 +33,7 @@ from ddpui.models.org import (
     OrgSchemaChange,
     ConnectionMeta,
 )
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.airbyte import AirbyteJob
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
@@ -73,6 +74,8 @@ from ddpui.utils.helpers import (
     get_integer_env_var,
 )
 from ddpui.utils import secretsmanager
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.core.pipelinefunctions import (
     setup_airbyte_sync_task_config,
     setup_airbyte_update_schema_task_config,
@@ -80,7 +83,6 @@ from ddpui.core.pipelinefunctions import (
 )
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
-from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
 from ddpui.ddpdbt.dbthelpers import create_or_update_dbt_profile_secret_blk, write_dbt_profiles_yml
 from ddpui.utils.redis_client import RedisClient
 
@@ -98,41 +100,12 @@ def _build_oauth_source_config(
     the same workspace catalog it got `sourceDefId` from — it is the OAuth registry key."""
     refresh_token = google_oauth_service.redeem_refresh_token_ref(
         orguser, refresh_token_ref, source_name
-    )
+    ).refresh_token
     connector = get_connector(source_name)
     credentials = connector.credentials_builder(
         oauth_client_id(), oauth_client_secret(), refresh_token
     )
     return {**config, "credentials": credentials}
-
-
-def inject_managed_gsheets_credentials(source_def_name: str, config: dict) -> dict:
-    """MANAGED-SA bridge — fill in Dalgo's own Google service-account key for a Google Sheets
-    source that arrived without one. See `core/oauth/google_service_account.py` to remove it.
-
-    `source_def_name` is off the request payload, so this trusts the caller about the connector
-    type. Fine for an internal API; revisit if that changes."""
-    if source_def_name != GSHEETS_SOURCE_NAME:
-        return config
-
-    key = google_service_account.managed_service_account_json()
-    if key is None:
-        return config
-
-    # A pasted key is the bring-your-own-key option — only fill an empty slot. No Client
-    # (OAuth) guard needed: sign-in is unreleased, so no saved source carries one.
-    credentials = config.get(google_service_account.CREDENTIALS_KEY) or {}
-    if credentials.get(google_service_account.SERVICE_INFO_KEY):
-        return config
-
-    logger.info("using the dalgo-managed google service account for this google sheets source")
-    return {
-        **config,
-        google_service_account.CREDENTIALS_KEY: {
-            google_service_account.AUTH_TYPE_KEY: google_service_account.SERVICE_AUTH_TYPE,
-            google_service_account.SERVICE_INFO_KEY: key,
-        },
-    }
 
 
 def create_oauth_source(orguser: OrgUser, payload: SourceGoogleOAuthCreate) -> dict:
@@ -1033,9 +1006,9 @@ def delete_source(org: Org, source_id: str):
 
 
 def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
-    """
-    Fetches the schema change catalog from airbyte and updates OrgSchemaChnage in our db
-    """
+    """Returns (connection_catalog, fetch_error, auto_accept_error).
+    auto_accept_error is set only when the auto-accept flag was on and apply failed."""
+    auto_accept_error = None
     try:
         logger.info(f"Fetching schema change (catalog) for connection {org.slug}|{connection_id}")
         connection_catalog = airbyte_service.get_connection_catalog(
@@ -1048,6 +1021,7 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
         return (
             None,
             f"Something went wrong fetching schema change (catalog) for {org.slug} connection {connection_id}: {err}",
+            None,
         )
 
     # update schema change type in our db
@@ -1066,40 +1040,66 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
             and catalog_diff
             and len(catalog_diff.get("transforms", [])) > 0
         ):
-            OrgSchemaChange.objects.update_or_create(
-                connection_id=connection_id,
-                defaults={"change_type": change_type, "org": org},
-            )
+            if (
+                change_type == "non_breaking"
+                and OrgPreferences.objects.filter(
+                    org=org, auto_accept_non_breaking_schema_changes=True
+                ).exists()
+            ):
+                try:
+                    airbyte_service.apply_schema_change(connection_catalog)
+                    logger.info(
+                        "Auto-accepted non-breaking schema change for %s|%s",
+                        org.slug,
+                        connection_id,
+                    )
+                    create_audit_log(
+                        org=org,
+                        orguser=None,
+                        resource_type=AuditLogResourceType.CONNECTION,
+                        resource_id=connection_id,
+                        action=AuditLogAction.SCHEMA_CHANGE_AUTO_ACCEPTED,
+                        resource_fields={
+                            "change_type": change_type,
+                            "catalog_diff": catalog_diff,
+                        },
+                    )
+                    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+                except Exception as err:
+                    logger.exception(
+                        "Failed to auto-accept schema change for %s|%s: %s",
+                        org.slug,
+                        connection_id,
+                        err,
+                    )
+                    OrgSchemaChange.objects.update_or_create(
+                        connection_id=connection_id,
+                        defaults={"change_type": change_type, "org": org},
+                    )
+                    auto_accept_error = str(err)
+            else:
+                OrgSchemaChange.objects.update_or_create(
+                    connection_id=connection_id,
+                    defaults={"change_type": change_type, "org": org},
+                )
         else:
-            schema_change = OrgSchemaChange.objects.filter(connection_id=connection_id).first()
-            # see if any jobs are scheduled for the schema change; delete them
-            if schema_change:
-                if schema_change.schedule_job:
-                    job = schema_change.schedule_job
-                    try:
-                        if job.flow_run_id:
-                            prefect_service.delete_flow_run(job.flow_run_id)
-                        job.delete()
-                        schema_change.delete()
-                    except Exception as err:
-                        logger.exception("Failed to delete the large schema change job - %s", err)
-                else:
-                    schema_change.delete()
+            OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
 
     except Exception as err:
         return (
             None,
             f"Something went wrong updating OrgSchemaChange {org.slug} {connection_id}: {err}",
+            None,
         )
 
-    return connection_catalog, None
+    return connection_catalog, None, auto_accept_error
 
 
 def get_schema_changes(org: Org):
     """
     Get the schema changes of a connection in an org.
     """
-    org_schema_change = OrgSchemaChange.objects.filter(org=org).select_related("schedule_job").all()
+    org_schema_change = OrgSchemaChange.objects.filter(org=org).all()
 
     if org_schema_change is None:
         return None, "No schema change found"

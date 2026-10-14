@@ -1,3 +1,8 @@
+> **This repository is now a read-only archive.**
+> Dalgo has moved to a monorepo at **[DalgoT4D/dalgo](https://github.com/DalgoT4D/dalgo)**. All active development, issues, and contributions should go there.
+
+---
+
 ## DDP_backend
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
@@ -145,18 +150,15 @@ All orgs run on dbt-core 1.10.19. Set up a local venv from the pinned pyproject.
 
 ```bash
 cd ../prefect-proxy/docker/dbt-1.10.19/
-UV_PROJECT_ENVIRONMENT=$DBT_VENV/venv uv sync
+uv sync
 ```
 
 The `uv.lock` file is committed for reproducible versions.
 
-Set the DBT paths in `.env`:
+Set the DBT client root in `.env`:
 ```
 CLIENTDBT_ROOT=/path/to/client/dbt/projects
-DBT_VENV=/path/to/dbt/environments
 ```
-
-Django resolves the dbt binary as `$DBT_VENV/<orgdbt.dbt_venv>/bin/dbt` (default `dbt_venv` value is `venv`).
 
 ### Step 8: Add SIGNUPCODE and FRONTEND_URL
 

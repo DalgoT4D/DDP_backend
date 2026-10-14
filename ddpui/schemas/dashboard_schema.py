@@ -89,6 +89,7 @@ class DashboardResponse(Schema):
     # mirrors enforcement from this; never "no_access" (those rows are hidden).
     access_level: Optional[str] = None
     is_private: bool = False
+    dependent_group_filter_ids: List[int] = []
 
 
 # =============================================================================
@@ -118,6 +119,18 @@ class FilterUpdate(Schema):
     column_name: Optional[str] = None
     settings: Optional[dict] = None
     order: Optional[int] = None
+
+
+class SetDependentGroup(Schema):
+    """Schema for replacing a dashboard's dependent group"""
+
+    filter_ids: List[int]
+
+
+class DependentGroupResponse(Schema):
+    """Schema for the dependent group after a set/replace"""
+
+    dependent_group_filter_ids: List[int]
 
 
 class FilterOptionResponse(Schema):
@@ -167,3 +180,22 @@ class LandingPageResolveResponse(Schema):
     dashboard_title: Optional[str] = None
     dashboard_type: Optional[str] = None
     source: str  # "personal", "org_default", or "none"
+
+
+# =============================================================================
+# Widget Image Schemas
+# =============================================================================
+
+
+class WidgetImageUploadResponse(Schema):
+    """Response schema for a dashboard widget image upload.
+
+    Unlike the org logo, this isn't persisted to any model field — a
+    dashboard can hold many widget images, each embedded inline in that
+    dashboard's own JSON config. image_key is stored there too so the
+    backend can locate the S3 object later (e.g. copy_widget_image on
+    duplicate/clone).
+    """
+
+    image_url: str
+    image_key: str

@@ -38,6 +38,7 @@ from ddpui.api.airbyte_api import (
     get_source_oauth_callback,
     post_source_oauth_create,
     put_source_oauth_update,
+    post_source_oauth_picker_config,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.core.oauth.google_oauth_provider import GSHEETS_SOURCE_NAME as GSHEETS_NAME
@@ -51,6 +52,7 @@ from ddpui.ddpairbyte.schema import (
     SourceGoogleOAuthConsentCreate,
     SourceGoogleOAuthCreate,
     SourceGoogleOAuthUpdate,
+    SourceGoogleOAuthPickerConfigFetch,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui import ddpprefect
@@ -312,6 +314,9 @@ def _oauth_env(monkeypatch):
     monkeypatch.setenv("AIRBYTE_GOOGLE_OAUTH_CLIENT_ID", "cid")
     monkeypatch.setenv("AIRBYTE_GOOGLE_OAUTH_CLIENT_SECRET", "csecret")
     monkeypatch.setenv("FRONTEND_URL_V2", "https://app.dalgo.org")
+    # Google Picker (browser-side, same GCP project as the OAuth client)
+    monkeypatch.setenv("AIRBYTE_GOOGLE_PICKER_API_KEY", "picker-key")
+    monkeypatch.setenv("AIRBYTE_GOOGLE_PICKER_APP_ID", "123456789")
 
 
 def _use_fake_redis(monkeypatch):
@@ -356,7 +361,9 @@ def test_post_source_oauth_consent_builds_google_url(seed_db, orguser_workspace,
     assert q["response_type"] == ["code"]
     assert q["access_type"] == ["offline"]
     assert q["prompt"] == ["consent"]
-    assert q["scope"] == ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    # drive.file (non-sensitive, per-file) — NOT spreadsheets.readonly (sensitive, all-sheets).
+    # The user grants the one spreadsheet through the Google Picker; see the provider registry.
+    assert q["scope"] == ["https://www.googleapis.com/auth/drive.file"]
     state = q["state"][0]
     assert state
     # the nonce is stored in redis bound to the caller's own org (CSRF + identity)
@@ -403,6 +410,10 @@ def test_oauth_callback_happy_path(seed_db, orguser_workspace, monkeypatch):
     assert stored["refresh_token"] == "rt-123"
     assert stored["orguser_id"] == orguser_workspace.id
     assert stored["source_name"] == GSHEETS_NAME
+    # the access_token rides along server-side: the Picker (in the browser) needs it to show
+    # the user their Drive, and it is handed out only via the picker-config endpoint
+    assert stored["access_token"] == "at"
+    assert "at" not in parse_qs(location.query)  # never in the redirect
     # state nonce is not consumed; it expires on its own short TTL
     assert f"airbyte_oauth_state:{state}" in fake_redis.store
 
@@ -497,16 +508,106 @@ def test_oauth_callback_non_json_response_redirects_error(seed_db, orguser_works
 
 
 # ---- create: redeem the ref, inject creds, save the source ------------------
-def _seed_ref(fake_redis, orguser, source_name, refresh_token="rt-123", ref="good-ref"):
-    """helper: pre-store a valid oauth ref (stashed refresh_token) in the fake redis"""
-    fake_redis.store[f"airbyte_oauth_refresh_token_ref:{ref}"] = json.dumps(
-        {
-            "orguser_id": orguser.id,
-            "source_name": source_name,
-            "refresh_token": refresh_token,
-        }
-    )
+def _seed_ref(
+    fake_redis,
+    orguser,
+    source_name,
+    refresh_token="rt-123",
+    ref="good-ref",
+    access_token="at-123",
+):
+    """helper: pre-store a valid oauth ref (stashed tokens) in the fake redis. Pass
+    access_token=None for a ref written by the pre-Picker release."""
+    payload = {
+        "orguser_id": orguser.id,
+        "source_name": source_name,
+        "refresh_token": refresh_token,
+    }
+    if access_token is not None:
+        payload["access_token"] = access_token
+    fake_redis.store[f"airbyte_oauth_refresh_token_ref:{ref}"] = json.dumps(payload)
     return ref
+
+
+# ---- picker config: hand the browser a Drive-scoped access token ------------
+def test_post_source_oauth_picker_config_success(seed_db, orguser_workspace, monkeypatch):
+    """the picker endpoint hands the browser the access_token for the ref it owns, plus the
+    Picker's own API key and app id — so the user can pick the spreadsheet being granted"""
+    _oauth_env(monkeypatch)
+    fake_redis = _use_fake_redis(monkeypatch)
+    ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_NAME)
+    request = mock_request(orguser_workspace)
+
+    result = post_source_oauth_picker_config(
+        request,
+        SourceGoogleOAuthPickerConfigFetch(sourceName=GSHEETS_NAME, refresh_token_ref=ref),
+    )
+
+    assert result.accessToken == "at-123"
+    assert result.apiKey == "picker-key"
+    assert result.appId == "123456789"
+    # the refresh_token stays server-side — the browser must never see it
+    assert "rt-123" not in result.model_dump_json()
+    # the ref is not consumed: the same ref is redeemed again at create-source time
+    assert f"airbyte_oauth_refresh_token_ref:{ref}" in fake_redis.store
+
+
+def test_post_source_oauth_picker_config_foreign_ref_rejected(
+    seed_db, orguser_workspace, orguser_workspace_b, monkeypatch
+):
+    """another org's ref cannot be traded for its access_token — the token would open that
+    org's Drive in this caller's browser"""
+    _oauth_env(monkeypatch)
+    fake_redis = _use_fake_redis(monkeypatch)
+    ref = _seed_ref(fake_redis, orguser_workspace_b, GSHEETS_NAME, access_token="at-org-b")
+    request = mock_request(orguser_workspace)
+
+    with pytest.raises(HttpError) as excinfo:
+        post_source_oauth_picker_config(
+            request,
+            SourceGoogleOAuthPickerConfigFetch(sourceName=GSHEETS_NAME, refresh_token_ref=ref),
+        )
+
+    assert str(excinfo.value) == "oauth session does not match this request"
+
+
+def test_post_source_oauth_picker_config_ref_without_access_token(
+    seed_db, orguser_workspace, monkeypatch
+):
+    """a ref stashed by the pre-Picker release carries no access_token — treated as an expired
+    session, so the frontend sends the user back through consent to mint a complete one"""
+    _oauth_env(monkeypatch)
+    fake_redis = _use_fake_redis(monkeypatch)
+    ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_NAME, access_token=None)
+    request = mock_request(orguser_workspace)
+
+    with pytest.raises(HttpError) as excinfo:
+        post_source_oauth_picker_config(
+            request,
+            SourceGoogleOAuthPickerConfigFetch(sourceName=GSHEETS_NAME, refresh_token_ref=ref),
+        )
+
+    assert str(excinfo.value) == "invalid or expired oauth session"
+
+
+def test_post_source_oauth_picker_config_missing_picker_env(
+    seed_db, orguser_workspace, monkeypatch
+):
+    """a deployment that set up the OAuth client but no Picker key fails loudly as a config
+    error, not as a broken picker in the user's browser"""
+    _oauth_env(monkeypatch)
+    monkeypatch.delenv("AIRBYTE_GOOGLE_PICKER_API_KEY")
+    fake_redis = _use_fake_redis(monkeypatch)
+    ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_NAME)
+    request = mock_request(orguser_workspace)
+
+    with pytest.raises(HttpError) as excinfo:
+        post_source_oauth_picker_config(
+            request,
+            SourceGoogleOAuthPickerConfigFetch(sourceName=GSHEETS_NAME, refresh_token_ref=ref),
+        )
+
+    assert str(excinfo.value) == "google picker api key is not configured"
 
 
 @patch.multiple(

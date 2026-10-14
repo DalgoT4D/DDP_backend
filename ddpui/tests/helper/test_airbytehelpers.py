@@ -37,6 +37,7 @@ from ddpui.models.org import (
     OrgSchemaChange,
     OrgDbt,
 )
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.org_user import OrgUser, User
 from ddpui.models.airbyte import AirbyteJob
@@ -928,17 +929,7 @@ def test_update_destination_snowflake_rejected(mock_update_destination: Mock):
     "ddpui.ddpairbyte.airbytehelpers.write_dbt_profiles_yml",
     mock_write_dbt_profiles_yml=Mock(),
 )
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.create_elementary_profile",
-    mock_create_elementary_profile=Mock(),
-)
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.elementary_setup_status",
-    mock_elementary_setup_status=Mock(),
-)
 def test_update_destination_does_not_refresh_elementary(
-    mock_elementary_setup_status: Mock,
-    mock_create_elementary_profile: Mock,
     mock_write_dbt_profiles_yml: Mock,
     mock_create_or_update_dbt_profile_secret_blk: Mock,
     mock_update_warehouse_credentials: Mock,
@@ -946,7 +937,7 @@ def test_update_destination_does_not_refresh_elementary(
     mock_update_destination: Mock,
 ):
     """update_destination refreshes the dbt-profile SECRET block only — it does not
-    materialize profiles.yml or refresh elementary's profile, even when elementary is set up."""
+    materialize profiles.yml."""
     org = Org.objects.create(name="org", slug="org")
     org_dbt = OrgDbt.objects.create(
         gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
@@ -958,7 +949,6 @@ def test_update_destination_does_not_refresh_elementary(
     mock_update_destination.return_value = {"destinationId": "DESTINATION_ID"}
     mock_retrieve_warehouse_credentials.return_value = {}
     mock_update_warehouse_credentials.return_value = None
-    mock_elementary_setup_status.return_value = "set-up"
 
     payload = AirbyteDestinationUpdate(
         name="name",
@@ -970,9 +960,8 @@ def test_update_destination_does_not_refresh_elementary(
 
     # SECRET block is refreshed (this is the new refresh path)
     mock_create_or_update_dbt_profile_secret_blk.assert_called_once()
-    # Legacy on-disk refresh paths must NOT be called
+    # Legacy on-disk refresh path must NOT be called
     mock_write_dbt_profiles_yml.assert_not_called()
-    mock_create_elementary_profile.assert_not_called()
 
 
 @patch("ddpui.ddpairbyte.airbyte_service.get_connections", mock_get_connections=Mock())
@@ -1326,6 +1315,95 @@ def test_fetch_and_update_org_schema_changes_non_breaking_change_with_diff(
     OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
 
 
+@patch("ddpui.ddpairbyte.airbytehelpers.create_audit_log")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.apply_schema_change")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_non_breaking_auto_accepted(
+    mock_get_connection_catalog,
+    mock_apply_schema_change,
+    mock_create_audit_log,
+    org_with_workspace,
+):
+    """flag on + non_breaking + transforms: apply_schema_change called, no OrgSchemaChange row, audit log written"""
+    connection_id = "test_connection_id"
+    OrgPreferences.objects.create(
+        org=org_with_workspace, auto_accept_non_breaking_schema_changes=True
+    )
+
+    mock_get_connection_catalog.return_value = {
+        "schemaChange": "non_breaking",
+        "catalogDiff": {"transforms": [{"stream_name": "test_stream"}]},
+    }
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+    fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+
+    mock_apply_schema_change.assert_called_once()
+    mock_create_audit_log.assert_called_once()
+    assert not OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.create_audit_log")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.apply_schema_change")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_breaking_never_auto_accepted(
+    mock_get_connection_catalog,
+    mock_apply_schema_change,
+    mock_create_audit_log,
+    org_with_workspace,
+):
+    """flag on + breaking: still creates OrgSchemaChange, apply not called"""
+    connection_id = "test_connection_id"
+    OrgPreferences.objects.create(
+        org=org_with_workspace, auto_accept_non_breaking_schema_changes=True
+    )
+
+    mock_get_connection_catalog.return_value = {
+        "schemaChange": "breaking",
+        "catalogDiff": {"transforms": [{"stream_name": "test_stream"}]},
+    }
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+    fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+
+    mock_apply_schema_change.assert_not_called()
+    mock_create_audit_log.assert_not_called()
+    assert OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.create_audit_log")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.apply_schema_change")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_auto_accept_failure_falls_back(
+    mock_get_connection_catalog,
+    mock_apply_schema_change,
+    mock_create_audit_log,
+    org_with_workspace,
+):
+    """flag on + non_breaking + apply raises: falls back to creating OrgSchemaChange row"""
+    connection_id = "test_connection_id"
+    OrgPreferences.objects.create(
+        org=org_with_workspace, auto_accept_non_breaking_schema_changes=True
+    )
+
+    mock_get_connection_catalog.return_value = {
+        "schemaChange": "non_breaking",
+        "catalogDiff": {"transforms": [{"stream_name": "test_stream"}]},
+    }
+    mock_apply_schema_change.side_effect = Exception("airbyte down")
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+    _, _, auto_accept_err = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+
+    mock_apply_schema_change.assert_called_once()
+    mock_create_audit_log.assert_not_called()
+    assert OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+    # Error reason is returned to the caller so the notifier can show it to admins
+    assert auto_accept_err == "airbyte down"
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
 def test_fetch_and_update_org_schema_changes_non_breaking_change_without_diff(
     mock_get_connection_catalog,
@@ -1383,9 +1461,9 @@ def test_fetch_and_update_org_schema_changes_invalid_change_type(
         "catalogDiff": {},
     }
 
-    err, result = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
-    assert err is None
-    assert "Something went wrong" in result
+    catalog, err, _ = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+    assert catalog is None
+    assert "Something went wrong" in err
 
 
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
@@ -1398,7 +1476,7 @@ def test_fetch_and_update_org_schema_changes_api_error(
 
     mock_get_connection_catalog.side_effect = Exception("API Error")
 
-    _, error = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+    _, error, _ = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
 
     assert "Something went wrong" in error
 

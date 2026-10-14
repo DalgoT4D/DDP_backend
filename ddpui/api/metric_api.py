@@ -93,7 +93,6 @@ def list_metrics(
 def create_metric(request, payload: MetricPayload):
     """Create a new metric"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
 
     try:
         metric = MetricService.create_metric(
@@ -105,23 +104,6 @@ def create_metric(request, payload: MetricPayload):
             aggregation=payload.aggregation,
             column_expression=payload.column_expression,
             orguser=orguser,
-        )
-
-        create_audit_log(
-            org=org,
-            orguser=orguser,
-            resource_type=AuditLogResourceType.METRIC,
-            resource_id=str(metric.id),
-            action=AuditLogAction.CREATE,
-            resource_fields={
-                "name": payload.name,
-                "description": payload.description or "",
-                "schema_name": payload.schema_name,
-                "table_name": payload.table_name,
-                "column": payload.column,
-                "aggregation": payload.aggregation,
-                "column_expression": payload.column_expression,
-            },
         )
     except MetricValidationError as e:
         raise HttpError(400, e.message) from None

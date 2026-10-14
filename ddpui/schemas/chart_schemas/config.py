@@ -43,6 +43,12 @@ class ChartMetric(Schema):
             )
         if self.aggregation != "count" and not self.column:
             raise ValueError(f"metric with aggregation='{self.aggregation}' requires `column`")
+        if self.alias is None:
+            self.alias = (
+                self.column
+                if not self.aggregation
+                else (f"{self.aggregation}_{self.column}" if self.column else self.aggregation)
+            )
         return self
 
 

@@ -57,12 +57,6 @@ class SourceCheckConnectionConsumer(BaseConsumer):
             payload.config = whitelisted_config
             logger.info("whitelisted the source config")
 
-        # MANAGED-SA bridge — the check must see the same credentials the save will use,
-        # or it fails on a config that would actually work.
-        payload.config = airbytehelpers.inject_managed_gsheets_credentials(
-            payload.sourceDefName, payload.config
-        )
-
         try:
             if source_id:
                 response = airbyte_service.check_source_connection_for_update(source_id, payload)

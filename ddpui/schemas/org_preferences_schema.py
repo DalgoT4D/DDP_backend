@@ -49,6 +49,12 @@ class UpdateAccessDefaultsSchema(Schema):
     allow_public_sharing: bool
 
 
+class UpdateAutoAcceptSchemaChangesSchema(Schema):
+    """Schema for updating the org-wide auto-accept non-breaking schema changes flag."""
+
+    auto_accept_non_breaking_schema_changes: bool
+
+
 class CreateOrgSupersetDetailsSchema(Schema):
     """Schema for creating organization superset details."""
 

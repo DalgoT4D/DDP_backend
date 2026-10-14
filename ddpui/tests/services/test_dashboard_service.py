@@ -35,8 +35,18 @@ from ddpui.services.dashboard_service import (
     DashboardServiceError,
     FilterNotFoundError,
     FilterValidationError,
+    WidgetImageValidationError,
+    WidgetImagePermissionError,
+    WidgetImageStorageError,
+    upload_widget_image,
+    copy_widget_image,
 )
-from ddpui.schemas.dashboard_schema import DashboardCreate, DashboardUpdate, DashboardTabSchema
+from ddpui.schemas.dashboard_schema import (
+    DashboardCreate,
+    DashboardUpdate,
+    DashboardTabSchema,
+    FilterUpdate,
+)
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
@@ -317,6 +327,118 @@ class TestCreateFilterValidation:
 
 
 # ================================================================================
+# Test set_dependent_group (dependent-filters v2 group model)
+# ================================================================================
+
+
+class TestSetDependentGroup:
+    """Tests for DashboardService.set_dependent_group()"""
+
+    def test_rejects_a_different_table_filter(self, sample_dashboard, org, seed_db):
+        """Grouping filters from two different tables is rejected -- narrowing can't
+        cross tables."""
+        f1 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="schools", column_name="state"
+            ),
+        )
+        f2 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="students", column_name="city"
+            ),
+        )
+
+        with pytest.raises(FilterValidationError):
+            DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id, f2.id])
+
+    def test_saving_a_single_member_dissolves_the_group(self, sample_dashboard, org, seed_db):
+        """A group needs 2+ members to narrow anything -- saving just 1 dissolves it
+        entirely (spec: 'a group under 2 members dissolves')."""
+        f1 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="schools", column_name="state"
+            ),
+        )
+
+        filter_ids = DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id])
+
+        assert filter_ids == []
+
+    def test_deleting_a_group_member_removes_it_from_the_group(
+        self, sample_dashboard, org, seed_db
+    ):
+        """Deleting a filter that's in the dependent group removes it from that list too"""
+        f1 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="schools", column_name="state"
+            ),
+        )
+        f2 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value",
+                schema_name="public",
+                table_name="schools",
+                column_name="district",
+            ),
+        )
+        DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id, f2.id])
+
+        DashboardService.delete_filter(sample_dashboard.id, f2.id, org)
+
+        sample_dashboard.refresh_from_db()
+        assert sample_dashboard.to_json()["dependent_group_filter_ids"] == []
+
+    def test_changing_a_group_members_type_removes_it_but_keeps_the_rest_grouped(
+        self, sample_dashboard, org, seed_db
+    ):
+        """Editing a group member's filter_type away from categorical removes it from
+        the group, leaving the other members correctly grouped (not dissolved, since 2
+        remain)."""
+        f1 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="schools", column_name="state"
+            ),
+        )
+        f2 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value",
+                schema_name="public",
+                table_name="schools",
+                column_name="population",
+            ),
+        )
+        f3 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="schools", column_name="city"
+            ),
+        )
+        DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id, f2.id, f3.id])
+
+        DashboardService.update_filter(
+            sample_dashboard.id, f2.id, org, FilterUpdate(filter_type="numerical")
+        )
+
+        sample_dashboard.refresh_from_db()
+        assert sample_dashboard.to_json()["dependent_group_filter_ids"] == [f1.id, f3.id]
+
+
+# ================================================================================
 # Test Exception Classes
 # ================================================================================
 
@@ -424,7 +546,7 @@ class TestDataClasses:
 
         assert data.name is None
         assert data.settings is None
-        assert data.order == 0  # Default
+        assert data.order == 0
 
 
 # ================================================================================
@@ -697,3 +819,92 @@ class TestUpdateDashboardTabs:
         assert updated.title == "New Title Only"
         assert len(updated.tabs) == 1
         assert updated.tabs[0]["id"] == "tab-existing"
+
+
+# ================================================================================
+# Test upload_widget_image (dashboard text/image widgets)
+# ================================================================================
+
+
+class TestUploadWidgetImage:
+    """Tests for upload_widget_image()"""
+
+    def test_upload_widget_image_invalid_content_type(self, org):
+        """Test that a disallowed content type is rejected before touching S3"""
+        with pytest.raises(WidgetImageValidationError) as excinfo:
+            upload_widget_image(b"not-an-image", "application/pdf", org)
+
+        assert "Invalid file type" in excinfo.value.message
+
+    def test_upload_widget_image_oversized(self, org, monkeypatch):
+        """Test that a file over the 5MB limit is rejected before touching S3"""
+        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
+        oversized_bytes = b"0" * (5 * 1024 * 1024 + 1)
+
+        with pytest.raises(WidgetImageValidationError) as excinfo:
+            upload_widget_image(oversized_bytes, "image/png", org)
+
+        assert "5MB" in excinfo.value.message
+
+    def test_upload_widget_image_missing_bucket_env(self, org, monkeypatch):
+        """Test that a missing S3_IMAGES_BUCKET env var surfaces as a storage error"""
+        monkeypatch.delenv("S3_IMAGES_BUCKET", raising=False)
+
+        with pytest.raises(WidgetImageStorageError):
+            upload_widget_image(b"fake-bytes", "image/png", org)
+
+    def test_upload_widget_image_success(self, org, monkeypatch):
+        """Test a successful upload returns the S3 url/key and scopes the key to the org"""
+        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
+
+        with patch(
+            "ddpui.services.dashboard_service.upload_file",
+            return_value="https://test-bucket.s3.ap-south-1.amazonaws.com/fake-key.png",
+        ) as mock_upload:
+            image_url, image_key = upload_widget_image(b"fake-bytes", "image/png", org)
+
+        assert image_url == "https://test-bucket.s3.ap-south-1.amazonaws.com/fake-key.png"
+        assert image_key.startswith(f"orgs/{org.pk}/dashboards/images/")
+        assert image_key.endswith(".png")
+
+        mock_upload.assert_called_once()
+        called_bucket, called_key, called_bytes, called_content_type = mock_upload.call_args[0]
+        assert called_bucket == "test-bucket"
+        assert called_key == image_key
+        assert called_bytes == b"fake-bytes"
+        assert called_content_type == "image/png"
+
+    def test_upload_widget_image_s3_failure(self, org, monkeypatch):
+        """Test that an S3 upload failure surfaces as a storage error"""
+        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
+
+        with patch(
+            "ddpui.services.dashboard_service.upload_file",
+            side_effect=Exception("S3 unavailable"),
+        ):
+            with pytest.raises(WidgetImageStorageError):
+                upload_widget_image(b"fake-bytes", "image/png", org)
+
+
+class TestCopyWidgetImage:
+    """Tests for copy_widget_image()"""
+
+    def test_copy_widget_image_wrong_source_org_prefix(self, org):
+        """An image_key outside source_org's own prefix must be rejected without
+        calling S3 — otherwise a dashboard's stored tabs JSON could carry a
+        crafted imageKey pointing at another org's S3 path, and duplicating/cloning
+        that dashboard would copy the foreign org's private image."""
+        other_org = Org.objects.create(
+            name="Another Org",
+            slug="other-org-copy",
+            airbyte_workspace_id="workspace-id-copy-test",
+        )
+        foreign_image_key = f"orgs/{other_org.pk}/dashboards/images/file.png"
+
+        try:
+            with patch("ddpui.services.dashboard_service.copy_file") as mock_copy:
+                with pytest.raises(WidgetImagePermissionError):
+                    copy_widget_image(foreign_image_key, org, org)
+                mock_copy.assert_not_called()
+        finally:
+            other_org.delete()

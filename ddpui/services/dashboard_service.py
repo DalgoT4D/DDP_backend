@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any, Set, Union, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import json
+import os
 import time
 import uuid
 
@@ -18,7 +19,11 @@ from django.utils import timezone
 from sqlalchemy import text, distinct, column
 from sqlalchemy.dialects import postgresql
 
+from ddpui.auth import orguser_has_permission
 from ddpui.core.access import access_control
+from ddpui.core.access.resource_share import sync_dashboard_cascade
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.resource_share import ResourceType
 from ddpui.models.dashboard import (
@@ -38,10 +43,18 @@ from ddpui.core.charts.charts_service import (
     get_warehouse_client,
     execute_chart_query,
     transform_data_for_chart,
+    apply_chart_filters,
+    execute_query,
 )
 from ddpui.schemas.dashboard_schema import DashboardTabSchema
+from ddpui.utils.constants import (
+    ALLOWED_IMAGE_CONTENT_TYPES,
+    MAX_IMAGE_UPLOAD_SIZE_BYTES,
+    IMAGE_CONTENT_TYPE_TO_EXT,
+)
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
+from ddpui.utils.s3_utils import upload_file, copy_file
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.schemas.dashboard_schema import DashboardUpdate, FilterUpdate
 
@@ -100,6 +113,27 @@ class FilterValidationError(DashboardServiceError):
         super().__init__(message, "FILTER_VALIDATION_ERROR")
 
 
+class WidgetImageValidationError(DashboardServiceError):
+    """Raised when a widget image upload fails content-type/size validation"""
+
+    def __init__(self, message: str):
+        super().__init__(message, "WIDGET_IMAGE_VALIDATION_ERROR")
+
+
+class WidgetImagePermissionError(DashboardServiceError):
+    """Raised when an image_key doesn't belong to the caller's org"""
+
+    def __init__(self, message: str = "Image does not belong to this organization"):
+        super().__init__(message, "WIDGET_IMAGE_PERMISSION_DENIED")
+
+
+class WidgetImageStorageError(DashboardServiceError):
+    """Raised when an S3 upload/delete for a widget image fails"""
+
+    def __init__(self, message: str):
+        super().__init__(message, "WIDGET_IMAGE_STORAGE_ERROR")
+
+
 # =============================================================================
 # Data Classes
 # =============================================================================
@@ -134,6 +168,24 @@ class LockInfo:
     lock_token: str
     expires_at: datetime
     locked_by_email: str
+
+
+# Fields update_dashboard can change; each one lands in the UPDATE audit log
+# only when its value actually differs from what was saved
+_AUDITED_UPDATE_FIELDS = (
+    "title",
+    "description",
+    "grid_columns",
+    "target_screen_size",
+    "tabs",
+    "filter_layout",
+    "is_published",
+)
+
+
+def _blank_normalized(value):
+    """Treat None and "" as equal: the DB stores None, the frontend sends an empty string."""
+    return value if value not in (None, "") else None
 
 
 class DashboardService:
@@ -361,6 +413,34 @@ class DashboardService:
         )
 
         logger.info(f"Created dashboard {dashboard.id} for org {orguser.org.id}")
+
+        # The org's first dashboard becomes its default when the creator may
+        # manage that; otherwise it becomes the creator's own landing page
+        org = orguser.org
+        if not Dashboard.objects.filter(org=org, is_org_default=True).exists():
+            if orguser_has_permission(orguser, "can_manage_org_default_dashboard"):
+                dashboard.is_org_default = True
+                dashboard.save(update_fields=["is_org_default"])
+            elif not orguser.landing_dashboard:
+                orguser.landing_dashboard = dashboard
+                orguser.save(update_fields=["landing_dashboard"])
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DASHBOARD,
+            resource_id=str(dashboard.id),
+            action=AuditLogAction.CREATE,
+            resource_fields={
+                "title": data.title,
+                "description": data.description or "",
+                "grid_columns": data.grid_columns,
+            },
+        )
+
+        # Materialise the owner's access as a self-share row so it survives
+        # future org-floor changes (no tabs yet, so no cascade children)
+        sync_dashboard_cascade(dashboard)
         return dashboard
 
     @staticmethod
@@ -392,6 +472,10 @@ class DashboardService:
             if not dashboard.lock.is_expired() and dashboard.lock.locked_by != orguser:
                 raise DashboardLockedError(dashboard.lock.locked_by.user.email)
 
+        # Pre-update values, so the audit log can skip fields that are sent
+        # but unchanged (auto-save re-sends the full current state)
+        before = {field: getattr(dashboard, field) for field in _AUDITED_UPDATE_FIELDS}
+
         # Apply updates
         if data.title is not None:
             dashboard.title = data.title
@@ -422,6 +506,33 @@ class DashboardService:
                 logger.info(f"Auto-refreshed lock for dashboard {dashboard_id} during save")
 
         logger.info(f"Updated dashboard {dashboard.id}")
+
+        if data.tabs is not None:
+            sync_dashboard_cascade(dashboard)
+
+        touched_fields = {
+            "title": data.title,
+            "description": data.description,
+            "grid_columns": data.grid_columns,
+            "target_screen_size": data.target_screen_size,
+            "tabs": [tab.model_dump() for tab in data.tabs] if data.tabs is not None else None,
+            "filter_layout": data.filter_layout,
+            "is_published": data.is_published,
+        }
+        changed_fields = {
+            field: value
+            for field, value in touched_fields.items()
+            if value is not None and _blank_normalized(value) != _blank_normalized(before[field])
+        }
+        if changed_fields:
+            create_audit_log(
+                org=org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.DASHBOARD,
+                resource_id=str(dashboard_id),
+                action=AuditLogAction.UPDATE,
+                resource_fields={**changed_fields, "title": dashboard.title},
+            )
         return dashboard
 
     @staticmethod
@@ -683,34 +794,57 @@ class DashboardService:
             FilterNotFoundError: If filter doesn't exist
             FilterValidationError: If filter type is invalid
         """
-        filter_obj = DashboardService.get_filter(dashboard_id, filter_id, org)
+        DashboardService.get_filter(dashboard_id, filter_id, org)  # existence + org-scope check
 
-        if data.name is not None:
-            filter_obj.name = data.name
+        with transaction.atomic():
+            # Locked to avoid racing a concurrent set_dependent_group() call.
+            filter_obj = DashboardFilter.objects.select_for_update().get(id=filter_id)
 
-        if data.filter_type is not None:
-            if data.filter_type not in [ft.value for ft in DashboardFilterType]:
-                raise FilterValidationError(f"Invalid filter type: {data.filter_type}")
-            filter_obj.filter_type = data.filter_type
+            if data.name is not None:
+                filter_obj.name = data.name
 
-        if data.schema_name is not None:
-            filter_obj.schema_name = data.schema_name
+            if data.filter_type is not None:
+                if data.filter_type not in [ft.value for ft in DashboardFilterType]:
+                    raise FilterValidationError(f"Invalid filter type: {data.filter_type}")
+                filter_obj.filter_type = data.filter_type
 
-        if data.table_name is not None:
-            filter_obj.table_name = data.table_name
+            if data.schema_name is not None:
+                filter_obj.schema_name = data.schema_name
 
-        if data.column_name is not None:
-            filter_obj.column_name = data.column_name
+            if data.table_name is not None:
+                filter_obj.table_name = data.table_name
 
-        if data.settings is not None:
-            filter_obj.settings = data.settings
+            if data.column_name is not None:
+                filter_obj.column_name = data.column_name
 
-        if data.order is not None:
-            filter_obj.order = data.order
+            if data.settings is not None:
+                filter_obj.settings = data.settings
 
-        filter_obj.save()
-        logger.info(f"Updated filter {filter_id} in dashboard {dashboard_id}")
-        return filter_obj
+            if data.order is not None:
+                filter_obj.order = data.order
+
+            dashboard = filter_obj.dashboard
+            if filter_obj.dependent_group_id is not None:
+                group_id = filter_obj.dependent_group_id
+                other_members = list(
+                    DashboardFilter.objects.select_for_update()
+                    .filter(dashboard=dashboard, dependent_group_id=group_id)
+                    .exclude(id=filter_id)
+                )
+                still_valid = filter_obj.filter_type == DashboardFilterType.VALUE.value and all(
+                    (m.schema_name, m.table_name) == (filter_obj.schema_name, filter_obj.table_name)
+                    for m in other_members
+                )
+                if not still_valid:
+                    filter_obj.dependent_group_id = None
+                    if len(other_members) < 2:
+                        DashboardFilter.objects.filter(id__in=[m.id for m in other_members]).update(
+                            dependent_group_id=None
+                        )
+
+            filter_obj.save()
+            logger.info(f"Updated filter {filter_id} in dashboard {dashboard_id}")
+            return filter_obj
 
     @staticmethod
     def delete_filter(dashboard_id: int, filter_id: int, org: Org) -> bool:
@@ -729,9 +863,66 @@ class DashboardService:
             FilterNotFoundError: If filter doesn't exist
         """
         filter_obj = DashboardService.get_filter(dashboard_id, filter_id, org)
+        dashboard = filter_obj.dashboard
+
+        if filter_obj.dependent_group_id is not None:
+            group_id = filter_obj.dependent_group_id
+            remaining = list(
+                dashboard.filters.filter(dependent_group_id=group_id).exclude(id=filter_id)
+            )
+            # A group under 2 members dissolves entirely, rather than being left at 1.
+            if len(remaining) < 2:
+                DashboardFilter.objects.filter(id__in=[m.id for m in remaining]).update(
+                    dependent_group_id=None
+                )
+
         filter_obj.delete()
         logger.info(f"Deleted filter {filter_id} from dashboard {dashboard_id}")
         return True
+
+    @staticmethod
+    def set_dependent_group(dashboard_id: int, org: Org, filter_ids: List[int]) -> List[int]:
+        """Replace a dashboard's dependent group with the given filter ids.
+
+        Every id must belong to this dashboard, be a categorical (VALUE-type) filter,
+        and share one (schema_name, table_name) -- narrowing can't cross tables.
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+            FilterValidationError: If any id is missing, non-categorical, or a different table
+        """
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+
+        filters = list(dashboard.filters.filter(id__in=filter_ids))
+        if len(filters) != len(filter_ids):
+            raise FilterValidationError("All filter ids must belong to this dashboard")
+
+        non_categorical = [
+            f.id for f in filters if f.filter_type != DashboardFilterType.VALUE.value
+        ]
+        if non_categorical:
+            raise FilterValidationError(
+                f"Only categorical filters can be grouped: {non_categorical}"
+            )
+
+        tables = {(f.schema_name, f.table_name) for f in filters}
+        if len(tables) > 1:
+            raise FilterValidationError("All filters in a dependent group must share one table")
+
+        with transaction.atomic():
+            DashboardFilter.objects.filter(
+                dashboard=dashboard, dependent_group_id__isnull=False
+            ).update(dependent_group_id=None)
+
+            # A group of exactly 1 can't narrow anything -- dissolve it instead.
+            if len(filter_ids) < 2:
+                logger.info(f"Dissolved dependent group for dashboard {dashboard_id}")
+                return []
+
+            group_id = 1
+            DashboardFilter.objects.filter(id__in=filter_ids).update(dependent_group_id=group_id)
+            logger.info(f"Set dependent group for dashboard {dashboard_id}: {filter_ids}")
+            return filter_ids
 
     # =========================================================================
     # Business Logic Operations (existing methods)
@@ -1108,6 +1299,44 @@ class DashboardService:
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
+def get_value_filter_options_with_fallback(
+    warehouse_client: Warehouse,
+    schema_name: str,
+    table_name: str,
+    column_name: str,
+    limit: int,
+    constraints: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Distinct values + counts for a dropdown filter, narrowed by any active constraints.
+    Falls back to the unnarrowed list if the narrowed query fails.
+    """
+
+    def _build(with_constraints: bool) -> AggQueryBuilder:
+        qb = AggQueryBuilder()
+        qb.add_column(column(column_name).label("value"))
+        qb.add_aggregate_column(None, "count", alias="count")
+        qb.fetch_from(table_name, schema_name)
+        qb.where_clause(column(column_name).isnot(None))
+        if with_constraints:
+            apply_chart_filters(qb, constraints or [])
+        qb.group_cols_by(column_name)
+        qb.order_cols_by([("count", "desc"), ("value", "asc")])
+        qb.limit_rows(limit)
+        return qb
+
+    try:
+        return execute_query(warehouse_client, _build(True))
+    except Exception as narrow_err:
+        if not constraints:
+            raise
+        constraint_columns = [c.get("column") for c in constraints]
+        logger.warning(
+            f"Narrowed filter preview failed for columns={constraint_columns}, "
+            f"falling back to unnarrowed list ({type(narrow_err).__name__})"
+        )
+        return execute_query(warehouse_client, _build(False))
+
+
 def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, str]:
     """
     Safely delete a dashboard with protection logic for landing pages.
@@ -1148,3 +1377,119 @@ def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, 
 
     logger.info(f"Dashboard '{dashboard_title}' deleted by {orguser.user.email}")
     return True, ""
+
+
+# =============================================================================
+# Widget Images (dashboard text/image widgets)
+# =============================================================================
+
+
+def _get_widget_image_bucket() -> str:
+    bucket = os.getenv("S3_IMAGES_BUCKET")
+    if not bucket:
+        raise WidgetImageStorageError("S3_IMAGES_BUCKET environment variable is not set")
+    return bucket
+
+
+def upload_widget_image(file_bytes: bytes, content_type: str, org: Org) -> Tuple[str, str]:
+    """Validate and upload a dashboard widget image to S3.
+
+    Unlike the org logo, this doesn't persist anywhere on a model — a
+    dashboard can hold many widget images, each embedded inline in that
+    dashboard's own JSON config — so this only returns (url, key) for the
+    caller to store there.
+    """
+    if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
+        raise WidgetImageValidationError(
+            f"Invalid file type: {content_type}. Allowed types: "
+            f"{', '.join(sorted(ALLOWED_IMAGE_CONTENT_TYPES))}"
+        )
+    if len(file_bytes) > MAX_IMAGE_UPLOAD_SIZE_BYTES:
+        raise WidgetImageValidationError("File size exceeds the 5MB limit")
+
+    bucket = _get_widget_image_bucket()
+    ext = IMAGE_CONTENT_TYPE_TO_EXT[content_type]
+    # Keyed by org.pk, not org.slug — slug is nullable and not unique-enforced
+    # (plain slugify(org.name) with no collision check), so two orgs could share
+    # a slug and pass each other's ownership check in copy_widget_image below.
+    # pk is the DB-guaranteed-unique, immutable identifier this needs.
+    image_key = f"orgs/{org.pk}/dashboards/images/{uuid.uuid4()}.{ext}"
+    try:
+        image_url = upload_file(bucket, image_key, file_bytes, content_type)
+    except Exception as err:
+        logger.error(f"S3 upload failed for widget image, org {org.slug}: {err}")
+        raise WidgetImageStorageError("Failed to upload image to S3") from err
+
+    logger.info(f"Uploaded dashboard widget image for {org.slug} to s3://{bucket}/{image_key}")
+    return image_url, image_key
+
+
+def copy_widget_image(image_key: str, source_org: Org, dest_org: Org) -> Tuple[str, str]:
+    """Copy an existing widget image to a new key scoped to dest_org.
+
+    Used when a dashboard's tabs are duplicated onto a new Dashboard row (same-org
+    duplicate, or trial-org cloning). A naive deep-copy of tabs would leave the copy
+    pointing at the ORIGINAL image_key, so removing/replacing the image on either
+    dashboard would silently delete it out from under the other.
+
+    Requires image_key to actually live under source_org's own prefix — tabs is
+    arbitrary stored JSON, so without this check a crafted imageKey pointing at
+    another org's S3 path would get copied into dest_org, exposing that org's
+    private image.
+    """
+    expected_prefix = f"orgs/{source_org.pk}/dashboards/images/"
+    if not image_key.startswith(expected_prefix):
+        raise WidgetImagePermissionError()
+
+    ext = image_key.rsplit(".", 1)[-1] if "." in image_key else "png"
+    new_image_key = f"orgs/{dest_org.pk}/dashboards/images/{uuid.uuid4()}.{ext}"
+    bucket = _get_widget_image_bucket()
+    try:
+        new_image_url = copy_file(bucket, image_key, new_image_key)
+    except Exception as err:
+        logger.error(f"S3 copy failed for widget image {image_key} -> {new_image_key}: {err}")
+        raise WidgetImageStorageError("Failed to copy image to S3") from err
+    return new_image_url, new_image_key
+
+
+def remap_widget_images(tabs: list, source_org: Org, dest_org: Org) -> list:
+    """Deep-copy `tabs` and give every text/image widget's S3-hosted image its own
+    independent copy, scoped to dest_org, rewriting imageUrl/imageKey in place.
+
+    If a single image fails to copy (e.g. a transient S3 error) within the SAME org
+    (a plain dashboard duplicate), that widget is left pointing at the original image
+    rather than failing the whole duplicate — the pre-existing shared-key behavior,
+    not a new failure mode. Across orgs (e.g. trial cloning), leaving that reference
+    would mean dest_org's dashboard depends on an image it doesn't own, so it's
+    cleared instead — same treatment as an out-of-org image_key below.
+    """
+    import copy as _copy
+
+    new_tabs = _copy.deepcopy(tabs) or []
+    for tab in new_tabs:
+        for component in (tab.get("components") or {}).values():
+            cfg = component.get("config") or {}
+            image_key = cfg.get("imageKey")
+            if not image_key:
+                continue
+            try:
+                new_url, new_key = copy_widget_image(image_key, source_org, dest_org)
+            except WidgetImagePermissionError:
+                logger.warning(f"Rejecting out-of-org widget image reference {image_key}")
+                cfg["imageUrl"] = None
+                cfg["imageKey"] = None
+                continue
+            except WidgetImageStorageError as err:
+                if source_org.pk != dest_org.pk:
+                    logger.warning(
+                        f"Clearing widget image reference after failed cross-org copy "
+                        f"for {image_key}: {err.message}"
+                    )
+                    cfg["imageUrl"] = None
+                    cfg["imageKey"] = None
+                else:
+                    logger.warning(f"Skipping widget image copy for {image_key}: {err.message}")
+                continue
+            cfg["imageUrl"] = new_url
+            cfg["imageKey"] = new_key
+    return new_tabs

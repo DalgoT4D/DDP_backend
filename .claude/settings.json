@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/himanshut4d/Documents/Tech4dev/Dalgo/DDP_backend checkout -b feature/gsheets-drive-file-picker origin/main)",
+      "Bash(git -C /Users/himanshut4d/Documents/Tech4dev/Dalgo/DDP_backend log --oneline -1)",
+      "Bash(git -C /Users/himanshut4d/Documents/Tech4dev/Dalgo/DDP_backend diff --stat)"
+    ]
+  }
+}

@@ -11,7 +11,9 @@ from django.db import transaction
 from django.db.models import Q
 
 from ddpui.core.access.access_control import accessible_filter
+from ddpui.core.audit_log_service import create_audit_log
 from ddpui.core.access.ownership import is_creator_or_admin
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.resource_share import ResourceType
 from ddpui.models.visualization import Chart
 from ddpui.models.org import Org
@@ -154,6 +156,22 @@ class ChartService:
         )
 
         logger.info(f"Created chart {chart.id} for org {orguser.org.id}")
+
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.CHART,
+            resource_id=str(chart.id),
+            action=AuditLogAction.CREATE,
+            resource_fields={
+                "title": data.title,
+                "description": data.description or "",
+                "chart_type": data.chart_type,
+                "schema_name": data.schema_name,
+                "table_name": data.table_name,
+                "extra_config": data.extra_config,
+            },
+        )
 
         # Re-load with relations pre-fetched so building the API response
         # (chart.created_by.user.email) doesn't trigger extra lazy queries

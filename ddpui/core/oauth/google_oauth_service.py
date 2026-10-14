@@ -22,6 +22,8 @@ from ddpui.core.oauth.google_oauth_provider import (
     get_connector,
     oauth_client_id,
     oauth_client_secret,
+    picker_api_key,
+    picker_app_id,
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
@@ -34,7 +36,8 @@ OAUTH_STATE_REDIS_PREFIX = "airbyte_oauth_state"
 OAUTH_STATE_TTL_SECONDS = 120  # 2 minutes
 # refresh_token_ref: opaque handle to a stashed refresh_token (callback -> create-source window)
 OAUTH_REFRESH_TOKEN_REF_REDIS_PREFIX = "airbyte_oauth_refresh_token_ref"
-OAUTH_REFRESH_TOKEN_REF_TTL_SECONDS = 120  # 2 minutes
+# Wide enough for the user to find a file in the Picker, still under Google's 1h access_token.
+OAUTH_REFRESH_TOKEN_REF_TTL_SECONDS = 600  # 10 minutes
 
 
 class OAuthStateData(Schema):
@@ -48,16 +51,40 @@ class OAuthStateData(Schema):
     source_name: str
 
 
+class GoogleTokens(Schema):
+    """Google's code-exchange response: refresh_token for Airbyte syncs, access_token for the
+    browser-side Picker."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    refresh_token: str
+    access_token: str
+
+
+class GooglePickerConfig(Schema):
+    """What the browser needs to open the Google Picker. camelCase to map 1:1 onto the Picker
+    builder's `setOAuthToken` / `setDeveloperKey` / `setAppId`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    accessToken: str
+    apiKey: str
+    appId: str
+
+
 class OAuthRefData(Schema):
     """Typed payload stashed in Redis under the `refresh_token_ref` handle (callback ->
-    create-source window): the stashed refresh_token plus the orguser/source it was minted
-    for. Redeemed at create-source time."""
+    create-source window): the stashed tokens plus the orguser/source they were minted for.
+
+    `access_token` is optional only so refs from the pre-Picker release still validate during
+    a rolling deploy."""
 
     model_config = ConfigDict(extra="forbid")
 
     orguser_id: int
     source_name: str
     refresh_token: str
+    access_token: str | None = None
 
 
 def _oauth_redirect_url() -> str:
@@ -106,14 +133,15 @@ def _read_oauth_state(state: str) -> OAuthStateData:
         raise HttpError(400, "invalid or expired oauth state") from err
 
 
-def _store_refresh_token_ref(orguser_id: int, source_name: str, refresh_token: str) -> str:
-    """Stash the refresh_token server-side under a fresh opaque handle. The browser only
-    ever receives this `refresh_token_ref`, never the token."""
+def _store_refresh_token_ref(orguser_id: int, source_name: str, tokens: GoogleTokens) -> str:
+    """Stash both Google tokens under a fresh opaque handle. The browser only ever receives
+    the handle; the access_token leaves solely through the picker-config endpoint."""
     refresh_token_ref = secrets.token_urlsafe(48)
     data = OAuthRefData(
         orguser_id=orguser_id,
         source_name=source_name,
-        refresh_token=refresh_token,
+        refresh_token=tokens.refresh_token,
+        access_token=tokens.access_token,
     )
     RedisClient.get_instance().set(
         f"{OAUTH_REFRESH_TOKEN_REF_REDIS_PREFIX}:{refresh_token_ref}",
@@ -123,10 +151,12 @@ def _store_refresh_token_ref(orguser_id: int, source_name: str, refresh_token: s
     return refresh_token_ref
 
 
-def redeem_refresh_token_ref(orguser: OrgUser, refresh_token_ref: str, source_name: str) -> str:
-    """Redeem a refresh_token_ref at create-source time; return the stashed refresh_token.
-    Rejects a missing/expired handle, or one minted for a different orguser or a different
-    source connector (compared by source-definition name, the registry key)."""
+def redeem_refresh_token_ref(
+    orguser: OrgUser, refresh_token_ref: str, source_name: str
+) -> OAuthRefData:
+    """Read the payload behind a refresh_token_ref and prove the caller owns it — rejects a
+    missing/expired handle, or one minted for a different orguser or source connector. Not
+    consumed: read once for the Picker, again at create-source."""
     raw = RedisClient.get_instance().get(
         f"{OAUTH_REFRESH_TOKEN_REF_REDIS_PREFIX}:{refresh_token_ref}"
     )
@@ -138,7 +168,23 @@ def redeem_refresh_token_ref(orguser: OrgUser, refresh_token_ref: str, source_na
         raise HttpError(400, "invalid or expired oauth session") from err
     if stored.orguser_id != orguser.id or stored.source_name != source_name:
         raise HttpError(403, "oauth session does not match this request")
-    return stored.refresh_token
+    return stored
+
+
+def get_picker_config(
+    orguser: OrgUser, refresh_token_ref: str, source_name: str
+) -> GooglePickerConfig:
+    """Picker config for a ref the caller owns. The access_token is the only Google credential
+    that ever reaches the browser — the Picker runs client-side. The refresh_token never does."""
+    stored = redeem_refresh_token_ref(orguser, refresh_token_ref, source_name)
+    if not stored.access_token:
+        # pre-Picker ref (see OAuthRefData); the frontend re-consents on this error
+        raise HttpError(400, "invalid or expired oauth session")
+    return GooglePickerConfig(
+        accessToken=stored.access_token,
+        apiKey=picker_api_key(),
+        appId=picker_app_id(),
+    )
 
 
 def get_source_oauth_consent(orguser: OrgUser, source_name: str) -> dict:
@@ -163,8 +209,8 @@ def get_source_oauth_consent(orguser: OrgUser, source_name: str) -> dict:
     return {"authUrl": f"{GOOGLE_OAUTH_AUTH_URL}?{urlencode(params)}"}
 
 
-def exchange_google_oauth_code(code: str) -> str:
-    """Exchange the authorization code for a refresh_token directly with Google (server-side).
+def exchange_google_oauth_code(code: str) -> GoogleTokens:
+    """Exchange the authorization code for Google's tokens directly (server-side).
 
     Raises if the exchange failed or no refresh_token came back (which happens if
     access_type=offline/prompt=consent were dropped)."""
@@ -197,7 +243,11 @@ def exchange_google_oauth_code(code: str) -> str:
     if "refresh_token" not in tokens:
         logger.error("google token exchange returned no refresh_token: keys=%s", list(tokens))
         raise HttpError(400, "oauth did not return a refresh token")
-    return tokens["refresh_token"]
+    if "access_token" not in tokens:
+        # without it the Picker cannot run — fail here rather than mid-flow
+        logger.error("google token exchange returned no access_token: keys=%s", list(tokens))
+        raise HttpError(400, "oauth did not return an access token")
+    return GoogleTokens(refresh_token=tokens["refresh_token"], access_token=tokens["access_token"])
 
 
 def complete_source_oauth(state: str, code: str) -> str:
@@ -205,8 +255,8 @@ def complete_source_oauth(state: str, code: str) -> str:
     Google, stash the refresh_token under a fresh refresh_token_ref, and return the ref. The
     state nonce is the authentication — it recovers the orguser that started the flow."""
     stored = _read_oauth_state(state)
-    refresh_token = exchange_google_oauth_code(code)
-    return _store_refresh_token_ref(stored.orguser_id, stored.source_name, refresh_token)
+    tokens = exchange_google_oauth_code(code)
+    return _store_refresh_token_ref(stored.orguser_id, stored.source_name, tokens)
 
 
 def oauth_callback_redirect_url(state: str, code: str, error: str) -> str:

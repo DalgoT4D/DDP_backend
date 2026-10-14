@@ -31,6 +31,7 @@ from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.core.reports.report_service import ReportService
+from ddpui.services.dashboard_service import DashboardService, FilterData
 from ddpui.schemas.report_schema import SnapshotUpdate
 from ddpui.core.reports.exceptions import (
     SnapshotNotFoundError,
@@ -714,6 +715,46 @@ class TestGetSnapshotViewData:
         assert rm["dashboard_title"] == "Test Dashboard"
         assert rm["dashboard_id"] == sample_snapshot.frozen_dashboard["dashboard_id"]
 
+    def test_view_data_includes_dependent_group_filter_ids(
+        self, mock_org_warehouse_model, mock_factory, sample_dashboard, sample_filter, orguser, org
+    ):
+        """A dashboard's dependent group is frozen into the snapshot and exposed in view data"""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
+        f1 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="orders", column_name="state"
+            ),
+        )
+        f2 = DashboardService.create_filter(
+            sample_dashboard.id,
+            org,
+            FilterData(
+                filter_type="value", schema_name="public", table_name="orders", column_name="city"
+            ),
+        )
+        DashboardService.set_dependent_group(sample_dashboard.id, org, [f1.id, f2.id])
+
+        snapshot = ReportService.create_snapshot(
+            title="Report with group",
+            dashboard_id=sample_dashboard.id,
+            date_column={
+                "schema_name": "public",
+                "table_name": "orders",
+                "column_name": "created_at",
+            },
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 1, 31),
+            orguser=orguser,
+        )
+
+        view_data = ReportService.get_snapshot_view_data(snapshot.id, org)
+
+        assert view_data["dashboard_data"]["dependent_group_filter_ids"] == [f1.id, f2.id]
+
     def test_warehouse_discovered_column_injects_chart_filters(
         self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
     ):
@@ -1154,17 +1195,42 @@ def tab_dashboard(orguser, org, tab_chart):
 
 
 class TestExtractChartIds:
-    """Tests for ReportService._extract_chart_ids"""
+    """Tests for Dashboard.component_ids — the single tabs[].components walk
+    shared by reports, KPIs, and chat scope."""
 
     def test_extracts_ids_from_tabs(self, tab_dashboard, tab_chart):
         """Charts inside tabs are discovered"""
-        chart_ids = ReportService._extract_chart_ids(tab_dashboard)
+        chart_ids = tab_dashboard.component_ids("chart")
         assert tab_chart.id in chart_ids
 
     def test_extracts_ids_from_tabs_sample(self, sample_dashboard, sample_chart):
         """Charts inside tabs are discovered (sample_dashboard fixture)"""
-        chart_ids = ReportService._extract_chart_ids(sample_dashboard)
+        chart_ids = sample_dashboard.component_ids("chart")
         assert sample_chart.id in chart_ids
+
+    def test_kpi_components_use_their_own_id_key(self, orguser, org):
+        """kpi components carry kpiId, not chartId — and don't leak into charts"""
+        dashboard = Dashboard.objects.create(
+            title="KPI walk",
+            dashboard_type="native",
+            grid_columns=12,
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "T1",
+                    "layout_config": [],
+                    "components": {
+                        "kpi-1": {"type": "kpi", "config": {"kpiId": 7}},
+                        "chart-1": {"type": "chart", "config": {"chartId": 3}},
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+        assert dashboard.component_ids("kpi") == [7]
+        assert dashboard.component_ids("chart") == [3]
+        dashboard.delete()
 
     def test_deduplicates_when_chart_in_multiple_tabs(self, orguser, org):
         """Same chartId in multiple tabs appears only once"""
@@ -1189,7 +1255,7 @@ class TestExtractChartIds:
             created_by=orguser,
             org=org,
         )
-        chart_ids = ReportService._extract_chart_ids(dashboard)
+        chart_ids = dashboard.component_ids("chart")
         assert chart_ids.count(99) == 1
         dashboard.delete()
 

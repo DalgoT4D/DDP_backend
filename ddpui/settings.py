@@ -15,6 +15,7 @@ from pathlib import Path
 import logging
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
+from sentry_sdk.integrations.langgraph import LanggraphIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 
 from datetime import timedelta
@@ -32,6 +33,9 @@ sentry_sdk.init(
         DjangoIntegration(),
         # Capture logging records as breadcrumbs (INFO+) and Sentry issues (ERROR+)
         LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+        # include_prompts=False: agent prompts/results contain org warehouse data,
+        # which must not reach Sentry (send_default_pii is on above)
+        LanggraphIntegration(include_prompts=False),
     ],
     # Set traces_sample_rate to 1.0 to capture 100%
     # of transactions for performance monitoring.

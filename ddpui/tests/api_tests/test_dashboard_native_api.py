@@ -16,6 +16,7 @@ import django
 from unittest.mock import patch
 import pytest
 from ninja.errors import HttpError
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -41,8 +42,10 @@ from ddpui.api.dashboard_native_api import (
     delete_filter,
     favorite_dashboard,
     unfavorite_dashboard,
+    set_dependent_group,
     set_personal_landing_dashboard,
     set_org_default_dashboard,
+    upload_dashboard_widget_image,
 )
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
@@ -50,6 +53,10 @@ from ddpui.schemas.dashboard_schema import (
     DashboardTabSchema,
     FilterCreate,
     FilterUpdate,
+    SetDependentGroup,
+)
+from ddpui.services.dashboard_service import (
+    WidgetImageValidationError,
 )
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
@@ -748,6 +755,26 @@ class TestDeleteFilter:
 
 
 # ================================================================================
+# Test set_dependent_group endpoint (dependent-filters v2 group model)
+# ================================================================================
+
+
+class TestSetDependentGroup:
+    """Tests for set_dependent_group endpoint"""
+
+    def test_set_dependent_group_dashboard_not_found(self, orguser, seed_db):
+        """Test setting group on a non-existent dashboard returns 404"""
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            set_dependent_group(
+                request, dashboard_id=99999, payload=SetDependentGroup(filter_ids=[1, 2])
+            )
+
+        assert excinfo.value.status_code == 404
+
+
+# ================================================================================
 # Test duplicate_dashboard tabs (NEW in feature/dashboard_tabs)
 # ================================================================================
 
@@ -833,6 +860,76 @@ class TestDuplicateDashboardTabs:
         # Cleanup
         original_filter.delete()
 
+    def test_duplicate_dashboard_gives_widget_image_its_own_s3_copy(
+        self, orguser, sample_dashboard, seed_db, monkeypatch
+    ):
+        """Test that a text widget's S3-hosted image is copied to a NEW key on
+        duplicate, not left pointing at the original — otherwise removing/replacing
+        the image on either dashboard would delete it out from under the other."""
+        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
+        original_image_key = f"orgs/{orguser.org.pk}/dashboards/images/old.png"
+        sample_dashboard.tabs = [
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": "text-1", "x": 0, "y": 0, "w": 4, "h": 3}],
+                "components": {
+                    "text-1": {
+                        "type": "text",
+                        "config": {
+                            "imageUrl": f"https://test-bucket.s3.amazonaws.com/{original_image_key}",
+                            "imageKey": original_image_key,
+                        },
+                    }
+                },
+            }
+        ]
+        sample_dashboard.save()
+
+        request = mock_request(orguser)
+        with patch(
+            "ddpui.services.dashboard_service.copy_file",
+            return_value="https://test-bucket.s3.amazonaws.com/orgs/dash-api-test-org/dashboards/images/new.png",
+        ) as mock_copy:
+            response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        new_config = response.tabs[0].components["text-1"]["config"]
+        assert new_config["imageKey"] != original_image_key
+        assert new_config["imageKey"].startswith(f"orgs/{orguser.org.pk}/dashboards/images/")
+        assert (
+            new_config["imageUrl"]
+            == "https://test-bucket.s3.amazonaws.com/orgs/dash-api-test-org/dashboards/images/new.png"
+        )
+        mock_copy.assert_called_once()
+
+    def test_duplicate_dashboard_remaps_dependent_group_filter_ids(
+        self, orguser, sample_dashboard, seed_db
+    ):
+        """Test that dependent_group_filter_ids is remapped to the copy's new filter ids"""
+        f1 = DashboardFilter.objects.create(
+            dashboard=sample_dashboard,
+            filter_type="value",
+            schema_name="public",
+            table_name="orders",
+            column_name="state",
+        )
+        f2 = DashboardFilter.objects.create(
+            dashboard=sample_dashboard,
+            filter_type="value",
+            schema_name="public",
+            table_name="orders",
+            column_name="city",
+        )
+        DashboardFilter.objects.filter(id__in=[f1.id, f2.id]).update(dependent_group_id=f1.id)
+
+        request = mock_request(orguser)
+        response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        new_filter_ids = {f.id for f in response.filters}
+        assert set(response.dependent_group_filter_ids) == new_filter_ids
+        assert f1.id not in response.dependent_group_filter_ids
+        assert f2.id not in response.dependent_group_filter_ids
+
 
 # ================================================================================
 # Test sharing permission gates (creator-or-admin, incl. orphaned dashboards)
@@ -861,7 +958,7 @@ def test_seed_data(seed_db):
 from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_create_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser):
     """Test that creating a dashboard creates an audit log entry."""
     request = mock_request(orguser)
@@ -885,7 +982,7 @@ def test_create_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser):
     Dashboard.objects.filter(title="Audit Log Test Dashboard").delete()
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, sample_dashboard):
     """Test that updating a dashboard creates an audit log entry."""
     request = mock_request(orguser)
@@ -908,7 +1005,7 @@ def test_update_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, sa
     assert resource_fields == {"title": "Updated Dashboard Title"}
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_no_fields_touched_skips_audit_log(
     mock_audit_log, seed_db, orguser, sample_dashboard
 ):
@@ -923,7 +1020,7 @@ def test_update_dashboard_no_fields_touched_skips_audit_log(
     mock_audit_log.assert_not_called()
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_none_vs_empty_string_skips_audit_log(
     mock_audit_log, seed_db, orguser, org
 ):
@@ -949,7 +1046,7 @@ def test_update_dashboard_none_vs_empty_string_skips_audit_log(
     dashboard.delete()
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_same_values_skips_audit_log(
     mock_audit_log, seed_db, orguser, sample_dashboard
 ):
@@ -968,7 +1065,7 @@ def test_update_dashboard_same_values_skips_audit_log(
     mock_audit_log.assert_not_called()
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_mixed_changed_and_unchanged_fields(
     mock_audit_log, seed_db, orguser, sample_dashboard
 ):
@@ -990,7 +1087,7 @@ def test_update_dashboard_mixed_changed_and_unchanged_fields(
     }
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
+@patch("ddpui.services.dashboard_service.create_audit_log")
 def test_update_dashboard_tabs_logs_full_tabs_json(
     mock_audit_log, seed_db, orguser, sample_dashboard
 ):
@@ -1125,3 +1222,49 @@ def test_set_org_default_dashboard_creates_audit_log(
         "title": sample_dashboard.title,
         "is_org_default": {"old": False, "new": True},
     }
+
+
+# ================================================================================
+# Test upload_dashboard_widget_image endpoint
+# ================================================================================
+
+
+class TestUploadDashboardWidgetImage:
+    """Tests for upload_dashboard_widget_image endpoint"""
+
+    def test_upload_widget_image_success(self, orguser, seed_db):
+        """Test a successful upload returns the service's url/key and forwards the org"""
+        request = mock_request(orguser)
+        file = SimpleUploadedFile("test.png", b"fake-image-bytes", content_type="image/png")
+
+        with patch(
+            "ddpui.api.dashboard_native_api.upload_widget_image",
+            return_value=(
+                "https://bucket.s3.amazonaws.com/key.png",
+                "orgs/dash-api-test-org/dashboards/images/key.png",
+            ),
+        ) as mock_upload:
+            response = upload_dashboard_widget_image(request, file=file)
+
+        assert response.image_url == "https://bucket.s3.amazonaws.com/key.png"
+        assert response.image_key == "orgs/dash-api-test-org/dashboards/images/key.png"
+
+        mock_upload.assert_called_once()
+        call_kwargs = mock_upload.call_args[1]
+        assert call_kwargs["file_bytes"] == b"fake-image-bytes"
+        assert call_kwargs["content_type"] == "image/png"
+        assert call_kwargs["org"] == orguser.org
+
+    def test_upload_widget_image_validation_error_returns_400(self, orguser, seed_db):
+        """Test that a validation error from the service surfaces as HTTP 400"""
+        request = mock_request(orguser)
+        file = SimpleUploadedFile("test.pdf", b"not-an-image", content_type="application/pdf")
+
+        with patch(
+            "ddpui.api.dashboard_native_api.upload_widget_image",
+            side_effect=WidgetImageValidationError("Invalid file type: application/pdf"),
+        ):
+            with pytest.raises(HttpError) as excinfo:
+                upload_dashboard_widget_image(request, file=file)
+
+        assert excinfo.value.status_code == 400

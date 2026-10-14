@@ -12,6 +12,7 @@ from ddpui.schemas.org_preferences_schema import (
     UpdateAccessDefaultsSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
+    UpdateAutoAcceptSchemaChangesSchema,
 )
 from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
@@ -19,7 +20,6 @@ from django.db import transaction
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import LEVEL_RANK
-from ddpui.ddpdbt import elementary_service
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import (
     prefect_service,
@@ -154,6 +154,25 @@ def update_access_defaults(request, payload: UpdateAccessDefaultsSchema):
     return {"success": True, "res": org_preferences.to_json()}
 
 
+@orgpreference_router.put("/auto-accept-schema-changes")
+@has_permission(["can_edit_schema_change_settings"])
+def update_auto_accept_schema_changes(request, payload: UpdateAutoAcceptSchemaChangesSchema):
+    """Updates the org-wide flag that auto-accepts non-breaking schema changes."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_preferences = OrgPreferences.objects.filter(org=org).first()
+    if org_preferences is None:
+        org_preferences = OrgPreferences.objects.create(org=org)
+
+    org_preferences.auto_accept_non_breaking_schema_changes = (
+        payload.auto_accept_non_breaking_schema_changes
+    )
+    org_preferences.save()
+
+    return {"success": True, "res": org_preferences.to_json()}
+
+
 @orgpreference_router.get("/")
 def get_org_preferences(request):
     """Gets preferences for an organization based on the logged-in user's organization"""
@@ -189,14 +208,6 @@ def get_tools_versions(request):
     # Prefect Version
     ver = prefect_service.get_prefect_version()
     versions.append({"Prefect": {"version": ver if ver else "Not available"}})
-
-    # dbt Version
-    ver = elementary_service.get_dbt_version(org)
-    versions.append({"DBT": {"version": ver if ver else "Not available"}})
-
-    # elementary Version
-    ver = elementary_service.get_edr_version(org)
-    versions.append({"Elementary": {"version": ver if ver else "Not available"}})
 
     # Superset Version
     versions.append(

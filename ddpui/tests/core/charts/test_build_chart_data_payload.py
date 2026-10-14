@@ -58,6 +58,19 @@ class TestBuildChartDataPayload:
         assert payload.customizations["title"] == "My Chart"
         assert payload.customizations["subtitle"] == "2025"
 
+    def test_customizations_none_in_extra_config(self):
+        """Charts saved via ChartCreate.model_dump (e.g. the AI tool) store customizations=None"""
+        config = ChartConfig(
+            chart_type="bar",
+            schema_name="public",
+            table_name="orders",
+            title="AI Chart",
+            extra_config={"dimension_column": "region", "customizations": None},
+        )
+        payload = build_chart_data_payload(config)
+
+        assert payload.customizations == {"title": "AI Chart"}
+
     def test_no_title_no_injection(self):
         """When title is None, customizations are not modified"""
         config = ChartConfig(

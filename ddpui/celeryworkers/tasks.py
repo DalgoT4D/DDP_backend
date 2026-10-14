@@ -26,11 +26,6 @@ from ddpui.core.webhooks.webhook_functions import (
 from ddpui.core.notifications.delivery import notify_org_managers
 from ddpui.core.notifications.triggers.schema_change import notify_schema_change
 
-from ddpui.ddpdbt import elementary_service
-from ddpui.ddpdbt.elementary_service import (
-    create_elementary_profile,
-    ensure_edr_sendreport_dataflow,
-)
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
 from ddpui.core.trial.lifecycle_emails import run_trial_lifecycle_sweep
@@ -43,6 +38,7 @@ from ddpui.models.org import (
     TransformType,
 )
 from ddpui.models.airbyte import AirbyteJob
+from ddpui.models.org_preferences import OrgPreferences
 
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import (
@@ -303,79 +299,13 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
             }
         )
         # Re-raise so the celery task ends in FAILURE state. Callers using
-        # .apply().maybe_throw() (e.g. install_elementary step 1) rely on this
-        # to detect sub-task failure — without it, an EagerResult in SUCCESS
-        # state hides the error and the caller proceeds as if it worked.
-        # .delay() callers are unaffected (they poll TaskProgress in Redis).
+        # .apply().maybe_throw() rely on this to detect sub-task failure —
+        # without it, an EagerResult in SUCCESS state hides the error.
         raise
 
     finally:
         for task_lock in task_locks:
             task_lock.delete()
-
-
-@app.task(bind=True)
-def install_elementary(self, org_id: int, task_id: str, hashkey: str):
-    """Consolidated Elementary setup — runs the three sub-steps as one task so
-    the frontend can render a single progress list.
-
-    Sub-steps (each emits {"stepIndex", "step", "status": running|completed}):
-      0. Create dbt profile              → create_elementary_profile(org)
-      1. Install elementary package      → run_dbt_commands (clean + deps + run --select elementary)
-      2. Schedule reports                → ensure_edr_sendreport_dataflow(org, org_task, cron)
-
-    On failure: emits {"stepIndex", "step", "status": "failed", "message"} for
-    the sub-step that blew up, then re-raises so Celery marks the task failed.
-    """
-    org: Org = Org.objects.get(id=org_id)
-    taskprogress = TaskProgress(task_id, hashkey)
-
-    steps = [
-        (0, "Creating dbt profile"),
-        (1, "Installing elementary package"),
-        (2, "Scheduling reports"),
-    ]
-    current = steps[0]
-
-    def _emit(step, status, message=None):
-        payload = {"stepIndex": step[0], "step": step[1], "status": status}
-        if message:
-            payload["message"] = message
-        taskprogress.add(payload)
-
-    try:
-        current = steps[0]
-        _emit(current, "running")
-        result = create_elementary_profile(org)
-        if isinstance(result, dict) and "error" in result:
-            raise Exception(result["error"])
-        _emit(current, "completed")
-
-        current = steps[1]
-        _emit(current, "running")
-        # run_dbt_commands is a bound celery task; .apply() executes it
-        # synchronously in-process (returns an EagerResult). Use a separate
-        # inner task_id so its verbose dbt-output progress doesn't pollute
-        # the install stream — the frontend only polls the outer install
-        # task_id + hashkey. Use .maybe_throw() instead of .get() to re-raise
-        # inner-task exceptions without tripping celery's "no sync subtasks"
-        # guard (which fires for any .get() call inside a running task).
-        inner_task_id = str(uuid4())
-        run_dbt_commands.apply(
-            args=[org.id, org.dbt.id, inner_task_id, {"options": {"select": "elementary"}}]
-        ).maybe_throw()
-        _emit(current, "completed")
-
-        current = steps[2]
-        _emit(current, "running")
-        result = ensure_edr_sendreport_dataflow(org, "0 0 * * *")
-        if isinstance(result, dict) and "error" in result:
-            raise Exception(result["error"])
-        _emit(current, "completed")
-
-    except Exception as err:
-        _emit(current, "failed", message=str(err))
-        raise
 
 
 def detect_schema_changes_for_org(org: Org, delay=0):
@@ -394,9 +324,11 @@ def detect_schema_changes_for_org(org: Org, delay=0):
 
     # check for schema changes
     for org_task in org_tasks:
-        connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(
-            org, org_task.connection_id
-        )
+        (
+            connection_catalog,
+            err,
+            auto_accept_err,
+        ) = airbytehelpers.fetch_and_update_org_schema_changes(org, org_task.connection_id)
         if delay:
             sleep(delay)
 
@@ -409,6 +341,13 @@ def detect_schema_changes_for_org(org: Org, delay=0):
                 )
             logger.error(err)
             continue
+
+        if auto_accept_err and os.getenv("ADMIN_EMAIL"):
+            send_text_message(
+                os.getenv("ADMIN_EMAIL"),
+                f"Auto-accept failed for {org.slug} connection {org_task.connection_id}{tag}",
+                auto_accept_err,
+            )
 
         if connection_catalog is None:
             if os.getenv("ADMIN_EMAIL"):
@@ -434,25 +373,44 @@ def detect_schema_changes_for_org(org: Org, delay=0):
             change_type,
         )
 
-        # notify users
-        if change_type == "breaking" or (
-            change_type == "non_breaking"
-            and catalog_diff
-            and len(catalog_diff.get("transforms", [])) > 0
-        ):
+        # Notify whenever a pending OrgSchemaChange row exists for this connection.
+        # Row existence is the single source of truth for "needs admin attention":
+        # - breaking changes always leave a row
+        # - non_breaking changes leave one when auto-accept is off OR when auto-accept
+        #   was attempted but failed and fell back (prevents silent failure)
+        if OrgSchemaChange.objects.filter(connection_id=org_task.connection_id).exists():
             try:
                 frontend_url = os.getenv("FRONTEND_URL")
                 if frontend_url.endswith("/"):
                     frontend_url = frontend_url[:-1]
                 connections_page = f"{frontend_url}/pipeline/ingest?tab=connections"
                 connection_name = connection_catalog["name"]
-                notify_schema_change(
-                    org,
-                    f"To the admins of {org.name},\n\nThis email is to let you know that"
-                    f' schema changes have been detected in your Dalgo sources for "{connection_name}".'
-                    f"\n\nPlease visit {connections_page} and review the Pending Actions",
-                    f"{org.name}: Schema changes detected in your Dalgo sources",
+                # If flag is on and the change is non_breaking but a row still exists,
+                # auto-accept must have been attempted and failed.
+                auto_accept_failed = (
+                    change_type == "non_breaking"
+                    and OrgPreferences.objects.filter(
+                        org=org, auto_accept_non_breaking_schema_changes=True
+                    ).exists()
                 )
+                if auto_accept_failed:
+                    error_detail = auto_accept_err or "unknown error"
+                    message = (
+                        f"To the admins of {org.name},\n\nDalgo tried to automatically apply a "
+                        f'non-breaking schema change for "{connection_name}" but was unable to.'
+                        f"\n\nError: {error_detail}"
+                        f"\n\nThe change needs manual review. Please visit {connections_page} "
+                        f"and review the Pending Actions"
+                    )
+                    subject = f"{org.name}: Auto-accept failed, schema change needs review"
+                else:
+                    message = (
+                        f"To the admins of {org.name},\n\nThis email is to let you know that"
+                        f' schema changes have been detected in your Dalgo sources for "{connection_name}".'
+                        f"\n\nPlease visit {connections_page} and review the Pending Actions"
+                    )
+                    subject = f"{org.name}: Schema changes detected in your Dalgo sources"
+                notify_schema_change(org, message, subject)
             except Exception as err:
                 logger.error(err)
 
@@ -483,7 +441,9 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
     taskprogress = SingleTaskProgress(task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180")))
     taskprogress.add({"message": "started", "status": TaskProgressStatus.RUNNING, "result": None})
 
-    connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(org, connection_id)
+    connection_catalog, err, _ = airbytehelpers.fetch_and_update_org_schema_changes(
+        org, connection_id
+    )
     # unsure how to handle a deprecated connection, ideally we would never get here
 
     if err:
