@@ -406,6 +406,131 @@ class TestGetPublicReportTableData:
             assert response["columns"] == ["id", "name"]
             assert len(response["data"]) == 1
 
+    def test_sort_query_param_overrides_frozen_sort(self, public_snapshot, seed_db):
+        """A live `sort` query param reaches build's extra_config, not just the
+        frozen snapshot default — this is what makes public-report sorting live."""
+        mock_preview = {
+            "columns": ["id", "name"],
+            "column_types": ["int", "str"],
+            "data": [],
+            "page": 0,
+            "limit": 100,
+        }
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
+        ) as mock_preview_fn, patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client"
+        ):
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_preview_fn.return_value = mock_preview
+
+            request = _make_public_request()
+            get_public_report_table_data(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                sort=json.dumps([{"column": "name", "direction": "desc"}]),
+            )
+
+            called_payload = mock_preview_fn.call_args[0][1]
+            assert called_payload.extra_config["sort"] == [{"column": "name", "direction": "desc"}]
+
+    def test_search_query_param_reaches_extra_config(self, public_snapshot, seed_db):
+        """A live `search` query param is written into extra_config the same way
+        the authenticated/dashboard paths do, so apply_table_search picks it up."""
+        mock_preview = {
+            "columns": ["id", "name"],
+            "column_types": ["int", "str"],
+            "data": [],
+            "page": 0,
+            "limit": 100,
+        }
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
+        ) as mock_preview_fn, patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client"
+        ):
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_preview_fn.return_value = mock_preview
+
+            request = _make_public_request()
+            get_public_report_table_data(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                search="bangalore",
+            )
+
+            called_payload = mock_preview_fn.call_args[0][1]
+            assert called_payload.extra_config["search"] == "bangalore"
+
+    def test_explicit_empty_sort_clears_an_already_frozen_sort(self, public_snapshot, seed_db):
+        """Regression: clearing a column that was showing the report's own frozen
+        desc sort must actually clear it server-side, not just visually reset the
+        header icon. Sending sort=[] (not omitting the param) is what makes that
+        happen — omitting it left the old frozen sort applied forever."""
+        mock_preview = {
+            "columns": ["id", "name"],
+            "column_types": ["int", "str"],
+            "data": [],
+            "page": 0,
+            "limit": 100,
+        }
+        frozen_chart_config = {
+            "chart_type": "table",
+            "schema_name": "public",
+            "table_name": "orders",
+            "extra_config": {"sort": [{"column": "name", "direction": "desc"}]},
+        }
+
+        with patch(
+            "ddpui.api.public_api._get_frozen_chart_for_public_report"
+        ) as mock_frozen, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
+        ) as mock_preview_fn:
+            mock_frozen.return_value = (public_snapshot, frozen_chart_config, MagicMock())
+            mock_preview_fn.return_value = mock_preview
+
+            request = _make_public_request()
+            get_public_report_table_data(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                sort=json.dumps([]),
+            )
+
+            called_payload = mock_preview_fn.call_args[0][1]
+            assert called_payload.extra_config["sort"] == []
+
+    def test_no_sort_or_search_params_leaves_frozen_config_untouched(
+        self, public_snapshot, seed_db
+    ):
+        """Without live overrides, nothing new is injected into extra_config —
+        the report still falls back to whatever sort was frozen at snapshot time."""
+        mock_preview = {
+            "columns": ["id", "name"],
+            "column_types": ["int", "str"],
+            "data": [],
+            "page": 0,
+            "limit": 100,
+        }
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
+        ) as mock_preview_fn, patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client"
+        ):
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_preview_fn.return_value = mock_preview
+
+            request = _make_public_request()
+            get_public_report_table_data(request, public_snapshot.public_share_token, chart_id=1)
+
+            called_payload = mock_preview_fn.call_args[0][1]
+            assert "search" not in (called_payload.extra_config or {})
+
     def test_dashboard_filters_resolved_and_passed(self, public_snapshot, seed_db):
         """A valid {filter_id: value} dashboard_filters query param is parsed
         and resolved against the frozen dashboard config."""
@@ -497,6 +622,29 @@ class TestGetPublicReportTableTotalRows:
 
             assert response["is_valid"] is True
             assert response["total_rows"] == 42
+
+    def test_search_query_param_reaches_total_rows_query(self, public_snapshot, seed_db):
+        """The total-rows count must reflect an active search — otherwise pagination
+        would show a page count for the unfiltered table while data-preview shows
+        the filtered rows, going out of sync."""
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_total_rows"
+        ) as mock_total, patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client"
+        ):
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_total.return_value = 3
+
+            request = _make_public_request()
+            get_public_report_table_total_rows(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                search="bangalore",
+            )
+
+            called_payload = mock_total.call_args[0][1]
+            assert called_payload.extra_config["search"] == "bangalore"
 
     def test_dashboard_filters_resolved_and_passed(self, public_snapshot, seed_db):
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(

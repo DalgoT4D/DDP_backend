@@ -12,6 +12,35 @@ from sqlalchemy.sql.expression import (
 )
 
 
+def build_aggregate_expression(column_name: str, agg_func: str):
+    """Build the raw (unlabeled) SQLAlchemy aggregate expression for a column + function.
+
+    Extracted from add_aggregate_column so callers that need the expression itself
+    (e.g. a HAVING clause referencing the same aggregate) don't duplicate this mapping.
+    """
+    agg_func_lower = agg_func.lower()
+
+    # Handle count with None column - use COUNT(*) instead of COUNT(None)
+    if agg_func_lower == "count" and column_name is None:
+        return func.count()
+
+    col = column(column_name)
+
+    agg_functions = {
+        "sum": func.sum,
+        "avg": func.avg,
+        "count": func.count,
+        "min": func.min,
+        "max": func.max,
+        "count_distinct": lambda c: func.count(func.distinct(c)),
+    }
+
+    if agg_func_lower not in agg_functions:
+        raise ValueError(f"Unsupported aggregate function: {agg_func}")
+
+    return agg_functions[agg_func_lower](col)
+
+
 class AggQueryBuilder:
     """
     Aggregate query builder
@@ -36,31 +65,7 @@ class AggQueryBuilder:
 
     def add_aggregate_column(self, column_name: str, agg_func: str, alias: str = None):
         """Add an aggregate column with specified function"""
-        agg_func_lower = agg_func.lower()
-
-        # Handle count with None column - use COUNT(*) instead of COUNT(None)
-        if agg_func_lower == "count" and column_name is None:
-            agg_column = func.count()
-        else:
-            # Quote column name to preserve case
-            col = column(column_name)
-
-            agg_functions = {
-                "sum": func.sum,
-                "avg": func.avg,
-                "count": func.count,
-                "min": func.min,
-                "max": func.max,
-                "count_distinct": lambda c: func.count(func.distinct(c)),
-            }
-
-            if agg_func_lower not in agg_functions:
-                raise ValueError(f"Unsupported aggregate function: {agg_func}")
-
-            if agg_func_lower == "count_distinct":
-                agg_column = agg_functions[agg_func_lower](col)
-            else:
-                agg_column = agg_functions[agg_func_lower](col)
+        agg_column = build_aggregate_expression(column_name, agg_func)
 
         if alias:
             agg_column = agg_column.label(alias)
